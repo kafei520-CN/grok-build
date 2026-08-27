@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildFileDiff, collapseRows, diffOps, opsToRows } from './diff';
+import { buildFileDiff, collapseRows, diffOps, opsToRows, pairReplacements, splitLines } from './diff';
 
 describe('diff', () => {
   it('replaces a middle line', () => {
@@ -31,6 +31,25 @@ describe('diff', () => {
     const hunks = collapseRows(opsToRows(diffOps(before, after)), 1);
     assert.equal(hunks[0]?.kind, 'gap');
     assert.equal(hunks.some((hunk) => hunk.kind === 'block'), true);
+  });
+
+  it('pairs a replacement onto one split row', () => {
+    const rows = pairReplacements(opsToRows(diffOps(['keep', 'old'], ['keep', 'new'])));
+    assert.equal(rows[1]?.type, 'replace');
+    assert.equal(rows[1]?.beforeText, 'old');
+    assert.equal(rows[1]?.afterText, 'new');
+  });
+
+  it('normalizes crlf before counting', () => {
+    const file = buildFileDiff({
+      path: 'a.ts',
+      absPath: '/a.ts',
+      before: 'a\r\nb\r\n',
+      after: 'a\nb\n',
+    });
+    assert.equal(file.added, 0);
+    assert.equal(file.removed, 0);
+    assert.deepEqual(splitLines('a\r\nb'), ['a', 'b']);
   });
 
   it('builds file stats', () => {

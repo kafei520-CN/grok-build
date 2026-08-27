@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { plat } from './platform';
+import { projectGrokDir, sameFsPath } from './grokDirs';
 import type { SkillItem } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -33,15 +34,25 @@ export function globalSkillsDir(): string {
   return path.join(plat().homeDir(), '.grok', 'skills');
 }
 
-export function projectSkillsDir(): string {
-  return path.join(plat().cwd(), '.grok', 'skills');
+export function projectSkillsDir(): string | undefined {
+  return projectGrokDir('skills');
 }
 
 export async function listSkills(): Promise<SkillItem[]> {
-  const rows = [
-    ...(await collectSkills(globalSkillsDir(), 'global')),
-    ...(await collectSkills(projectSkillsDir(), 'project')),
-  ];
+  const globalDir = globalSkillsDir();
+  const rows = await collectSkills(globalDir, 'global');
+  const seen = new Set(rows.map((row) => normalizeDir(row.dirPath)));
+  const projectDir = projectSkillsDir();
+  if (projectDir && !sameFsPath(projectDir, globalDir, plat().os())) {
+    for (const row of await collectSkills(projectDir, 'project')) {
+      const key = normalizeDir(row.dirPath);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      rows.push(row);
+    }
+  }
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -223,4 +234,9 @@ function stripQuotes(value?: string): string | undefined {
     return undefined;
   }
   return value.replace(/^['"]|['"]$/g, '').trim() || undefined;
+}
+
+function normalizeDir(dir: string): string {
+  const value = path.normalize(path.resolve(dir));
+  return plat().os() === 'win32' ? value.toLowerCase() : value;
 }

@@ -31,6 +31,11 @@ export class JsonRpcConnection extends EventEmitter {
 
   feed(chunk: Buffer | string): void {
     this.buffer += chunk.toString('utf8');
+    if (this.buffer.length > 4_000_000) {
+      this.buffer = '';
+      this.emit('log', 'ACP stdout overflow, dropping buffer');
+      return;
+    }
     while (true) {
       const idx = this.buffer.indexOf('\n');
       if (idx < 0) {

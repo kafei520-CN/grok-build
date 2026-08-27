@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { plat } from './platform';
+import { projectGrokDir, sameFsPath } from './grokDirs';
 import type { RuleItem } from './types';
 
 const DISABLED = '.disabled';
@@ -24,15 +25,25 @@ export function globalRulesDir(): string {
   return path.join(plat().homeDir(), '.grok', 'rules');
 }
 
-export function projectRulesDir(): string {
-  return path.join(plat().cwd(), '.grok', 'rules');
+export function projectRulesDir(): string | undefined {
+  return projectGrokDir('rules');
 }
 
 export async function listRules(): Promise<RuleItem[]> {
-  const rows = [
-    ...(await collectRules(globalRulesDir(), 'global')),
-    ...(await collectRules(projectRulesDir(), 'project')),
-  ];
+  const globalDir = globalRulesDir();
+  const rows = await collectRules(globalDir, 'global');
+  const seen = new Set(rows.map((row) => normalizeDir(row.filePath)));
+  const projectDir = projectRulesDir();
+  if (projectDir && !sameFsPath(projectDir, globalDir, plat().os())) {
+    for (const row of await collectRules(projectDir, 'project')) {
+      const key = normalizeDir(row.filePath);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      rows.push(row);
+    }
+  }
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -101,4 +112,9 @@ async function moveFile(from: string, to: string): Promise<void> {
   const bytes = await plat().readFile(from);
   await plat().writeFile(to, bytes);
   await plat().deleteFile(from, false);
+}
+
+function normalizeDir(dir: string): string {
+  const value = path.normalize(path.resolve(dir));
+  return plat().os() === 'win32' ? value.toLowerCase() : value;
 }

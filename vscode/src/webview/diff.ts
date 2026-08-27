@@ -165,19 +165,35 @@ function rowsEl(rows: DiffRow[]): HTMLElement {
 function splitRow(row: DiffRow): HTMLElement {
   const el = document.createElement('div');
   el.className = `pair ${row.type}`;
+  const leftKind = row.type === 'add' ? 'ghost' : row.type === 'replace' ? 'del' : row.type;
+  const rightKind = row.type === 'del' ? 'ghost' : row.type === 'replace' ? 'add' : row.type;
   el.append(
-    cell('before', row.type === 'add' ? 'ghost' : row.type, row.beforeNo, row.beforeText),
-    cell('after', row.type === 'del' ? 'ghost' : row.type, row.afterNo, row.afterText),
+    cell('before', leftKind, row.beforeNo, row.beforeText),
+    cell('after', rightKind, row.afterNo, row.afterText),
   );
   return el;
 }
 
 function unifiedRow(row: DiffRow): HTMLElement {
+  if (row.type === 'replace') {
+    const wrap = document.createElement('div');
+    wrap.append(
+      unifiedLine('del', row.beforeNo, row.beforeText),
+      unifiedLine('add', row.afterNo, row.afterText),
+    );
+    return wrap;
+  }
+  return unifiedLine(row.type, row.type === 'add' ? row.afterNo : row.beforeNo, row.type === 'add' ? row.afterText : row.beforeText);
+}
+
+function unifiedLine(
+  type: DiffRow['type'],
+  no: number | undefined,
+  text: string | undefined,
+): HTMLElement {
   const el = document.createElement('div');
-  el.className = `uni ${row.type}`;
-  const sign = row.type === 'add' ? '+' : row.type === 'del' ? '−' : '·';
-  const no = row.type === 'add' ? row.afterNo : row.beforeNo;
-  const text = row.type === 'add' ? row.afterText : row.beforeText;
+  el.className = `uni ${type}`;
+  const sign = type === 'add' ? '+' : type === 'del' ? '−' : '·';
   el.innerHTML = `<span class="no">${no ?? ''}</span><span class="sign">${sign}</span><pre>${escapeHtml(text ?? '')}</pre>`;
   return el;
 }

@@ -1,5 +1,5 @@
 import type { ContextMeter } from './contextMeter';
-import { editsFromToolUpdate, mergeEdits, publicEdits } from './edits';
+import { editsFromToolUpdate, mergeEdits } from './edits';
 import { FALLBACK_COMMANDS } from './slash';
 import type { ChatMessage, ChatState, SessionUpdate, SlashCommandInfo } from './types';
 import { asObject, asString } from './wire';
@@ -220,12 +220,10 @@ function applyTool(session: SessionView, assistant: ChatMessage, update: Session
       void session.rememberFile(edit.path);
     }
   }
-  const labeled = publicEdits(
-    found.map((edit) => ({
-      ...edit,
-      path: session.displayPath(edit.path),
-    })),
-  );
+  const labeled = found.map((edit) => ({
+    ...edit,
+    path: session.displayPath(edit.path),
+  }));
   if (labeled.length > 0) {
     assistant.edits = mergeEdits([...(assistant.edits ?? []), ...labeled]);
   }

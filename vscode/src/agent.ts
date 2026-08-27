@@ -70,7 +70,9 @@ export class GrokAgent {
     agent.extensionVersion = options.extensionVersion;
 
     rpc.on('log', (message: string) => logWarn(message));
-    child.stdout.on('data', (chunk: Buffer) => rpc.feed(chunk));
+    child.stdout.on('data', (chunk: Buffer) => {
+      setImmediate(() => rpc.feed(chunk));
+    });
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8').trimEnd();
       if (text) {

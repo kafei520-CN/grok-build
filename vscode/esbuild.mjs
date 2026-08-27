@@ -69,6 +69,8 @@ const tests = {
     'src/sessionRow.test.ts',
     'src/rulesHost.test.ts',
     'src/skillsHost.test.ts',
+    'src/grokDirs.test.ts',
+    'src/fileSearch.test.ts',
   ],
   outdir: 'dist/test',
   format: 'cjs',

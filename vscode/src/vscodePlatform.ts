@@ -4,8 +4,16 @@ import * as vscode from 'vscode';
 import { COMMANDS } from './constants';
 import { GrokDiffPanel } from './diffPanel';
 import { OUTPUT_CHANNEL } from './constants';
+import {
+  FILE_SEARCH_EXCLUDE,
+  FILE_SEARCH_LIMIT,
+  fileSearchGlob,
+  shouldSearchFiles,
+} from './fileSearch';
 import type { GrokSettings } from './types';
 import type { Platform } from './platform';
+
+let findFilesCts: vscode.CancellationTokenSource | undefined;
 
 let channel: vscode.OutputChannel | undefined;
 
@@ -135,12 +143,29 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
       await vscode.env.clipboard.writeText(text);
     },
     async findFiles(query) {
-      const pattern = query ? `**/*${query}*` : '**/*';
-      const hits = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 30);
-      return hits.map((uri) => ({
-        path: uri.fsPath,
-        label: vscode.workspace.asRelativePath(uri),
-      }));
+      findFilesCts?.cancel();
+      findFilesCts = new vscode.CancellationTokenSource();
+      const token = findFilesCts.token;
+      if (!shouldSearchFiles(query)) {
+        return [];
+      }
+      try {
+        const hits = await vscode.workspace.findFiles(
+          fileSearchGlob(query),
+          FILE_SEARCH_EXCLUDE,
+          FILE_SEARCH_LIMIT,
+          token,
+        );
+        if (token.isCancellationRequested) {
+          return [];
+        }
+        return hits.map((uri) => ({
+          path: uri.fsPath,
+          label: vscode.workspace.asRelativePath(uri),
+        }));
+      } catch {
+        return [];
+      }
     },
     relativePath(filePath) {
       try {

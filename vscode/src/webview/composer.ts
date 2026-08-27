@@ -46,6 +46,7 @@ export function mountComposer(parent: HTMLElement): void {
 let barKey = '';
 let chipKey = '';
 let menuKey = '';
+let fileSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function patchComposer(): void {
   if (!document.getElementById('composer-wrap')) {
@@ -152,7 +153,12 @@ function bindComposerInput(input: HTMLTextAreaElement): void {
     } else if (last.startsWith('@')) {
       ui.menu = 'files';
       ui.picker = undefined;
-      post({ type: 'searchFiles', query: last.slice(1) });
+      const query = last.slice(1);
+      if (fileSearchTimer) {
+        clearTimeout(fileSearchTimer);
+      }
+      fileSearchTimer = setTimeout(() => post({ type: 'searchFiles', query }), 160);
+      render();
     } else if (ui.menu) {
       ui.menu = undefined;
       render();

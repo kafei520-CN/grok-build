@@ -77,7 +77,6 @@ function moreMenu(): HTMLElement {
   const items: Array<[StringKey, () => void]> = [
     ['menuCompact', () => post({ type: 'runSlash', command: 'compact' })],
     ['menuExport', () => post({ type: 'exportChat' })],
-    ['menuSkills', () => post({ type: 'openDrawer', drawer: 'extensions', tab: 'skills' })],
     ['menuSettings', () => post({ type: 'openSettings' })],
     ['menuRestart', () => post({ type: 'restart' })],
   ];
@@ -110,18 +109,19 @@ export function renderDrawer(): HTMLElement {
   head.append(title, close);
   el.append(head);
   if (ui.state.drawer === 'sessions') {
-    for (const row of ui.state.sessions ?? []) {
+    const sessions = listedSessions();
+    for (const row of sessions) {
       const item = document.createElement('button');
       item.type = 'button';
       item.className =
         row.id === ui.state.currentSessionId ? 'session-row active' : 'session-row';
-      item.innerHTML = `<span class="session-title">${escapeHtml(row.title || row.id)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
+      item.innerHTML = `<span class="session-title">${escapeHtml(row.title)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
       item.addEventListener('click', () =>
         post({ type: 'loadSession', sessionId: row.id, cwd: row.cwd }),
       );
       el.append(item);
     }
-    if (!ui.state.sessions?.length) {
+    if (!sessions.length) {
       const empty = document.createElement('p');
       empty.textContent = tr('sessionsEmpty');
       el.append(empty);
@@ -317,7 +317,7 @@ export function home(): HTMLElement {
     starters.append(btn);
   }
   el.append(starters);
-  const preview = (ui.state.sessions ?? []).slice(0, 4);
+  const preview = listedSessions().slice(0, 4);
   if (preview.length > 0) {
     const recent = document.createElement('div');
     recent.className = 'recent';
@@ -330,7 +330,7 @@ export function home(): HTMLElement {
       btn.type = 'button';
       btn.className =
         row.id === ui.state.currentSessionId ? 'session-row active' : 'session-row';
-      btn.innerHTML = `<span class="session-title">${escapeHtml(row.title || row.id)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
+      btn.innerHTML = `<span class="session-title">${escapeHtml(row.title)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
       btn.addEventListener('click', () =>
         post({ type: 'loadSession', sessionId: row.id, cwd: row.cwd }),
       );
@@ -339,4 +339,8 @@ export function home(): HTMLElement {
     el.append(recent);
   }
   return el;
+}
+
+function listedSessions() {
+  return (ui.state.sessions ?? []).filter((row) => Boolean(row.title.trim()));
 }

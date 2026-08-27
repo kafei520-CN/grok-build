@@ -22,7 +22,9 @@ export function parseSessionRow(item: unknown): SessionRow | undefined {
   const generated = asString(obj['generated_title']) ?? asString(obj['generatedTitle']);
   const summary = asString(obj['session_summary']) ?? asString(obj['sessionSummary']);
   const named = asString(obj['title']) ?? asString(legacy['title']);
-  const title = humanTitle(id, generated, summary, named);
+  const lastTurn =
+    asString(obj['last_turn_summary']) ?? asString(obj['lastTurnSummary']);
+  const title = humanTitle(id, generated, summary, named, lastTurn);
   const hidden = obj['hidden'] === true;
   const sessionKind = asString(obj['session_kind']) ?? asString(obj['sessionKind']);
   const numChatMessages =
@@ -48,17 +50,42 @@ export function sessionHasHistory(row: SessionRow): boolean {
   if (kind.startsWith('subagent') || kind === 'headless') {
     return false;
   }
-  const chats = row.numChatMessages ?? row.numMessages;
-  if (chats !== undefined) {
-    return chats > 0;
+  if (!row.title.trim() || isSessionIdLike(row.title, row.id)) {
+    return false;
   }
-  return Boolean(row.title.trim());
+  // New ACP sessions persist system + reminder as num_chat_messages=2 with
+  // num_messages=0. That is not a user conversation.
+  if (row.numMessages !== undefined && row.numMessages < 1) {
+    return false;
+  }
+  if (
+    row.numMessages === undefined &&
+    row.numChatMessages !== undefined &&
+    row.numChatMessages <= 2
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function isSessionIdLike(text: string, id?: string): boolean {
+  const value = text.trim();
+  if (!value) {
+    return false;
+  }
+  if (id && value === id) {
+    return true;
+  }
+  return (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ||
+    /^[0-9a-f]{26,32}$/i.test(value)
+  );
 }
 
 function humanTitle(id: string, ...candidates: Array<string | undefined>): string {
   for (const raw of candidates) {
     const text = raw?.trim() ?? '';
-    if (text && text !== id) {
+    if (text && !isSessionIdLike(text, id)) {
       return text;
     }
   }

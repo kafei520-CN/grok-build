@@ -44,8 +44,6 @@ export function activate(context: vscode.ExtensionContext): void {
   status.command = COMMANDS.openChat;
   status.show();
   context.subscriptions.push(status);
-
-  void controller.start();
 }
 
 export function deactivate(): void {

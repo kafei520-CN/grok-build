@@ -2,23 +2,17 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { FileDiff } from './diff';
+import {
+  FILE_SEARCH_LIMIT,
+  FILE_SEARCH_MAX_VISIT,
+  FILE_SEARCH_SKIP,
+  shouldSearchFiles,
+} from './fileSearch';
 import type { FileInfo, Platform, SelectionInfo } from './platform';
 import { DEFAULT_SETTINGS, type GrokSettings } from './types';
 
 export type HostRequest = (method: string, params?: unknown) => Promise<unknown>;
 export type HostNotify = (payload: unknown) => void;
-
-const SKIP_DIRS = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  'out',
-  'target',
-  '.idea',
-  '.gradle',
-  '.intellijPlatform',
-]);
 
 export class NodePlatform implements Platform {
   selection?: SelectionInfo;
@@ -173,41 +167,44 @@ export class NodePlatform implements Platform {
   }
 
   async findFiles(query: string): Promise<Array<{ path: string; label: string }>> {
+    if (!shouldSearchFiles(query)) {
+      return [];
+    }
     const hits: Array<{ path: string; label: string }> = [];
     const needle = query.trim().toLowerCase();
-    const walk = (dir: string, depth: number) => {
-      if (hits.length >= 30 || depth > 12) {
+    let visited = 0;
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (hits.length >= FILE_SEARCH_LIMIT || depth > 8 || visited >= FILE_SEARCH_MAX_VISIT) {
         return;
       }
       let entries: fs.Dirent[];
       try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
+        entries = await fs.promises.readdir(dir, { withFileTypes: true });
       } catch {
         return;
       }
       for (const entry of entries) {
-        if (hits.length >= 30) {
+        if (hits.length >= FILE_SEARCH_LIMIT || visited >= FILE_SEARCH_MAX_VISIT) {
           return;
         }
         if (entry.name.startsWith('.') && entry.name !== '.grok') {
-          if (entry.isDirectory()) {
-            continue;
-          }
+          continue;
         }
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
-          if (SKIP_DIRS.has(entry.name)) {
+          if (FILE_SEARCH_SKIP.has(entry.name)) {
             continue;
           }
-          walk(full, depth + 1);
+          await walk(full, depth + 1);
           continue;
         }
-        if (!needle || entry.name.toLowerCase().includes(needle)) {
+        visited += 1;
+        if (entry.name.toLowerCase().includes(needle)) {
           hits.push({ path: full, label: path.relative(this.opts.cwd, full) });
         }
       }
     };
-    walk(this.opts.cwd, 0);
+    await walk(this.opts.cwd, 0);
     return hits;
   }
 

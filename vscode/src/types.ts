@@ -98,6 +98,7 @@ export interface FileEdit {
   path: string;
   added: number;
   removed: number;
+  previous?: string;
 }
 
 export interface ToolCard {
@@ -155,7 +156,7 @@ export interface GrokSettings {
 
 export const DEFAULT_SETTINGS: GrokSettings = {
   cliPath: '',
-  preferWorkspaceBinary: true,
+  preferWorkspaceBinary: false,
   minCliVersion: '0.1.0',
   permissionMode: 'ask',
   includeSelectionOnSend: true,

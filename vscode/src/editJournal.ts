@@ -20,6 +20,7 @@ const execFileAsync = promisify(execFile);
 
 export class EditJournal {
   private readonly snapshots = new Map<string, FileSnapshot[]>();
+  private readonly remembering = new Map<string, Promise<void>>();
 
   constructor(
     private readonly host: {
@@ -75,7 +76,27 @@ export class EditJournal {
     if (!abs) {
       return;
     }
+    const key = `${assistant.id}:${normalizeFsPath(abs)}`;
+    const inflight = this.remembering.get(key);
+    if (inflight) {
+      await inflight;
+      return;
+    }
     const current = this.snapshots.get(assistant.id) ?? [];
+    if (alreadyCaptured(current, abs)) {
+      return;
+    }
+    const work = this.captureFromDisk(assistant.id, abs);
+    this.remembering.set(key, work);
+    try {
+      await work;
+    } finally {
+      this.remembering.delete(key);
+    }
+  }
+
+  private async captureFromDisk(messageId: string, abs: string): Promise<void> {
+    const current = this.snapshots.get(messageId) ?? [];
     if (alreadyCaptured(current, abs)) {
       return;
     }
@@ -100,7 +121,7 @@ export class EditJournal {
         previous: '',
       };
     }
-    this.snapshots.set(assistant.id, addSnapshot(current, snap));
+    this.snapshots.set(messageId, addSnapshot(this.snapshots.get(messageId) ?? [], snap));
   }
 
   capturePrevious(filePath: string, previous: string): void {
@@ -225,53 +246,62 @@ export class EditJournal {
 
   async diffs(messageId?: string, onlyPath?: string): Promise<FileDiff[]> {
     const assistant = this.assistant(messageId);
-    if (assistant && (this.snapshots.get(assistant.id) ?? []).length === 0) {
-      await this.hydrateFromGit();
-    }
     const edits = assistant?.edits ?? [];
     const paths = onlyPath ? [onlyPath] : edits.map((edit) => edit.path);
     const files: FileDiff[] = [];
+    const seen = new Set<string>();
     for (const filePath of paths) {
-      const pair = await this.readBeforeAfter(assistant?.id, filePath);
+      const pair = await this.readBeforeAfter(assistant, filePath);
       if (!pair) {
         continue;
       }
-      files.push(
-        buildFileDiff({
-          path: this.host.displayPath(pair.absPath),
-          absPath: pair.absPath,
-          before: pair.before,
-          after: pair.after,
-        }),
-      );
+      const key = normalizeFsPath(pair.absPath);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const file = buildFileDiff({
+        path: this.host.displayPath(pair.absPath),
+        absPath: pair.absPath,
+        before: pair.before,
+        after: pair.after,
+      });
+      if (file.added === 0 && file.removed === 0 && !file.created && !file.deleted) {
+        continue;
+      }
+      files.push(file);
     }
     return files;
   }
 
   private async readBeforeAfter(
-    messageId: string | undefined,
+    assistant: ChatMessage | undefined,
     filePath: string,
   ): Promise<{ absPath: string; before: string; after: string } | undefined> {
     const abs = this.resolvePath(filePath);
     if (!abs) {
       return undefined;
     }
-    const pool = messageId
-      ? (this.snapshots.get(messageId) ?? [])
+    const pool = assistant
+      ? (this.snapshots.get(assistant.id) ?? [])
       : [...this.snapshots.values()].flat();
     const snap = pool.find((item) => normalizeFsPath(item.absPath) === normalizeFsPath(abs));
+    const edit = assistant?.edits?.find(
+      (item) => normalizeFsPath(this.resolvePath(item.path) ?? item.path) === normalizeFsPath(abs),
+    );
     let before: string | undefined;
     if (snap && !snap.existed) {
       before = '';
     } else if (snap?.previous !== undefined) {
       before = snap.previous;
-    } else {
-      before = await this.readGitHead(abs);
+    } else if (edit?.previous !== undefined) {
+      before = edit.previous;
     }
     if (before === undefined) {
       return undefined;
     }
-    return { absPath: abs, before, after: (await this.readCurrentText(abs)) ?? '' };
+    const after = (await this.readCurrentText(abs)) ?? '';
+    return { absPath: abs, before, after };
   }
 
   private async readCurrentText(abs: string): Promise<string | undefined> {

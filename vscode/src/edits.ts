@@ -1,11 +1,5 @@
+import type { FileEdit } from './types';
 import { asObject, asString } from './wire';
-
-export interface FileEdit {
-  path: string;
-  added: number;
-  removed: number;
-  previous?: string;
-}
 
 export function countUnifiedDiff(text: string): { added: number; removed: number } {
   let added = 0;
@@ -123,6 +117,12 @@ export function editsFromToolUpdate(update: {
         previous: oldText,
       });
     }
+  }
+  const real = collected.filter(
+    (edit) => edit.added > 0 || edit.removed > 0 || edit.previous !== undefined,
+  );
+  if (real.length > 0) {
+    return mergeEdits(real);
   }
   for (const loc of update.locations ?? []) {
     if (loc.path) {

@@ -40,6 +40,23 @@ describe('edits', () => {
     assert.equal(looksLikeFilePath('hello world'), false);
   });
 
+  it('does not attach location-only files when a real diff exists', () => {
+    const found = editsFromToolUpdate({
+      kind: 'edit',
+      locations: [{ path: 'src/a.ts' }, { path: 'src/other.ts' }],
+      content: {
+        type: 'diff',
+        path: 'src/a.ts',
+        oldText: 'a\n',
+        newText: 'b\n',
+      },
+    });
+    assert.equal(found.length, 1);
+    assert.equal(found[0].path, 'src/a.ts');
+    assert.equal(found[0].added, 1);
+    assert.equal(found[0].removed, 1);
+  });
+
   it('keeps nested replay diffs and previous text', () => {
     const found = editsFromToolUpdate({
       kind: 'edit',

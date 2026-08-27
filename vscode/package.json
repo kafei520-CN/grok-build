@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.1.21",
+  "version": "0.1.26",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -198,7 +198,7 @@
         },
         "grok.preferWorkspaceBinary": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "%config.preferWorkspaceBinary%"
         },
         "grok.minCliVersion": {

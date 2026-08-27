@@ -1,4 +1,4 @@
-export type DiffKind = 'equal' | 'add' | 'del';
+export type DiffKind = 'equal' | 'add' | 'del' | 'replace';
 
 export interface DiffOp {
   type: DiffKind;
@@ -40,10 +40,11 @@ const DP_LIMIT = 2_000_000;
 const CONTEXT = 2;
 
 export function splitLines(text: string): string[] {
-  if (text === '') {
+  const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (normalized === '') {
     return [];
   }
-  return text.split('\n');
+  return normalized.split('\n');
 }
 
 export function diffOps(before: string[], after: string[]): DiffOp[] {
@@ -125,6 +126,48 @@ export function opsToRows(ops: DiffOp[]): DiffRow[] {
   return rows;
 }
 
+/** Put a deleted line on the same split row as the added line that replaces it. */
+export function pairReplacements(rows: DiffRow[]): DiffRow[] {
+  const out: DiffRow[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    if (rows[index].type !== 'del') {
+      out.push(rows[index]);
+      index += 1;
+      continue;
+    }
+    const dels: DiffRow[] = [];
+    while (index < rows.length && rows[index].type === 'del') {
+      dels.push(rows[index]);
+      index += 1;
+    }
+    const adds: DiffRow[] = [];
+    while (index < rows.length && rows[index].type === 'add') {
+      adds.push(rows[index]);
+      index += 1;
+    }
+    const n = Math.max(dels.length, adds.length);
+    for (let i = 0; i < n; i += 1) {
+      const del = dels[i];
+      const add = adds[i];
+      if (del && add) {
+        out.push({
+          type: 'replace',
+          beforeNo: del.beforeNo,
+          afterNo: add.afterNo,
+          beforeText: del.beforeText,
+          afterText: add.afterText,
+        });
+      } else if (del) {
+        out.push(del);
+      } else if (add) {
+        out.push(add);
+      }
+    }
+  }
+  return out;
+}
+
 export function collapseRows(rows: DiffRow[], context = CONTEXT): DiffHunk[] {
   if (rows.length === 0) {
     return [];
@@ -202,6 +245,6 @@ export function buildFileDiff(input: {
     removed: stats.removed,
     created: input.before === '' && input.after !== '',
     deleted: input.after === '' && input.before !== '',
-    hunks: collapseRows(opsToRows(ops)),
+    hunks: collapseRows(pairReplacements(opsToRows(ops))),
   };
 }

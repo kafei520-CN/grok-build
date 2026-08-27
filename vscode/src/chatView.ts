@@ -9,6 +9,7 @@ import type { ChatState, WebviewToHost } from './types';
 export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = VIEW_ID;
   private view?: vscode.WebviewView;
+  private started = false;
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
@@ -47,6 +48,12 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
       }),
     );
     this.postState(this.controller.snapshot());
+    if (!this.started) {
+      this.started = true;
+      setTimeout(() => {
+        void this.controller.start();
+      }, 80);
+    }
   }
 
   private async onMessage(message: WebviewToHost): Promise<void> {

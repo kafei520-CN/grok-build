@@ -138,7 +138,7 @@ async function runNamed(name: string): Promise<void> {
 
 const platform = new NodePlatform({
   cwd: process.env['GROK_CWD'] || process.cwd(),
-  version: process.env['GROK_VERSION'] || '0.1.21',
+  version: process.env['GROK_VERSION'] || '0.1.22',
   language: process.env['GROK_LANG'] || Intl.DateTimeFormat().resolvedOptions().locale,
   request,
   notify: send,

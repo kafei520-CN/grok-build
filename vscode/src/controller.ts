@@ -16,6 +16,7 @@ import {
 import { installHint, resolveGrokBinary } from './cli';
 import { ContextMeter } from './contextMeter';
 import { EditJournal } from './editJournal';
+import { publicEdits } from './edits';
 import { handleIncoming, parsePermissionOptions } from './incoming';
 import { tr, uiLocale } from './locale';
 import { logError, logInfo, logWarn, showLog } from './logger';
@@ -103,6 +104,8 @@ export class GrokController implements SlashRuntime {
   private readonly listeners = new Set<(state: ChatState) => void>();
   private readonly streamListeners = new Set<(tail: import('./types').StreamTail) => void>();
   private emitTimer?: ReturnType<typeof setTimeout>;
+  private searchTimer?: ReturnType<typeof setTimeout>;
+  private searchSeq = 0;
   private readonly disposables: Array<{ dispose(): void }> = [];
   readonly journal: EditJournal;
   readonly meter: ContextMeter;
@@ -166,7 +169,11 @@ export class GrokController implements SlashRuntime {
       login: this.loginView,
       models: this.models,
       modeId: this.modeId,
-      messages: this.messages,
+      messages: this.messages.map((message) =>
+        message.edits?.length
+          ? { ...message, edits: publicEdits(message.edits) }
+          : message,
+      ),
       permission: this.permission,
       attachments: this.attachments,
       agentVersion: this.agentVersion,
@@ -644,7 +651,21 @@ export class GrokController implements SlashRuntime {
   }
 
   async searchFiles(query: string): Promise<void> {
-    this.fileHits = await plat().findFiles(query);
+    const seq = ++this.searchSeq;
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+    }
+    await new Promise<void>((resolve) => {
+      this.searchTimer = setTimeout(resolve, 180);
+    });
+    if (seq !== this.searchSeq) {
+      return;
+    }
+    const hits = await plat().findFiles(query);
+    if (seq !== this.searchSeq) {
+      return;
+    }
+    this.fileHits = hits;
     this.emit();
   }
 
@@ -655,6 +676,14 @@ export class GrokController implements SlashRuntime {
   async reviewEdits(messageId?: string, onlyPath?: string): Promise<void> {
     const assistant = this.journal.assistant(messageId);
     const files = await this.journal.diffs(messageId, onlyPath);
+    if (assistant && files.length > 0 && !onlyPath) {
+      assistant.edits = files.map((file) => ({
+        path: file.path,
+        added: file.added,
+        removed: file.removed,
+      }));
+      this.emit();
+    }
     if (files.length === 0) {
       if (onlyPath) {
         await plat().openFile(onlyPath, true);
@@ -1000,7 +1029,7 @@ export class GrokController implements SlashRuntime {
     }
     const cliPath = resolveGrokBinary({
       configuredPath: plat().getConfig('cliPath', ''),
-      preferWorkspaceBinary: plat().getConfig('preferWorkspaceBinary', true),
+      preferWorkspaceBinary: plat().getConfig('preferWorkspaceBinary', false),
       workspaceFolders: plat().workspaceFolders(),
       homeDir: plat().homeDir(),
       pathEnv: plat().pathEnv(),
@@ -1049,7 +1078,6 @@ export class GrokController implements SlashRuntime {
       });
       this.currentSessionId = agent.sessionId;
       this.setStatus('ready');
-      void this.refreshSessionsSilent();
     } catch (error) {
       this.fail('Could not start the Grok agent', error);
     }
@@ -1148,6 +1176,17 @@ export class GrokController implements SlashRuntime {
     if (assistant) {
       assistant.streaming = false;
       assistant.endedAt = assistant.endedAt ?? new Date().toISOString();
+      void this.journal.diffs(assistant.id).then((files) => {
+        if (!files.length || assistant !== this.messages.filter((m) => m.role === 'assistant').at(-1)) {
+          return;
+        }
+        assistant.edits = files.map((file) => ({
+          path: file.path,
+          added: file.added,
+          removed: file.removed,
+        }));
+        this.emit();
+      });
     }
     void this.meter.refresh();
   }
