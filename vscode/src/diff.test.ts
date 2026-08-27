@@ -52,6 +52,21 @@ describe('diff', () => {
     assert.deepEqual(splitLines('a\r\nb'), ['a', 'b']);
   });
 
+  it('counts a few edits in a large file instead of rewriting it', () => {
+    const before = Array.from({ length: 1700 }, (_, i) => `line-${i}`);
+    const after = before.slice();
+    after[10] = 'changed-10';
+    after.splice(100, 0, 'inserted');
+    const file = buildFileDiff({
+      path: 'big.css',
+      absPath: '/big.css',
+      before: before.join('\n'),
+      after: after.join('\n'),
+    });
+    assert.equal(file.added, 2);
+    assert.equal(file.removed, 1);
+  });
+
   it('builds file stats', () => {
     const file = buildFileDiff({
       path: 'a.ts',

@@ -36,7 +36,6 @@ export interface FileDiff {
   hunks: DiffHunk[];
 }
 
-const DP_LIMIT = 2_000_000;
 const CONTEXT = 2;
 
 export function splitLines(text: string): string[] {
@@ -56,47 +55,81 @@ export function diffOps(before: string[], after: string[]): DiffOp[] {
   if (m === 0) {
     return before.map((value) => ({ type: 'del', value }));
   }
-  if (n * m > DP_LIMIT) {
-    return [
-      ...before.map((value) => ({ type: 'del' as const, value })),
-      ...after.map((value) => ({ type: 'add' as const, value })),
-    ];
-  }
-  const dp: Int16Array[] = Array.from({ length: n + 1 }, () => new Int16Array(m + 1));
-  for (let i = n - 1; i >= 0; i -= 1) {
-    const row = dp[i];
-    const next = dp[i + 1];
-    for (let j = m - 1; j >= 0; j -= 1) {
-      row[j] =
-        before[i] === after[j]
-          ? (next[j + 1] + 1)
-          : Math.max(next[j], row[j + 1]);
+  return myersOps(before, after);
+}
+
+/** Myers O(ND) shortest edit script — same class of result as git, scales to large files. */
+function myersOps(a: string[], b: string[]): DiffOp[] {
+  const n = a.length;
+  const m = b.length;
+  const max = n + m;
+  const offset = max;
+  const v = new Int32Array(2 * max + 1);
+  const trace: Int32Array[] = [];
+  let done = false;
+  for (let d = 0; d <= max && !done; d += 1) {
+    trace.push(Int32Array.from(v));
+    for (let k = -d; k <= d; k += 2) {
+      let x: number;
+      if (k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])) {
+        x = v[offset + k + 1];
+      } else {
+        x = v[offset + k - 1] + 1;
+      }
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x += 1;
+        y += 1;
+      }
+      v[offset + k] = x;
+      if (x >= n && y >= m) {
+        done = true;
+        break;
+      }
     }
   }
   const ops: DiffOp[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < n && j < m) {
-    if (before[i] === after[j]) {
-      ops.push({ type: 'equal', value: before[i] });
-      i += 1;
-      j += 1;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      ops.push({ type: 'del', value: before[i] });
-      i += 1;
-    } else {
-      ops.push({ type: 'add', value: after[j] });
-      j += 1;
+  let x = n;
+  let y = m;
+  for (let d = trace.length - 1; d >= 0; d -= 1) {
+    const snap = trace[d];
+    const k = x - y;
+    const down = k === -d || (k !== d && snap[offset + k - 1] < snap[offset + k + 1]);
+    const prevK = down ? k + 1 : k - 1;
+    const prevX = d === 0 ? 0 : snap[offset + prevK];
+    const prevY = prevX - prevK;
+    while (x > Math.max(prevX, 0) && y > Math.max(prevY, 0) && a[x - 1] === b[y - 1]) {
+      ops.push({ type: 'equal', value: a[x - 1] });
+      x -= 1;
+      y -= 1;
+    }
+    if (d === 0) {
+      break;
+    }
+    if (x === prevX) {
+      if (y > 0) {
+        ops.push({ type: 'add', value: b[y - 1] });
+        y -= 1;
+      }
+    } else if (x > 0) {
+      ops.push({ type: 'del', value: a[x - 1] });
+      x -= 1;
     }
   }
-  while (i < n) {
-    ops.push({ type: 'del', value: before[i] });
-    i += 1;
+  while (x > 0 && y > 0 && a[x - 1] === b[y - 1]) {
+    ops.push({ type: 'equal', value: a[x - 1] });
+    x -= 1;
+    y -= 1;
   }
-  while (j < m) {
-    ops.push({ type: 'add', value: after[j] });
-    j += 1;
+  while (x > 0) {
+    ops.push({ type: 'del', value: a[x - 1] });
+    x -= 1;
   }
+  while (y > 0) {
+    ops.push({ type: 'add', value: b[y - 1] });
+    y -= 1;
+  }
+  ops.reverse();
   return ops;
 }
 
