@@ -1,0 +1,48 @@
+<idea-plugin>
+  <id>cn.mckafei.grok-build</id>
+  <name>Grok Build</name>
+  <vendor>mckafei_CN</vendor>
+  <description><![CDATA[
+    Grok Build chat for IntelliJ. Same WebView UI and agent core as the VS Code extension,
+    with a thin JCEF + Node sidecar adapter. Requires Node.js and the Grok CLI.
+  ]]></description>
+  <depends>com.intellij.modules.platform</depends>
+  <idea-version since-build="243" until-build="253.*"/>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow id="Grok Build"
+                anchor="right"
+                icon="/icons/grok.svg"
+                factoryClass="cn.mckafei.grokbuild.GrokToolWindowFactory"/>
+    <notificationGroup id="Grok Build" displayType="BALLOON" isLogByDefault="true"/>
+  </extensions>
+
+  <actions>
+    <action id="Grok.OpenChat"
+            class="cn.mckafei.grokbuild.OpenChatAction"
+            text="Open Grok Build"
+            description="Focus the Grok Build tool window">
+      <keyboard-shortcut keymap="$default" first-keystroke="control SEMICOLON"/>
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+    </action>
+    <action id="Grok.NewSession"
+            class="cn.mckafei.grokbuild.NewSessionAction"
+            text="Grok: New Session"
+            description="Start a new Grok Build session">
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+    </action>
+    <action id="Grok.AddSelection"
+            class="cn.mckafei.grokbuild.AddSelectionAction"
+            text="Grok: Add Selection"
+            description="Attach the current editor selection">
+      <keyboard-shortcut keymap="$default" first-keystroke="control alt G"/>
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+    <action id="Grok.AddActiveFile"
+            class="cn.mckafei.grokbuild.AddActiveFileAction"
+            text="Grok: Add Active File"
+            description="Attach the current editor file">
+      <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+  </actions>
+</idea-plugin>

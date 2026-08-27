@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { settingNeedsRestart } from './types';
+
+describe('settings', () => {
+  it('marks spawn-time keys as needing a restart', () => {
+    assert.equal(settingNeedsRestart('alwaysApprove'), true);
+    assert.equal(settingNeedsRestart('cliPath'), true);
+    assert.equal(settingNeedsRestart('locale'), false);
+    assert.equal(settingNeedsRestart('permissionMode'), false);
+  });
+});

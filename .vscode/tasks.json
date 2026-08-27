@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "compile-grok-vscode",
+      "type": "shell",
+      "command": "npm run compile",
+      "options": {
+        "cwd": "${workspaceFolder}/vscode"
+      },
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

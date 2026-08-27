@@ -1,0 +1,262 @@
+:root {
+  --fg: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground, color-mix(in srgb, var(--vscode-foreground) 55%, transparent));
+  --bg: var(--vscode-editor-background, var(--vscode-sideBar-background));
+  --elev: color-mix(in srgb, var(--vscode-foreground) 6%, var(--bg));
+  --line: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+  --hover: color-mix(in srgb, var(--vscode-foreground) 8%, transparent);
+  --ice: color-mix(in srgb, #b9d4ff 72%, var(--fg));
+  --ok: #3fb950;
+  --bad: #f85149;
+  --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+  --font: var(--vscode-font-family);
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.04em;
+}
+
+.brand .mark,
+.gap-btn .mark {
+  color: var(--ice);
+  display: inline-flex;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--ice) 40%, transparent));
+}
+
+.summary {
+  color: var(--muted);
+}
+
+.add {
+  color: var(--ok);
+}
+
+.del {
+  color: var(--bad);
+}
+
+.modes {
+  margin-left: auto;
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.mode,
+.text-btn,
+.open-btn,
+.gap-btn,
+.file-head {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.mode {
+  background: none;
+  border: none;
+  padding: 4px 12px;
+  color: var(--muted);
+}
+
+.mode.on {
+  background: color-mix(in srgb, var(--ice) 16%, transparent);
+  color: var(--fg);
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+}
+
+.text-btn:hover,
+.open-btn:hover {
+  color: var(--ice);
+}
+
+.open-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+.file {
+  margin: 18px 16px 28px;
+  border-left: 2px solid color-mix(in srgb, var(--ice) 55%, transparent);
+  padding-left: 12px;
+}
+
+.file.closed .file-body {
+  display: none;
+}
+
+.file-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 0 0 8px;
+}
+
+.file-path {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.file-stats em {
+  font-style: normal;
+  color: var(--ice);
+  margin-right: 6px;
+}
+
+.gap {
+  margin: 6px 0;
+}
+
+.gap-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: color-mix(in srgb, var(--ice) 8%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ice) 32%, var(--line));
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.gap.open .gap-btn {
+  color: var(--fg);
+  border-style: solid;
+}
+
+.file-body {
+  overflow-x: hidden;
+}
+
+.rows {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-width: 0;
+}
+
+.pair + .pair .cell {
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.cell {
+  display: grid;
+  grid-template-columns: 3.2em minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.cell.before {
+  border-right: 1px solid color-mix(in srgb, var(--ice) 22%, var(--line));
+}
+
+.cell.ghost {
+  background: color-mix(in srgb, var(--fg) 4%, var(--bg));
+}
+
+.cell.ghost .no,
+.cell.ghost pre {
+  visibility: hidden;
+}
+
+.cell.add,
+.uni.add {
+  background: color-mix(in srgb, var(--ok) 16%, transparent);
+}
+
+.cell.del,
+.uni.del {
+  background: color-mix(in srgb, var(--bad) 16%, transparent);
+}
+
+.no {
+  color: var(--muted);
+  text-align: right;
+  padding: 0 8px;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.cell pre,
+.uni pre {
+  margin: 0;
+  padding: 0 12px 0 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+.uni {
+  display: grid;
+  grid-template-columns: 3.2em 1.2em 1fr;
+}
+
+.sign {
+  color: var(--muted);
+  text-align: center;
+}
+
+.uni.add .sign {
+  color: var(--ok);
+}
+
+.uni.del .sign {
+  color: var(--bad);
+}
+
+.empty {
+  padding: 32px 16px;
+  color: var(--muted);
+  text-align: center;
+}

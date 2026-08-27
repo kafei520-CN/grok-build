@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { classifySlash, filterCommands, parseSlash, resolveAlias } from './slash';
+
+describe('slash routing', () => {
+  it('parses command and args', () => {
+    assert.deepEqual(parseSlash('/compact keep auth'), {
+      command: 'compact',
+      args: 'keep auth',
+    });
+  });
+
+  it('routes aliases to host actions', () => {
+    assert.equal(resolveAlias('clear'), 'new');
+    assert.equal(classifySlash('/clear').kind, 'newSession');
+    assert.equal(classifySlash('/undo').kind, 'rewind');
+    assert.equal(classifySlash('/cost manage').kind, 'usage');
+  });
+
+  it('passes agent-owned commands through', () => {
+    assert.equal(classifySlash('/imagine a cat').kind, 'pass');
+    assert.equal(classifySlash('/workflow review-changes').kind, 'pass');
+    assert.equal(classifySlash('/goal status').kind, 'pass');
+    assert.equal(classifySlash('hello').kind, 'pass');
+  });
+
+  it('filters the command menu', () => {
+    const hits = filterCommands(
+      [
+        { name: 'compact', description: 'Compress history' },
+        { name: 'plan', description: 'Enter plan mode' },
+      ],
+      'pla',
+    );
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].name, 'plan');
+  });
+});

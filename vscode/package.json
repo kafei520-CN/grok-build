@@ -1,0 +1,263 @@
+{
+  "name": "grok-for-vs-code",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.1.21",
+  "publisher": "kafei520cn",
+  "author": "mckafei_CN",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/kafei520-CN/Grok-For-VS-Code",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kafei520-CN/Grok-For-VS-Code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kafei520-CN/Grok-For-VS-Code/issues"
+  },
+  "private": false,
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "grok",
+    "xai",
+    "agent",
+    "acp",
+    "chat"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "resources/icon.png",
+  "contributes": {
+    "commands": [
+      {
+        "command": "grok.openChat",
+        "title": "%command.openChat%",
+        "category": "Grok Build",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "grok.newSession",
+        "title": "%command.newSession%",
+        "category": "Grok Build",
+        "icon": "$(add)"
+      },
+      {
+        "command": "grok.login",
+        "title": "%command.login%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.logout",
+        "title": "%command.logout%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.setApiKey",
+        "title": "%command.setApiKey%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.addSelection",
+        "title": "%command.addSelection%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.addActiveFile",
+        "title": "%command.addActiveFile%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.restartAgent",
+        "title": "%command.restartAgent%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.showLog",
+        "title": "%command.showLog%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.cancel",
+        "title": "%command.cancel%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.compact",
+        "title": "%command.compact%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.rewind",
+        "title": "%command.rewind%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.resumeSession",
+        "title": "%command.resumeSession%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.cycleMode",
+        "title": "%command.cycleMode%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.forkSession",
+        "title": "%command.forkSession%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.exportSession",
+        "title": "%command.exportSession%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.usage",
+        "title": "%command.usage%",
+        "category": "Grok Build"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "grok.openChat",
+        "key": "ctrl+;",
+        "mac": "cmd+;"
+      },
+      {
+        "command": "grok.addSelection",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "grok.cycleMode",
+        "key": "ctrl+shift+;",
+        "mac": "cmd+shift+;"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "grok.newSession",
+          "when": "view == grok.chat",
+          "group": "navigation"
+        },
+        {
+          "command": "grok.restartAgent",
+          "when": "view == grok.chat",
+          "group": "navigation"
+        },
+        {
+          "command": "grok.resumeSession",
+          "when": "view == grok.chat",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "grok.addSelection",
+          "when": "editorHasSelection",
+          "group": "grok@1"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "grok",
+          "title": "%view.container%",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "grok": [
+        {
+          "type": "webview",
+          "id": "grok.chat",
+          "name": "%view.chat%",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "%config.title%",
+      "properties": {
+        "grok.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.cliPath%"
+        },
+        "grok.preferWorkspaceBinary": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.preferWorkspaceBinary%"
+        },
+        "grok.minCliVersion": {
+          "type": "string",
+          "default": "0.1.0",
+          "description": "%config.minCliVersion%"
+        },
+        "grok.permissionMode": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "%config.permissionMode.ask%",
+            "%config.permissionMode.auto%"
+          ],
+          "default": "ask",
+          "description": "%config.permissionMode%"
+        },
+        "grok.includeSelectionOnSend": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.includeSelectionOnSend%"
+        },
+        "grok.alwaysApprove": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.alwaysApprove%"
+        },
+        "grok.locale": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "en",
+            "zh-CN"
+          ],
+          "enumDescriptions": [
+            "%config.locale.auto%",
+            "%config.locale.en%",
+            "%config.locale.zhCN%"
+          ],
+          "default": "auto",
+          "description": "%config.locale%"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "test": "node esbuild.mjs --test && node --test dist/test/*.js",
+    "package": "npx --yes @vscode/vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/vscode": "^1.93.0",
+    "esbuild": "^0.25.4",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,3 +1,9 @@
 /target
 **/*.rs.bk
 .DS_Store
+vscode/node_modules/
+vscode/dist/
+vscode/*.vsix
+idea/.gradle/
+idea/build/
+idea/.intellijPlatform/
