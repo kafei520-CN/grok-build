@@ -1,5 +1,5 @@
 import type { ChatState, StreamTail } from '../types';
-import { bindRender, normalizeState, persistUi, post, root, ui } from './app';
+import { bindRender, isBooting, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
 import { mountComposer, patchComposer } from './composer';
 import { removeSlot, replaceSlot } from './dom';
@@ -43,18 +43,19 @@ function render(): void {
     root.dataset.status = ui.state.status;
     root.classList.toggle('compact', Boolean(ui.state.compactMode));
     root.classList.toggle('focused', ui.composerFocused);
-    if (!document.getElementById('grok-header')) {
+    if (!isBooting() && !document.getElementById('grok-header')) {
       root.replaceChildren();
     }
     patchHeader(root);
     patchBody(root);
-    if (!document.getElementById('composer-wrap')) {
+    const booting = isBooting();
+    if (!booting && !document.getElementById('composer-wrap')) {
       mountComposer(root);
     }
     patchComposer();
     const composer = document.getElementById('composer-wrap');
     if (composer) {
-      composer.hidden = Boolean(ui.state.settingsOpen);
+      composer.hidden = booting || Boolean(ui.state.settingsOpen);
     }
     if (ui.state.drawer) {
       replaceSlot('grok-drawer', renderDrawer(), root);

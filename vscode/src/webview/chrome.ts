@@ -1,6 +1,6 @@
 import type { StringKey } from '../i18n';
 import { formatRelativeTime } from '../i18n';
-import { loc, post, render, tr, ui } from './app';
+import { isBooting, loc, post, render, tr, ui } from './app';
 import { button, iconButton } from './dom';
 import { iconClock, iconEdit, iconMore, iconStar } from './icons';
 import { escapeHtml } from './markdown';
@@ -8,8 +8,13 @@ import { escapeHtml } from './markdown';
 let headerLocale: string | undefined;
 
 export function patchHeader(parent: HTMLElement): void {
-  const locale = ui.state.locale ?? 'en';
   let el = document.getElementById('grok-header');
+  if (isBooting()) {
+    el?.remove();
+    headerLocale = undefined;
+    return;
+  }
+  const locale = ui.state.locale ?? 'en';
   if (!el || headerLocale !== locale) {
     const next = renderHeader();
     next.id = 'grok-header';
@@ -276,6 +281,18 @@ export function loginCard(): HTMLElement {
   });
   card.append(api);
   return card;
+}
+
+export function bootStar(): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'boot';
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-label', tr('startingTitle'));
+  const mark = document.createElement('div');
+  mark.className = 'mark pulse';
+  mark.innerHTML = iconStar();
+  el.append(mark);
+  return el;
 }
 
 export function errorCard(): HTMLElement {

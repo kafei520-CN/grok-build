@@ -820,6 +820,21 @@ textarea:focus-visible {
   color: var(--ice);
 }
 
+.boot {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+}
+
+.boot .mark {
+  width: 56px;
+  height: 56px;
+  color: var(--ice);
+  filter: drop-shadow(0 0 18px var(--ice-dim));
+  animation: star-pulse 1.2s ease-in-out infinite;
+}
+
 .permission {
   margin: 0 12px 8px;
   padding: 12px;

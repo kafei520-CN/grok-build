@@ -228,6 +228,10 @@ export function countOps(ops: DiffOp[]): { added: number; removed: number } {
   return { added, removed };
 }
 
+export function countChange(before: string, after: string): { added: number; removed: number } {
+  return countOps(diffOps(splitLines(before), splitLines(after)));
+}
+
 export function buildFileDiff(input: {
   path: string;
   absPath: string;

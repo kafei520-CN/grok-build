@@ -1,3 +1,5 @@
+import { countChange } from './diff';
+import { isFullFileBaseline } from './snapshots';
 import type { FileEdit } from './types';
 import { asObject, asString } from './wire';
 
@@ -49,13 +51,23 @@ export function mergeEdits(edits: FileEdit[]): FileEdit[] {
     const key = edit.path.replace(/\\/g, '/');
     const current = byPath.get(key);
     if (current) {
-      current.added += edit.added;
-      current.removed += edit.removed;
       if (edit.previous !== undefined && current.previous === undefined) {
         current.previous = edit.previous;
       }
       if (edit.next !== undefined) {
         current.next = edit.next;
+      }
+      if (
+        current.previous !== undefined &&
+        current.next !== undefined &&
+        isFullFileBaseline(current.previous, current.next)
+      ) {
+        const stats = countChange(current.previous, current.next);
+        current.added = stats.added;
+        current.removed = stats.removed;
+      } else if (current.previous === undefined || current.next === undefined) {
+        current.added += edit.added;
+        current.removed += edit.removed;
       }
     } else {
       byPath.set(key, { ...edit, path: edit.path });
@@ -66,6 +78,23 @@ export function mergeEdits(edits: FileEdit[]): FileEdit[] {
 
 export function publicEdits(edits: FileEdit[]): Array<{ path: string; added: number; removed: number }> {
   return edits.map(({ path, added, removed }) => ({ path, added, removed }));
+}
+
+export function applyDiffStats(
+  edits: FileEdit[],
+  files: Array<{ path: string; added: number; removed: number }>,
+): FileEdit[] {
+  const byPath = new Map(edits.map((edit) => [edit.path.replace(/\\/g, '/'), edit]));
+  return files.map((file) => {
+    const prev = byPath.get(file.path.replace(/\\/g, '/'));
+    return {
+      path: file.path,
+      added: file.added,
+      removed: file.removed,
+      previous: prev?.previous,
+      next: prev?.next,
+    };
+  });
 }
 
 export function totals(edits: FileEdit[]): { added: number; removed: number } {

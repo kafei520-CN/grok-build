@@ -16,6 +16,7 @@ export interface SessionView {
   capturePrevious: (filePath: string, previous: string) => void;
   displayPath: (filePath: string) => string;
   emitUnlessReplaying: () => void;
+  refreshEditStats?: (assistant: ChatMessage) => void;
 }
 
 export function applySessionUpdate(session: SessionView, update: SessionUpdate): void {
@@ -226,6 +227,9 @@ function applyTool(session: SessionView, assistant: ChatMessage, update: Session
   }));
   if (labeled.length > 0) {
     assistant.edits = mergeEdits([...(assistant.edits ?? []), ...labeled]);
+    if (status === 'completed') {
+      session.refreshEditStats?.(assistant);
+    }
   }
 }
 

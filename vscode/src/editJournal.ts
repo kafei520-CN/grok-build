@@ -308,7 +308,11 @@ export class EditJournal {
         return { absPath: abs, before: snap.previous, after: afterDisk };
       }
     }
-    if (edit?.previous !== undefined && edit.next !== undefined) {
+    if (
+      edit?.previous !== undefined &&
+      edit.next !== undefined &&
+      isFullFileBaseline(edit.previous, edit.next)
+    ) {
       return { absPath: abs, before: edit.previous, after: edit.next };
     }
     if (edit?.previous !== undefined && isFullFileBaseline(edit.previous, afterDisk)) {

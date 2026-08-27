@@ -2,7 +2,7 @@ import { totals } from '../edits';
 import { formatClock, formatDuration, toolKindLabel } from '../i18n';
 import type { ChatMessage, ChatState, FileEdit, PermissionOption } from '../types';
 import { loc, post, render, tr, ui } from './app';
-import { errorCard, home, loginCard, panel, setupCard } from './chrome';
+import { bootStar, errorCard, home, loginCard, panel, setupCard } from './chrome';
 import { button } from './dom';
 import { iconCheck, iconCopy, iconStar, toolIcon } from './icons';
 import { fileName, renderMarkdown } from './markdown';
@@ -91,7 +91,7 @@ function fillBody(el: HTMLElement): void {
     return;
   }
   if (status === 'connecting') {
-    el.append(panel(tr('startingTitle'), tr('startingBody')));
+    el.append(bootStar());
     return;
   }
   if (status === 'login' || status === 'authenticating') {
@@ -103,7 +103,7 @@ function fillBody(el: HTMLElement): void {
     return;
   }
   if (ui.state.restoringSession) {
-    el.append(panel(tr('restoringTitle'), tr('restoringBody')));
+    el.append(bootStar());
     return;
   }
   if (ui.state.messages.length === 0) {
@@ -354,6 +354,7 @@ function turnId(turn: Turn): string {
 
 function turnSig(turn: Turn, split: boolean): string {
   const a = turn.assistant;
+  const sum = totals(a?.edits ?? []);
   return [
     split ? '1' : '0',
     a?.streaming ? '1' : '0',
@@ -362,6 +363,8 @@ function turnSig(turn: Turn, split: boolean): string {
     a?.plan?.length ?? 0,
     a?.tools.length ?? 0,
     a?.edits?.length ?? 0,
+    sum.added,
+    sum.removed,
     a?.images?.length ?? 0,
     ui.copiedId === a?.id ? 'c' : '',
   ].join(':');

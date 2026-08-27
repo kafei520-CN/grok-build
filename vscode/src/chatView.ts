@@ -47,6 +47,7 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
       }),
     );
     this.postState(this.controller.snapshot());
+    void this.controller.start();
   }
 
   private async onMessage(message: WebviewToHost): Promise<void> {
@@ -76,7 +77,7 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
   <title>Grok Build</title>
 </head>
 <body>
-  <div id="app">Starting Grok…</div>
+  <div id="app"></div>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

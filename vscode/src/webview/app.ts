@@ -52,12 +52,16 @@ export function post(message: WebviewToHost): void {
 
 export function emptyState(): ChatState {
   return {
-    status: 'ready',
+    status: 'connecting',
     messages: [],
     attachments: [],
     commands: [],
     locale: 'en',
   };
+}
+
+export function isBooting(): boolean {
+  return ui.state.status === 'connecting' || Boolean(ui.state.restoringSession);
 }
 
 export function persistUi(): void {

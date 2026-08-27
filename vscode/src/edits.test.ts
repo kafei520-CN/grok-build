@@ -35,6 +35,27 @@ describe('edits', () => {
     assert.deepEqual(totals(merged), { added: 3, removed: 1 });
   });
 
+  it('does not sum hunk-sized rewrites into inflated totals', () => {
+    const merged = mergeEdits([
+      {
+        path: 'a.css',
+        added: 2,
+        removed: 1,
+        previous: 'keep\n',
+        next: 'keep\nnew\n',
+      },
+      {
+        path: 'a.css',
+        added: 900,
+        removed: 2,
+        previous: 'keep\n',
+        next: `${'x\n'.repeat(80)}keep\n`,
+      },
+    ]);
+    assert.equal(merged.length, 1);
+    assert.ok((merged[0]?.added ?? 0) < 100);
+  });
+
   it('detects windows file paths', () => {
     assert.equal(looksLikeFilePath('C:\\Temp\\shot.png'), true);
     assert.equal(looksLikeFilePath('hello world'), false);

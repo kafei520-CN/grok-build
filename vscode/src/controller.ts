@@ -16,7 +16,7 @@ import {
 import { installHint, resolveGrokBinary } from './cli';
 import { ContextMeter } from './contextMeter';
 import { EditJournal } from './editJournal';
-import { publicEdits } from './edits';
+import { applyDiffStats, publicEdits } from './edits';
 import { handleIncoming, parsePermissionOptions } from './incoming';
 import { tr, uiLocale } from './locale';
 import { logError, logInfo, logWarn, showLog } from './logger';
@@ -68,7 +68,7 @@ interface PendingPermission {
 
 export class GrokController implements SlashRuntime {
   agent?: GrokAgent;
-  status: ChatStatus = 'ready';
+  status: ChatStatus = 'connecting';
   messages: ChatMessage[] = [];
   attachments: Attachment[] = [];
   queue: string[] = [];
@@ -701,11 +701,7 @@ export class GrokController implements SlashRuntime {
     const assistant = this.journal.assistant(messageId);
     const files = await this.journal.diffs(messageId, onlyPath);
     if (assistant && files.length > 0 && !onlyPath) {
-      assistant.edits = files.map((file) => ({
-        path: file.path,
-        added: file.added,
-        removed: file.removed,
-      }));
+      assistant.edits = applyDiffStats(assistant.edits ?? [], files);
       this.emit();
     }
     if (files.length === 0) {
@@ -987,6 +983,9 @@ export class GrokController implements SlashRuntime {
         this.journal.capturePrevious(filePath, previous),
       displayPath: (filePath: string) => this.displayPath(filePath),
       emitUnlessReplaying: () => this.emitUnlessReplaying(),
+      refreshEditStats: (assistant) => {
+        void this.syncEditStats(assistant);
+      },
     };
     applySessionUpdate(view, update);
     this.modeId = view.modeId;
@@ -1046,7 +1045,7 @@ export class GrokController implements SlashRuntime {
 
   private async startInner(): Promise<void> {
     this.error = undefined;
-    if (this.messages.length === 0 && this.status !== 'ready' && this.status !== 'error') {
+    if (this.messages.length === 0) {
       this.setStatus('connecting');
     }
     if (!plat().isTrusted()) {
@@ -1189,6 +1188,15 @@ export class GrokController implements SlashRuntime {
     return plat().relativePath(filePath);
   }
 
+  private async syncEditStats(assistant: ChatMessage): Promise<void> {
+    const files = await this.journal.diffs(assistant.id);
+    if (!files.length || !this.messages.includes(assistant)) {
+      return;
+    }
+    assistant.edits = applyDiffStats(assistant.edits ?? [], files);
+    this.emitUnlessReplaying();
+  }
+
   private async createSession(agent: GrokAgent): Promise<void> {
     const result = await agent.newSession(this.cwd());
     this.currentSessionId = agent.sessionId ?? result.sessionId;
@@ -1201,17 +1209,7 @@ export class GrokController implements SlashRuntime {
     if (assistant) {
       assistant.streaming = false;
       assistant.endedAt = assistant.endedAt ?? new Date().toISOString();
-      void this.journal.diffs(assistant.id).then((files) => {
-        if (!files.length || assistant !== this.messages.filter((m) => m.role === 'assistant').at(-1)) {
-          return;
-        }
-        assistant.edits = files.map((file) => ({
-          path: file.path,
-          added: file.added,
-          removed: file.removed,
-        }));
-        this.emit();
-      });
+      void this.syncEditStats(assistant);
     }
     void this.meter.refresh();
   }
