@@ -75,5 +75,6 @@ describe('edits', () => {
     assert.equal(found[0].previous, 'a\n');
     assert.equal(found[0].added, 1);
     assert.equal(found[0].removed, 1);
+    assert.equal(found[0].next, 'b\n');
   });
 });

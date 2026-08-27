@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   addSnapshot,
   alreadyCaptured,
+  isFullFileBaseline,
   isProbablyText,
   normalizeFsPath,
   planRevert,
@@ -37,6 +38,34 @@ describe('snapshots', () => {
       plans.map((item) => item.action),
       ['restore', 'delete', 'skip'],
     );
+  });
+
+  it('lets a disk snapshot replace a tool hunk snapshot', () => {
+    const tool: FileSnapshot = {
+      absPath: 'E:/tmp/a.ts',
+      displayPath: 'a.ts',
+      existed: true,
+      previous: 'old line\n',
+      source: 'tool',
+    };
+    const disk: FileSnapshot = {
+      absPath: 'E:/tmp/a.ts',
+      displayPath: 'a.ts',
+      existed: true,
+      previous: 'full file\ncontents\n',
+      source: 'disk',
+    };
+    const list = addSnapshot(addSnapshot([], tool), disk);
+    assert.equal(list.length, 1);
+    assert.equal(list[0]?.source, 'disk');
+    assert.equal(alreadyCaptured(list, 'E:/tmp/a.ts'), true);
+  });
+
+  it('rejects a short hunk as a full-file baseline', () => {
+    const hunk = '    [\'menuSkills\', () => post({ type: \'openDrawer\' })],\n';
+    const file = `${'line\n'.repeat(80)}${hunk}`;
+    assert.equal(isFullFileBaseline(hunk, file), false);
+    assert.equal(isFullFileBaseline(file, file.replace('line', 'LINE')), true);
   });
 
   it('rejects nul bytes as text', () => {

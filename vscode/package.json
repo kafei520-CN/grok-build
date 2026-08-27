@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.1.26",
+  "version": "0.1.28",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -31,7 +31,7 @@
     "chat"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onView:grok.chat"
   ],
   "main": "./dist/extension.js",
   "icon": "resources/icon.png",

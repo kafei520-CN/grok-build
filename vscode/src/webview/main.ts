@@ -1,5 +1,5 @@
 import type { ChatState, StreamTail } from '../types';
-import { bindRender, normalizeState, post, root, ui, vscode } from './app';
+import { bindRender, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
 import { mountComposer, patchComposer } from './composer';
 import { removeSlot, replaceSlot } from './dom';
@@ -13,7 +13,7 @@ window.addEventListener(
   (event: MessageEvent<{ type: string; state?: ChatState } & Partial<StreamTail>>) => {
     if (event.data?.type === 'state' && event.data.state) {
       ui.state = normalizeState(event.data.state);
-      vscode.setState(ui.state);
+      persistUi();
       render();
       return;
     }

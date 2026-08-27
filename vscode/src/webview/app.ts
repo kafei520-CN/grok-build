@@ -21,7 +21,7 @@ export const vscode = getVsCodeApi();
 export const root = document.getElementById('app') ?? document.body;
 
 export const ui = {
-  state: normalizeState(vscode.getState()),
+  state: prefsOnly(vscode.getState()),
   draft: '',
   menu: undefined as 'slash' | 'files' | undefined,
   picker: undefined as 'model' | 'effort' | undefined,
@@ -52,11 +52,35 @@ export function post(message: WebviewToHost): void {
 
 export function emptyState(): ChatState {
   return {
-    status: 'connecting',
+    status: 'ready',
     messages: [],
     attachments: [],
     commands: [],
     locale: 'en',
+  };
+}
+
+export function persistUi(): void {
+  vscode.setState({
+    locale: ui.state.locale,
+    compactMode: ui.state.compactMode,
+    timestamps: ui.state.timestamps,
+    multiline: ui.state.multiline,
+  });
+}
+
+function prefsOnly(raw: unknown): ChatState {
+  const base = emptyState();
+  if (!raw || typeof raw !== 'object') {
+    return base;
+  }
+  const value = raw as Partial<ChatState>;
+  return {
+    ...base,
+    locale: value.locale === 'zh-CN' ? 'zh-CN' : 'en',
+    compactMode: value.compactMode,
+    timestamps: value.timestamps,
+    multiline: value.multiline,
   };
 }
 

@@ -68,7 +68,7 @@ interface PendingPermission {
 
 export class GrokController implements SlashRuntime {
   agent?: GrokAgent;
-  status: ChatStatus = 'connecting';
+  status: ChatStatus = 'ready';
   messages: ChatMessage[] = [];
   attachments: Attachment[] = [];
   queue: string[] = [];
@@ -100,6 +100,7 @@ export class GrokController implements SlashRuntime {
   private authSeq = 0;
   private turn = 0;
   private starting?: Promise<void>;
+  private wantAgent = false;
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   private readonly listeners = new Set<(state: ChatState) => void>();
   private readonly streamListeners = new Set<(tail: import('./types').StreamTail) => void>();
@@ -131,7 +132,9 @@ export class GrokController implements SlashRuntime {
     });
     this.disposables.push(
       plat().onTrustChange(() => {
-        void this.start();
+        if (this.wantAgent) {
+          void this.start();
+        }
       }),
       plat().onConfigChange(() => {
         this.emit();
@@ -202,6 +205,7 @@ export class GrokController implements SlashRuntime {
   }
 
   async start(): Promise<void> {
+    this.wantAgent = true;
     if (this.starting) {
       return this.starting;
     }
@@ -209,6 +213,13 @@ export class GrokController implements SlashRuntime {
       this.starting = undefined;
     });
     return this.starting;
+  }
+
+  private async ensureAgent(): Promise<void> {
+    if (this.agent) {
+      return;
+    }
+    await this.start();
   }
 
   async restart(): Promise<void> {
@@ -223,14 +234,17 @@ export class GrokController implements SlashRuntime {
   async newSession(): Promise<void> {
     if (!this.agent) {
       await this.start();
+    }
+    const agent = this.agent;
+    if (!agent) {
       return;
     }
     this.messages = [];
     this.journal.clear();
     this.permission = undefined;
     try {
-      await this.createSession(this.agent);
-      this.currentSessionId = this.agent.sessionId;
+      await this.createSession(agent);
+      this.currentSessionId = agent.sessionId;
       this.setStatus('ready');
       void this.refreshSessionsSilent();
     } catch (error) {
@@ -353,6 +367,7 @@ export class GrokController implements SlashRuntime {
     if (!trimmed && this.attachments.length === 0) {
       return;
     }
+    await this.ensureAgent();
     const action = classifySlash(trimmed);
     if (action.kind !== 'pass') {
       await this.runHostAction(action);
@@ -361,6 +376,15 @@ export class GrokController implements SlashRuntime {
     const agent = this.agent;
     if (!agent || (this.status !== 'ready' && this.status !== 'streaming')) {
       return;
+    }
+    if (!agent.sessionId) {
+      try {
+        await this.createSession(agent);
+        this.currentSessionId = agent.sessionId;
+      } catch (error) {
+        this.fail('Could not create a session', error);
+        return;
+      }
     }
     if (this.status === 'streaming') {
       this.queue = [...this.queue, trimmed];
@@ -1022,11 +1046,14 @@ export class GrokController implements SlashRuntime {
 
   private async startInner(): Promise<void> {
     this.error = undefined;
-    this.setStatus('connecting');
+    if (this.messages.length === 0 && this.status !== 'ready' && this.status !== 'error') {
+      this.setStatus('connecting');
+    }
     if (!plat().isTrusted()) {
       this.setStatus('untrusted');
       return;
     }
+    await new Promise<void>((resolve) => setImmediate(resolve));
     const cliPath = resolveGrokBinary({
       configuredPath: plat().getConfig('cliPath', ''),
       preferWorkspaceBinary: plat().getConfig('preferWorkspaceBinary', false),
@@ -1070,13 +1097,11 @@ export class GrokController implements SlashRuntime {
         await agent.authenticate(methodId);
       }
       this.account = await agent.authInfo().catch(() => undefined);
-      await this.createSession(agent);
       this.commands = mergeCommands(agent.availableCommands(), FALLBACK_COMMANDS);
       void agent.commandsList().then((cmds) => {
         this.commands = mergeCommands(cmds, FALLBACK_COMMANDS);
         this.emit();
       });
-      this.currentSessionId = agent.sessionId;
       this.setStatus('ready');
     } catch (error) {
       this.fail('Could not start the Grok agent', error);

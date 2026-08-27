@@ -99,6 +99,7 @@ export interface FileEdit {
   added: number;
   removed: number;
   previous?: string;
+  next?: string;
 }
 
 export interface ToolCard {

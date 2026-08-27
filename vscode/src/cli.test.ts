@@ -30,6 +30,20 @@ describe('cli lookup', () => {
     );
   });
 
+  it('ignores workspace target binaries on PATH unless enabled', () => {
+    const hidden = candidateCliPaths({
+      preferWorkspaceBinary: false,
+      workspaceFolders: ['E:\\Project\\grok-build'],
+      homeDir: 'C:\\Users\\dev',
+      pathEnv: 'E:\\Project\\grok-build\\target\\release',
+      platform: 'win32',
+    });
+    assert.equal(
+      hidden.some((c) => c.toLowerCase().includes(path.join('target', 'release'))),
+      false,
+    );
+  });
+
   it('compares versions', () => {
     assert.equal(isVersionAtLeast('1.0.5', '0.1.0'), true);
     assert.equal(isVersionAtLeast('0.0.9', '0.1.0'), false);

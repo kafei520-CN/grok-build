@@ -9,6 +9,7 @@ import {
   MAX_SNAPSHOT_CHARS,
   addSnapshot,
   alreadyCaptured,
+  isFullFileBaseline,
   isProbablyText,
   normalizeFsPath,
   planRevert,
@@ -104,13 +105,19 @@ export class EditJournal {
     try {
       const bytes = await plat().readFile(abs);
       if (!isProbablyText(bytes) || bytes.byteLength > MAX_SNAPSHOT_CHARS) {
-        snap = { absPath: abs, displayPath: this.host.displayPath(abs), existed: true };
+        snap = {
+          absPath: abs,
+          displayPath: this.host.displayPath(abs),
+          existed: true,
+          source: 'disk',
+        };
       } else {
         snap = {
           absPath: abs,
           displayPath: this.host.displayPath(abs),
           existed: true,
           previous: Buffer.from(bytes).toString('utf8'),
+          source: 'disk',
         };
       }
     } catch {
@@ -119,6 +126,7 @@ export class EditJournal {
         displayPath: this.host.displayPath(abs),
         existed: false,
         previous: '',
+        source: 'disk',
       };
     }
     this.snapshots.set(messageId, addSnapshot(this.snapshots.get(messageId) ?? [], snap));
@@ -148,6 +156,7 @@ export class EditJournal {
         displayPath: this.host.displayPath(abs),
         existed: previous.length > 0,
         previous,
+        source: 'tool',
       }),
     );
   }
@@ -177,6 +186,7 @@ export class EditJournal {
             displayPath: this.host.displayPath(abs),
             existed: true,
             previous,
+            source: 'disk',
           }),
         );
       }
@@ -289,19 +299,22 @@ export class EditJournal {
     const edit = assistant?.edits?.find(
       (item) => normalizeFsPath(this.resolvePath(item.path) ?? item.path) === normalizeFsPath(abs),
     );
-    let before: string | undefined;
+    const afterDisk = (await this.readCurrentText(abs)) ?? '';
     if (snap && !snap.existed) {
-      before = '';
-    } else if (snap?.previous !== undefined) {
-      before = snap.previous;
-    } else if (edit?.previous !== undefined) {
-      before = edit.previous;
+      return { absPath: abs, before: '', after: afterDisk };
     }
-    if (before === undefined) {
-      return undefined;
+    if (snap?.source !== 'tool' && snap?.previous !== undefined) {
+      if (isFullFileBaseline(snap.previous, afterDisk)) {
+        return { absPath: abs, before: snap.previous, after: afterDisk };
+      }
     }
-    const after = (await this.readCurrentText(abs)) ?? '';
-    return { absPath: abs, before, after };
+    if (edit?.previous !== undefined && edit.next !== undefined) {
+      return { absPath: abs, before: edit.previous, after: edit.next };
+    }
+    if (edit?.previous !== undefined && isFullFileBaseline(edit.previous, afterDisk)) {
+      return { absPath: abs, before: edit.previous, after: afterDisk };
+    }
+    return undefined;
   }
 
   private async readCurrentText(abs: string): Promise<string | undefined> {

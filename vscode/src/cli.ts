@@ -48,12 +48,27 @@ export function candidateCliPaths(input: CliLookupInput): string[] {
 
   const pathParts = input.pathEnv.split(path.delimiter).filter(Boolean);
   for (const dir of pathParts) {
+    if (!input.preferWorkspaceBinary && isWorkspaceBuildDir(dir, input.workspaceFolders)) {
+      continue;
+    }
     for (const name of names) {
       add(path.join(dir, name));
     }
   }
 
   return out;
+}
+
+function isWorkspaceBuildDir(dir: string, folders: string[]): boolean {
+  const norm = path.normalize(dir).toLowerCase();
+  return folders.some((folder) => {
+    const root = path.normalize(folder).toLowerCase();
+    return (
+      norm.startsWith(path.join(root, 'target')) ||
+      norm.startsWith(path.join(root, 'target', 'release')) ||
+      norm.startsWith(path.join(root, 'target', 'debug'))
+    );
+  });
 }
 
 export function firstExistingCli(candidates: string[]): string | undefined {

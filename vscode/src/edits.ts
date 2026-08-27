@@ -54,6 +54,9 @@ export function mergeEdits(edits: FileEdit[]): FileEdit[] {
       if (edit.previous !== undefined && current.previous === undefined) {
         current.previous = edit.previous;
       }
+      if (edit.next !== undefined) {
+        current.next = edit.next;
+      }
     } else {
       byPath.set(key, { ...edit, path: edit.path });
     }
@@ -115,6 +118,7 @@ export function editsFromToolUpdate(update: {
         added,
         removed,
         previous: oldText,
+        next: newText,
       });
     }
   }
