@@ -8,6 +8,7 @@ import {
   askCardForPlan,
   askCardForQuestion,
   cancelledAskResponse,
+  collectAskAnswer,
   exitPlanResponse,
   parseAskQuestions,
   parseExitPlan,
@@ -79,5 +80,27 @@ describe('plan ask wire', () => {
     const q = askCardForQuestion('r2', parseAskQuestions({ questions: [{ question: 'Go?' }] }), 0);
     assert.equal(q.total, 1);
     assert.equal(q.choices.at(-1)?.other, true);
+    assert.equal(q.multiSelect, false);
+  });
+
+  it('keeps multiSelect answers as a label list', () => {
+    const questions = parseAskQuestions({
+      questions: [
+        {
+          question: 'Pick stores',
+          multiSelect: true,
+          options: [{ label: 'Redis' }, { label: 'SQLite' }],
+        },
+      ],
+    });
+    assert.equal(questions[0].multiSelect, true);
+    const card = askCardForQuestion('r3', questions, 0);
+    assert.equal(card.multiSelect, true);
+    const collected = collectAskAnswer(questions[0], ['Redis', 'SQLite']);
+    assert.deepEqual(collected?.labels, ['Redis', 'SQLite']);
+    assert.equal(collectAskAnswer(questions[0], ['Other']), undefined);
+    const other = collectAskAnswer(questions[0], ['Redis', 'Other'], 'Valkey');
+    assert.deepEqual(other?.labels, ['Redis', 'Other']);
+    assert.equal(other?.annotation?.notes, 'Valkey');
   });
 });

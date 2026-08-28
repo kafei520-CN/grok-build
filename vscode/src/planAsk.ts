@@ -90,7 +90,55 @@ export function askCardForQuestion(
     choices: question?.options ?? withOtherOption([]),
     index,
     total: questions.length,
+    multiSelect: Boolean(question?.multiSelect),
   };
+}
+
+/** Labels + Other notes for one ask_user_question answer. */
+export function collectAskAnswer(
+  question: AskQuestion,
+  choiceIds: string[],
+  notes?: string,
+): { labels: string[]; annotation?: { notes: string } } | undefined {
+  const ids = uniqueChoiceIds(choiceIds);
+  if (!ids.length) {
+    return undefined;
+  }
+  const picked = question.multiSelect ? ids : ids.slice(0, 1);
+  const labels: string[] = [];
+  let other = false;
+  for (const id of picked) {
+    const choice = question.options.find((row) => row.id === id || row.label === id);
+    const isOther = Boolean(choice?.other) || id === OTHER_LABEL;
+    if (isOther) {
+      other = true;
+      labels.push(OTHER_LABEL);
+    } else {
+      labels.push(choice?.label ?? id);
+    }
+  }
+  const note = notes?.trim();
+  if (other && !note) {
+    return undefined;
+  }
+  return {
+    labels,
+    annotation: other && note ? { notes: note } : undefined,
+  };
+}
+
+function uniqueChoiceIds(choiceIds: string[]): string[] {
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const id of choiceIds) {
+    const key = id.trim();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    ids.push(key);
+  }
+  return ids;
 }
 
 export function askCardForPlan(requestId: string, plan: string): AskCard {

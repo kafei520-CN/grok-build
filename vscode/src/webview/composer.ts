@@ -1,11 +1,13 @@
 import { contextTone, formatTokens } from '../context';
 import { looksLikeFilePath } from '../edits';
 import { effortLabel } from '../i18n';
+import { lerpInt, liveEditSummary, type LiveEditSummary } from '../liveEdits';
 import { FALLBACK_COMMANDS, filterCommands } from '../slash';
 import type { Attachment, ChatState, ModelOption } from '../types';
+import { jumpBottomKind } from './scroll';
 import { canSend, canType, loc, post, render, tr, turnBusy, ui } from './app';
 import { iconButton } from './dom';
-import { iconChevron, iconPlus, iconStar, iconStop } from './icons';
+import { iconChevron, iconDown, iconPlus, iconStar, iconStop } from './icons';
 import { escapeHtml } from './markdown';
 
 const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
@@ -27,6 +29,10 @@ export function mountComposer(parent: HTMLElement): void {
   chips.style.display = 'none';
   const menuBox = document.createElement('div');
   menuBox.id = 'composer-menu-slot';
+  const live = document.createElement('div');
+  live.id = 'live-edits';
+  live.className = 'live-edits';
+  live.hidden = true;
   const card = document.createElement('div');
   card.id = 'composer-card';
   card.className = 'composer-card';
@@ -37,8 +43,14 @@ export function mountComposer(parent: HTMLElement): void {
   const bar = document.createElement('div');
   bar.id = 'composer-bar';
   bar.className = 'composer-bar';
-  card.append(input, bar);
-  footer.append(queue, chips, menuBox, card);
+  const jump = document.createElement('button');
+  jump.type = 'button';
+  jump.id = 'jump-bottom';
+  jump.className = 'jump-bottom';
+  jump.hidden = true;
+  jump.addEventListener('click', jumpToLatest);
+  card.append(jump, input, bar);
+  footer.append(queue, chips, menuBox, live, card);
   parent.append(footer);
   ui.composer = input;
 }
@@ -126,6 +138,8 @@ export function patchComposer(): void {
   } else if (bar) {
     patchContextMeter(bar);
   }
+  patchLiveEdits();
+  patchJumpBottom();
   if (input.dataset.composing !== '1') {
     autosize(input);
   }
@@ -172,14 +186,14 @@ function bindComposerInput(input: HTMLTextAreaElement): void {
   });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
-      if (ui.lightboxSrc) {
+      if (ui.lightboxSrc || ui.menu || ui.picker) {
+        event.preventDefault();
+        event.stopPropagation();
         ui.lightboxSrc = undefined;
+        ui.menu = undefined;
+        ui.picker = undefined;
         render();
-        return;
       }
-      ui.menu = undefined;
-      ui.picker = undefined;
-      render();
       return;
     }
     const sendKey = ui.state.multiline
@@ -650,4 +664,213 @@ function attachmentChip(attachment: Attachment): HTMLElement {
   x.addEventListener('click', () => post({ type: 'removeAttachment', id: attachment.id }));
   chip.append(label, x);
   return chip;
+}
+
+const TICK_MS = 280;
+let liveHideTimer: ReturnType<typeof setTimeout> | undefined;
+let liveRaf = 0;
+let liveShown = { files: 0, added: 0, removed: 0 };
+let liveFrom = { files: 0, added: 0, removed: 0 };
+let liveTo = { files: 0, added: 0, removed: 0 };
+let liveTickStart = 0;
+
+function patchLiveEdits(): void {
+  const wrap = document.getElementById('composer-wrap');
+  let el = document.getElementById('live-edits');
+  if (!el && wrap) {
+    el = document.createElement('div');
+    el.id = 'live-edits';
+    el.className = 'live-edits';
+    el.hidden = true;
+    const card = document.getElementById('composer-card');
+    wrap.insertBefore(el, card ?? null);
+  }
+  if (!el) {
+    return;
+  }
+  const summary = liveEditSummary(ui.state);
+  if (!summary) {
+    hideLiveEdits(el);
+    return;
+  }
+  if (liveHideTimer) {
+    clearTimeout(liveHideTimer);
+    liveHideTimer = undefined;
+  }
+  const first = el.hidden || el.childElementCount === 0;
+  if (first) {
+    el.replaceChildren(mountLiveEditsInner(summary));
+    liveShown = { files: 0, added: 0, removed: 0 };
+  }
+  el.hidden = false;
+  el.classList.remove('leave');
+  el.dataset.id = summary.messageId;
+  const label = el.querySelector('.live-edits-label');
+  if (label) {
+    label.textContent = tr('liveEdits', { n: summary.files });
+  }
+  const review = el.querySelector('.live-edits-review') as HTMLButtonElement | null;
+  if (review) {
+    review.onclick = () => post({ type: 'reviewEdits', messageId: summary.messageId });
+  }
+  tickLiveCounts(el, summary, first);
+}
+
+function mountLiveEditsInner(summary: LiveEditSummary): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  const rail = document.createElement('span');
+  rail.className = 'live-edits-rail';
+  const star = document.createElement('span');
+  star.className = 'mark pulse';
+  star.innerHTML = iconStar('11');
+  const label = document.createElement('span');
+  label.className = 'live-edits-label';
+  label.textContent = tr('liveEdits', { n: summary.files });
+  const stats = document.createElement('span');
+  stats.className = 'live-edits-stats';
+  stats.innerHTML =
+    '<span class="add" data-kind="added">+0</span> <span class="del" data-kind="removed">−0</span>';
+  const review = document.createElement('button');
+  review.type = 'button';
+  review.className = 'live-edits-review';
+  review.textContent = tr('review');
+  review.addEventListener('click', () =>
+    post({ type: 'reviewEdits', messageId: summary.messageId }),
+  );
+  frag.append(rail, star, label, stats, review);
+  return frag;
+}
+
+function hideLiveEdits(el: HTMLElement): void {
+  if (el.hidden || el.classList.contains('leave')) {
+    return;
+  }
+  el.classList.add('leave');
+  if (liveRaf) {
+    cancelAnimationFrame(liveRaf);
+    liveRaf = 0;
+  }
+  liveHideTimer = setTimeout(() => {
+    el.hidden = true;
+    el.classList.remove('leave');
+    el.replaceChildren();
+    liveShown = { files: 0, added: 0, removed: 0 };
+    liveHideTimer = undefined;
+  }, 180);
+}
+
+function tickLiveCounts(el: HTMLElement, summary: LiveEditSummary, first: boolean): void {
+  const next = { files: summary.files, added: summary.added, removed: summary.removed };
+  if (
+    liveShown.files === next.files &&
+    liveShown.added === next.added &&
+    liveShown.removed === next.removed &&
+    !first
+  ) {
+    return;
+  }
+  if (liveRaf) {
+    cancelAnimationFrame(liveRaf);
+  }
+  liveFrom = { ...liveShown };
+  liveTo = next;
+  liveTickStart = performance.now();
+  const step = (now: number) => {
+    const t = Math.min(1, (now - liveTickStart) / TICK_MS);
+    const files = lerpInt(liveFrom.files, liveTo.files, t);
+    const added = lerpInt(liveFrom.added, liveTo.added, t);
+    const removed = lerpInt(liveFrom.removed, liveTo.removed, t);
+    paintLiveCounts(el, files, added, removed, t < 1);
+    if (t < 1) {
+      liveRaf = requestAnimationFrame(step);
+      return;
+    }
+    liveRaf = 0;
+    liveShown = liveTo;
+    paintLiveCounts(el, liveTo.files, liveTo.added, liveTo.removed, false);
+  };
+  liveRaf = requestAnimationFrame(step);
+}
+
+export function jumpToLatest(): void {
+  ui.stickToBottom = true;
+  const transcript = document.getElementById('transcript');
+  if (transcript) {
+    transcript.scrollTop = transcript.scrollHeight;
+    ui.transcriptScroll = transcript.scrollTop;
+  }
+  patchJumpBottom();
+}
+
+export function patchJumpBottom(): void {
+  const card = document.getElementById('composer-card');
+  let el = document.getElementById('jump-bottom') as HTMLButtonElement | null;
+  if (!el && card) {
+    el = document.createElement('button');
+    el.type = 'button';
+    el.id = 'jump-bottom';
+    el.className = 'jump-bottom';
+    el.hidden = true;
+    el.addEventListener('click', jumpToLatest);
+    card.prepend(el);
+  }
+  if (!el) {
+    return;
+  }
+  const kind = jumpBottomKind({
+    stickToBottom: ui.stickToBottom,
+    streaming: ui.state.status === 'streaming',
+  });
+  if (kind === 'hidden') {
+    el.hidden = true;
+    el.classList.remove('dots');
+    return;
+  }
+  el.hidden = false;
+  el.title = kind === 'dots' ? tr('jumpBottomLive') : tr('jumpBottom');
+  el.setAttribute('aria-label', el.title);
+  const nextMode = kind === 'dots' ? 'dots' : 'arrow';
+  if (el.dataset.mode === nextMode && el.childElementCount > 0) {
+    return;
+  }
+  el.dataset.mode = nextMode;
+  el.classList.toggle('dots', kind === 'dots');
+  if (kind === 'dots') {
+    el.replaceChildren(jumpDots());
+  } else {
+    el.innerHTML = iconDown();
+  }
+}
+
+function jumpDots(): HTMLElement {
+  const row = document.createElement('span');
+  row.className = 'jump-dots';
+  row.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 3; i += 1) {
+    row.append(document.createElement('i'));
+  }
+  return row;
+}
+
+function paintLiveCounts(
+  el: HTMLElement,
+  files: number,
+  added: number,
+  removed: number,
+  ticking: boolean,
+): void {
+  const label = el.querySelector('.live-edits-label');
+  if (label) {
+    label.textContent = tr('liveEdits', { n: files });
+  }
+  const add = el.querySelector('[data-kind="added"]');
+  const del = el.querySelector('[data-kind="removed"]');
+  if (add) {
+    add.textContent = `+${added}`;
+    add.classList.toggle('tick', ticking && added !== liveFrom.added);
+  }
+  if (del) {
+    del.textContent = `−${removed}`;
+    del.classList.toggle('tick', ticking && removed !== liveFrom.removed);
+  }
 }

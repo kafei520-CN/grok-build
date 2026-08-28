@@ -77,4 +77,24 @@ describe('handleIncoming', () => {
     assert.equal(asks.length, 1);
     assert.equal(plans.length, 1);
   });
+
+  it('refuses workspace writes while Ask mode is on', async () => {
+    await assert.rejects(
+      () =>
+        handleIncoming(
+          host({ allowsFileWrites: () => false }),
+          'fs/write_text_file',
+          { path: '/tmp/a.ts', content: 'x' },
+          3,
+        ),
+      /Ask mode is read-only/,
+    );
+  });
+
+  it('answers mcp elicit with a typed cancel', async () => {
+    const result = await handleIncoming(host(), 'x.ai/mcp/elicit', { message: 'Need email' }, 9);
+    assert.deepEqual(result, { outcome: 'cancel' });
+    const done = await handleIncoming(host(), '_x.ai/mcp/elicit_complete', {}, '');
+    assert.deepEqual(done, {});
+  });
 });

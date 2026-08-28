@@ -66,6 +66,8 @@ export async function importSkillZips(paths: string[]): Promise<number> {
     try {
       await extractZip(filePath, tmp);
       imported += await importSkillRoots(await findSkillRoots(tmp));
+    } catch (error) {
+      plat().warn(`skill zip skipped: ${error instanceof Error ? error.message : error}`);
     } finally {
       await fs.rm(tmp, { recursive: true, force: true });
     }
@@ -215,7 +217,36 @@ async function uniqueDir(parent: string, stem: string): Promise<string> {
   return `${stem}-${Date.now()}`;
 }
 
+/** True when a zip/tar member would extract outside `dest`. */
+export function zipEntryUnsafe(dest: string, entry: string): boolean {
+  const name = entry.trim().replace(/\\/g, '/').replace(/^\.\/+/, '');
+  if (!name || name === '.') {
+    return false;
+  }
+  if (name.startsWith('/') || /^[A-Za-z]:/.test(name)) {
+    return true;
+  }
+  const parts = name.split('/').filter((part) => part && part !== '.');
+  if (parts.includes('..')) {
+    return true;
+  }
+  const root = path.resolve(dest);
+  const resolved = path.resolve(root, ...parts);
+  const rel = path.relative(root, resolved);
+  return rel.startsWith('..') || path.isAbsolute(rel);
+}
+
 async function extractZip(zipPath: string, dest: string): Promise<void> {
+  const listed = await execFileAsync('tar', ['-tf', zipPath], {
+    windowsHide: true,
+    maxBuffer: 8_000_000,
+  });
+  const destRoot = path.resolve(dest);
+  for (const line of String(listed.stdout).split(/\r?\n/)) {
+    if (zipEntryUnsafe(destRoot, line)) {
+      throw new Error(`unsafe skill zip path: ${line.trim()}`);
+    }
+  }
   await fs.mkdir(dest, { recursive: true });
   await execFileAsync('tar', ['-xf', zipPath, '-C', dest], { windowsHide: true });
 }

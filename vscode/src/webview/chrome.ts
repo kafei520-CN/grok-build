@@ -112,6 +112,12 @@ function moreMenu(): HTMLElement {
 }
 
 export function renderDrawer(): HTMLElement {
+  const layer = document.createElement('div');
+  layer.className = 'drawer-layer';
+  const scrim = document.createElement('div');
+  scrim.className = 'drawer-scrim';
+  scrim.title = tr('drawerClose');
+  scrim.addEventListener('click', () => post({ type: 'closeDrawer' }));
   const el = document.createElement('aside');
   el.className = 'drawer';
   const head = document.createElement('div');
@@ -159,7 +165,8 @@ export function renderDrawer(): HTMLElement {
     pre.textContent = ui.state.drawerBody ?? '';
     el.append(pre);
   }
-  return el;
+  layer.append(scrim, el);
+  return layer;
 }
 
 export function renderLightbox(): HTMLElement {

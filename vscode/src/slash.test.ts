@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { classifySlash, filterCommands, parseSlash, resolveAlias } from './slash';
+import { classifySlash, filterCommands, parseSlash, promptModeMeta, resolveAlias } from './slash';
 
 describe('slash routing', () => {
   it('parses command and args', () => {
@@ -45,5 +45,11 @@ describe('slash routing', () => {
     );
     assert.equal(hits.length, 1);
     assert.equal(hits[0].name, 'plan');
+  });
+
+  it('maps session modes onto prompt _meta.mode', () => {
+    assert.equal(promptModeMeta('ask'), 'ask');
+    assert.equal(promptModeMeta('plan'), 'plan');
+    assert.equal(promptModeMeta('default'), 'agent');
   });
 });

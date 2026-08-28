@@ -17,6 +17,7 @@ export interface IncomingHost {
   refreshDashboard?(): void;
   askUserQuestion?(params: unknown): Promise<unknown>;
   reviewPlan?(params: unknown): Promise<unknown>;
+  allowsFileWrites?(): boolean;
 }
 
 export async function handleIncoming(
@@ -58,10 +59,20 @@ export async function handleIncoming(
     }
     return controller.reviewPlan(params);
   }
+  if (name === 'x.ai/mcp/elicit') {
+    // Headless Cancel: keep the turn alive instead of Method not found.
+    return { outcome: 'cancel' };
+  }
+  if (name === 'x.ai/mcp/elicit_complete') {
+    return {};
+  }
   if (name === 'fs/read_text_file') {
     return readWorkspaceFile(params);
   }
   if (name === 'fs/write_text_file') {
+    if (controller.allowsFileWrites && !controller.allowsFileWrites()) {
+      throw new Error('Ask mode is read-only. Switch to Agent mode to edit files.');
+    }
     const filePath = asString(asObject(params)['path']);
     if (filePath) {
       await controller.journal.remember(filePath);

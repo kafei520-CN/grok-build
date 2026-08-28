@@ -17,13 +17,12 @@ import { installHint, resolveGrokBinary } from './cli';
 import { ContextMeter } from './contextMeter';
 import { EditJournal } from './editJournal';
 import { applyDiffStats, publicEdits } from './edits';
-import { handleIncoming, parsePermissionOptions } from './incoming';
+import { handleIncoming } from './incoming';
 import { tr, uiLocale } from './locale';
 import { logError, logInfo, logWarn, showLog } from './logger';
 import { buildPromptBlocks } from './prompt';
 import { formatAgentError, formatErrorLine, isCancelError } from './errors';
-import { RpcError } from './rpc';
-import { normalizeSetting, readGrokSettings, writeGrokSetting } from './settings';
+import { readGrokSettings } from './settings';
 import {
   applySessionUpdate,
   finalizeReplayTimes,
@@ -31,53 +30,26 @@ import {
   mergeModelCatalog,
   modelsFromResult,
 } from './sessionUpdates';
-import { FALLBACK_COMMANDS, classifySlash, modeLabel, type HostAction } from './slash';
+import { FALLBACK_COMMANDS, classifySlash, modeLabel, promptModeMeta, type HostAction } from './slash';
 import { bindPlatform, plat, type Platform } from './platform';
-import {
-  deleteRule as removeRuleFile,
-  importRuleFiles,
-  listRules,
-  toggleRule as toggleRuleFile,
-} from './rulesHost';
-import {
-  deleteSkill as removeSkillDir,
-  importSkillFolders,
-  importSkillZips,
-  listSkills,
-  toggleSkill as toggleSkillDir,
-} from './skillsHost';
-import { listApiEndpoints, removeApiEndpoint, saveApiEndpoint } from './apiEndpoints';
-import {
-  deleteAgent as removeAgentFile,
-  importAgentFiles,
-  listAgents,
-  toggleAgent as toggleAgentFile,
-} from './agentsHost';
-import {
-  deletePersona as removePersonaFile,
-  importPersonaFiles,
-  listPersonas,
-  togglePersona as togglePersonaFile,
-} from './personasHost';
+
 import { gitProbePaths } from './fork';
-import { listMemoryFiles, latestPlan } from './memoryHost';
-import {
-  OTHER_LABEL,
-  PLAN_DECLINE,
-  PLAN_DECLINE_FEEDBACK,
-  PLAN_EXECUTE,
-  PLAN_SUPPLEMENT,
-  acceptedAskResponse,
-  askCardForPlan,
-  askCardForQuestion,
-  cancelledAskResponse,
-  exitPlanResponse,
-  parseAskQuestions,
-  parseExitPlan,
-  type AskQuestion,
-} from './planAsk';
-import { rosterFromHistory } from './roster';
 import { runSlashAction, type SlashRuntime } from './slashHost';
+import {
+  abortClientRpcs,
+  answerAsk as answerAskRpc,
+  askUserQuestion as askUserQuestionRpc,
+  cancelAsk as cancelAskRpc,
+  cancelPermission as cancelPermissionRpc,
+  choosePermission as choosePermissionRpc,
+  requestToolPermission as requestToolPermissionRpc,
+  reviewPlan as reviewPlanRpc,
+  type PendingAsk,
+  type PendingPermission,
+  type ReverseHost,
+} from './reverseRpc';
+import * as drawers from './settingsDrawers';
+import type { SettingsHost } from './settingsDrawers';
 import type {
   AccountInfo,
   AgentDefItem,
@@ -109,34 +81,13 @@ import type {
   TaskItem,
   MemoryFile,
 } from './types';
-import { parseMcpList } from './mcpHost';
-import {
-  cancelledPermission,
-  pickAllowOption,
-  selectedPermission,
-  sessionPermissionMeta,
-  settlePending,
-  shouldAutoApprove,
-} from './permissions';
+import { sessionPermissionMeta } from './permissions';
 import { disposeAllTerminals } from './acpTerminal';
 import { AGENT_RECONNECT_MAX, reconnectDelayMs } from './reconnect';
 import { workspaceStartupHints } from './startup';
 import { DEFAULT_THEME, normalizeTheme } from './theme';
 
-interface PendingPermission {
-  resolve: (value: unknown) => void;
-}
-
-interface PendingAsk {
-  resolve: (value: unknown) => void;
-  kind: 'question' | 'plan';
-  questions: AskQuestion[];
-  index: number;
-  answers: Record<string, string[]>;
-  annotations: Record<string, { notes?: string }>;
-}
-
-export class GrokController implements SlashRuntime {
+export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   agent?: GrokAgent;
   status: ChatStatus = 'connecting';
   messages: ChatMessage[] = [];
@@ -173,42 +124,42 @@ export class GrokController implements SlashRuntime {
   private error?: string;
   private account?: AccountInfo;
   private loginView?: ChatState['login'];
-  private models?: ChatState['models'];
-  private permission?: PermissionPrompt;
-  private ask?: AskCard;
-  private askPending?: PendingAsk;
+  models?: ChatState['models'];
+  permission?: PermissionPrompt;
+  ask?: AskCard;
+  askPending?: PendingAsk;
   private cliPath?: string;
   private agentVersion?: string;
-  private modeId = 'default';
+  modeId = 'default';
   private commands: SlashCommandInfo[] = FALLBACK_COMMANDS;
-  private sessions?: SessionRow[];
-  private currentSessionId?: string;
+  sessions?: SessionRow[];
+  currentSessionId?: string;
   private sessionCwd?: string;
   private restoringSession = false;
   private replaying = false;
   private authSeq = 0;
-  private turn = 0;
+  turn = 0;
   private starting?: Promise<void>;
   private wantAgent = false;
   private reconnectFails = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
-  private readonly pendingPermissions = new Map<string, PendingPermission>();
+  readonly pendingPermissions = new Map<string, PendingPermission>();
   private readonly listeners = new Set<(state: ChatState) => void>();
   private readonly streamListeners = new Set<(tail: import('./types').StreamTail) => void>();
   private emitTimer?: ReturnType<typeof setTimeout>;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
-  private modelsReloadSeq = 0;
+  modelsReloadSeq = 0;
   private pendingModelId?: string;
   private pendingEffort?: string;
   private runGen = 0;
   private agentGen = 0;
   private sessionOp = 0;
   private hideSessionPreview = false;
-  private dashSeq = 0;
-  private dashTimer?: ReturnType<typeof setTimeout>;
-  private taskSeq = 0;
-  private taskTimer?: ReturnType<typeof setTimeout>;
+  dashSeq = 0;
+  dashTimer?: ReturnType<typeof setTimeout>;
+  taskSeq = 0;
+  taskTimer?: ReturnType<typeof setTimeout>;
   private readonly disposables: Array<{ dispose(): void }> = [];
   readonly journal: EditJournal;
   readonly meter: ContextMeter;
@@ -249,18 +200,10 @@ export class GrokController implements SlashRuntime {
 
   dispose(): void {
     this.wantAgent = false;
-    this.abortClientRpcs('cancel');
+    abortClientRpcs(this, 'cancel');
     this.flushEmitTimer();
-    this.dashSeq += 1;
-    if (this.dashTimer) {
-      clearTimeout(this.dashTimer);
-      this.dashTimer = undefined;
-    }
-    this.taskSeq += 1;
-    if (this.taskTimer) {
-      clearTimeout(this.taskTimer);
-      this.taskTimer = undefined;
-    }
+    drawers.stopDashboardPoll(this);
+    drawers.stopTaskPoll(this);
     if (this.searchTimer) {
       clearTimeout(this.searchTimer);
       this.searchTimer = undefined;
@@ -382,7 +325,7 @@ export class GrokController implements SlashRuntime {
     this.runGen += 1;
     this.sessionOp += 1;
     this.reconnectFails = 0;
-    this.abortClientRpcs('cancel');
+    abortClientRpcs(this, 'cancel');
     this.queue = [];
     this.dropAgent();
     this.messages = [];
@@ -397,7 +340,7 @@ export class GrokController implements SlashRuntime {
     this.messages = [];
     this.journal.clear();
     this.drawer = undefined;
-    this.stopDashboardPoll();
+    drawers.stopDashboardPoll(this);
     this.replaying = false;
     this.restoringSession = false;
     this.hideSessionPreview = true;
@@ -479,7 +422,7 @@ export class GrokController implements SlashRuntime {
     } catch (error) {
       logError('logout failed', error);
     }
-    this.abortClientRpcs('cancel');
+    abortClientRpcs(this, 'cancel');
     this.account = undefined;
     this.messages = [];
     this.journal.clear();
@@ -580,7 +523,7 @@ export class GrokController implements SlashRuntime {
     this.attachments = [];
     this.setStatus('streaming');
     try {
-      await agent.prompt(blocks);
+      await agent.prompt(blocks, { mode: promptModeMeta(this.modeId) });
     } catch (error) {
       if (run !== this.runGen) {
         return;
@@ -604,7 +547,7 @@ export class GrokController implements SlashRuntime {
 
   cancelTurn(): void {
     this.runGen += 1;
-    this.abortClientRpcs('cancel');
+    abortClientRpcs(this, 'cancel');
     this.agent?.cancelTurn();
     this.queue = [];
     if (this.status === 'streaming') {
@@ -613,161 +556,28 @@ export class GrokController implements SlashRuntime {
     }
   }
 
-  choosePermission(optionId: string): void {
-    const current = this.permission;
-    if (!current) {
-      return;
-    }
-    const pending = this.pendingPermissions.get(current.requestId);
-    pending?.resolve({
-      outcome: { outcome: 'selected', optionId },
-    });
-    this.pendingPermissions.delete(current.requestId);
-    this.permission = undefined;
-    this.emit();
+  async choosePermission(optionId: string): Promise<void> {
+    await choosePermissionRpc(this, optionId);
   }
 
   cancelPermission(): void {
-    const current = this.permission;
-    if (!current) {
-      return;
-    }
-    const pending = this.pendingPermissions.get(current.requestId);
-    pending?.resolve(cancelledPermission());
-    this.pendingPermissions.delete(current.requestId);
-    this.permission = undefined;
-    this.emit();
+    cancelPermissionRpc(this);
   }
 
   async askUserQuestion(params: unknown): Promise<unknown> {
-    const questions = parseAskQuestions(params);
-    if (!questions.length) {
-      return cancelledAskResponse();
-    }
-    this.dismissAsk('replace');
-    const requestId = `ask-${++this.turn}`;
-    this.ask = askCardForQuestion(requestId, questions, 0);
-    this.emit();
-    return new Promise((resolve) => {
-      this.askPending = {
-        resolve,
-        kind: 'question',
-        questions,
-        index: 0,
-        answers: {},
-        annotations: {},
-      };
-    });
+    return askUserQuestionRpc(this, params);
   }
 
   async reviewPlan(params: unknown): Promise<unknown> {
-    const parsed = parseExitPlan(params);
-    const plan = parsed.plan?.trim() || latestPlan(this.messages);
-    this.dismissAsk('replace');
-    const requestId = `plan-${++this.turn}`;
-    this.ask = askCardForPlan(requestId, plan);
-    this.emit();
-    return new Promise((resolve) => {
-      this.askPending = {
-        resolve,
-        kind: 'plan',
-        questions: [],
-        index: 0,
-        answers: {},
-        annotations: {},
-      };
-    });
+    return reviewPlanRpc(this, params);
   }
 
-  answerAsk(choiceId: string, notes?: string): void {
-    const pending = this.askPending;
-    const card = this.ask;
-    if (!pending || !card) {
-      return;
-    }
-    if (pending.kind === 'plan') {
-      this.finishPlanAsk(choiceId, notes);
-      return;
-    }
-    const question = pending.questions[pending.index];
-    if (!question) {
-      this.finishAsk(cancelledAskResponse());
-      return;
-    }
-    const choice = question.options.find((row) => row.id === choiceId || row.label === choiceId);
-    const other = Boolean(choice?.other) || choiceId === OTHER_LABEL;
-    const note = notes?.trim();
-    if (other && !note) {
-      return;
-    }
-    pending.answers[question.text] = [other ? OTHER_LABEL : choice?.label ?? choiceId];
-    if (other && note) {
-      pending.annotations[question.text] = { notes: note };
-    }
-    pending.index += 1;
-    if (pending.index >= pending.questions.length) {
-      this.finishAsk(acceptedAskResponse(pending.answers, pending.annotations));
-      return;
-    }
-    this.ask = askCardForQuestion(card.requestId, pending.questions, pending.index);
-    this.emit();
+  answerAsk(choiceIds: string[], notes?: string): void {
+    answerAskRpc(this, choiceIds, notes);
   }
 
   cancelAsk(): void {
-    this.dismissAsk('cancel');
-    this.emit();
-  }
-
-  private finishPlanAsk(choiceId: string, notes?: string): void {
-    if (choiceId === PLAN_EXECUTE) {
-      this.finishAsk(exitPlanResponse('approved'));
-      return;
-    }
-    if (choiceId === PLAN_SUPPLEMENT) {
-      const note = notes?.trim();
-      if (!note) {
-        return;
-      }
-      this.finishAsk(exitPlanResponse('cancelled', note));
-      return;
-    }
-    if (choiceId === PLAN_DECLINE) {
-      this.finishAsk(exitPlanResponse('cancelled', PLAN_DECLINE_FEEDBACK));
-    }
-  }
-
-  private finishAsk(value: unknown): void {
-    const pending = this.askPending;
-    this.askPending = undefined;
-    this.ask = undefined;
-    pending?.resolve(value);
-    this.emit();
-  }
-
-  private dismissAsk(reason: 'cancel' | 'replace'): void {
-    const pending = this.askPending;
-    if (!pending) {
-      this.ask = undefined;
-      return;
-    }
-    this.askPending = undefined;
-    this.ask = undefined;
-    pending.resolve(
-      pending.kind === 'plan'
-        ? exitPlanResponse('cancelled', reason === 'cancel' ? PLAN_DECLINE_FEEDBACK : undefined)
-        : cancelledAskResponse(),
-    );
-  }
-
-  private dismissPermissions(): void {
-    settlePending(this.pendingPermissions, cancelledPermission());
-    this.permission = undefined;
-  }
-
-  /** Answer every reverse ACP request so the CLI is not left waiting. */
-  private abortClientRpcs(reason: 'cancel' | 'replace'): void {
-    this.dismissAsk(reason);
-    this.dismissPermissions();
+    cancelAskRpc(this);
   }
 
   private dropAgent(): void {
@@ -788,7 +598,7 @@ export class GrokController implements SlashRuntime {
       return;
     }
     this.agent = undefined;
-    this.abortClientRpcs('cancel');
+    abortClientRpcs(this, 'cancel');
     disposeAllTerminals();
     this.agentGen += 1;
     if (!this.wantAgent) {
@@ -928,13 +738,17 @@ export class GrokController implements SlashRuntime {
       return;
     }
     try {
-      await this.agent?.setMode(modeId);
-      this.modeId = modeId;
-      this.note(`Mode: ${modeLabel(modeId)}`);
-      this.emit();
+      await this.applySessionMode(modeId);
     } catch (error) {
       this.fail('Could not change mode', error);
     }
+  }
+
+  async applySessionMode(modeId: string): Promise<void> {
+    await this.agent?.setMode(modeId);
+    this.modeId = modeId;
+    this.note(`Mode: ${modeLabel(modeId)}`);
+    this.emit();
   }
 
   async compact(note?: string): Promise<void> {
@@ -1099,7 +913,7 @@ export class GrokController implements SlashRuntime {
     this.messages = [];
     this.journal.clear();
     this.drawer = undefined;
-    this.stopDashboardPoll();
+    drawers.stopDashboardPoll(this);
     this.hideSessionPreview = false;
     this.restoringSession = true;
     this.replaying = true;
@@ -1219,797 +1033,71 @@ export class GrokController implements SlashRuntime {
     void this.reviewEdits(messageId, filePath);
   }
 
-  closeDrawer(): void {
-    this.drawer = undefined;
-    this.drawerBody = undefined;
-    this.stopDashboardPoll();
-    this.stopTaskPoll();
-    this.emit();
-  }
-
-  async openDashboard(): Promise<void> {
-    this.settingsOpen = false;
-    this.drawer = 'dashboard';
-    this.emit();
-    await this.refreshDashboardInner();
-  }
-
-  refreshDashboard(): void {
-    if (this.drawer !== 'dashboard') {
-      return;
-    }
-    void this.refreshDashboardInner();
-  }
-
-  stopRosterSession(sessionId: string): void {
-    if (sessionId === this.currentSessionId) {
-      this.cancelTurn();
-      this.refreshDashboard();
-      return;
-    }
-    this.agent?.cancelSession(sessionId);
-    this.refreshDashboard();
-  }
-
-  async cancelSubagent(subagentId: string): Promise<void> {
-    try {
-      await this.agent?.cancelSubagent(subagentId);
-    } catch (error) {
-      plat().warn(error instanceof Error ? error.message : String(error));
-    }
-    this.refreshDashboard();
-  }
-
+  closeDrawer(): void { drawers.closeDrawer(this); }
+  async openDashboard(): Promise<void> { await drawers.openDashboard(this); }
+  refreshDashboard(): void { drawers.refreshDashboard(this); }
+  stopRosterSession(sessionId: string): void { drawers.stopRosterSession(this, sessionId); }
+  async cancelSubagent(subagentId: string): Promise<void> { await drawers.cancelSubagent(this, subagentId); }
   async dashboardDispatch(text: string, sessionId?: string): Promise<void> {
-    const trimmed = text.trim();
-    if (!trimmed) {
-      return;
-    }
-    if (sessionId && sessionId !== this.currentSessionId) {
-      const row = this.roster.find((item) => item.id === sessionId);
-      await this.loadSession(sessionId, row?.cwd);
-    } else {
-      this.closeDrawer();
-    }
-    await this.send(trimmed);
-  }
-
-  private stopDashboardPoll(): void {
-    this.dashSeq += 1;
-    if (this.dashTimer) {
-      clearTimeout(this.dashTimer);
-      this.dashTimer = undefined;
-    }
-  }
-
-  private async refreshDashboardInner(): Promise<void> {
-    const seq = ++this.dashSeq;
-    if (this.dashTimer) {
-      clearTimeout(this.dashTimer);
-      this.dashTimer = undefined;
-    }
-    try {
-      try {
-        this.roster = (await this.agent?.listRoster()) ?? [];
-      } catch (error) {
-        logWarn(`roster: ${error instanceof Error ? error.message : error}`);
-        this.roster = [];
-      }
-      if (!this.roster.length) {
-        if (!this.sessions?.length) {
-          await this.refreshSessionsSilent();
-        }
-        this.roster = rosterFromHistory(
-          this.sessions ?? [],
-          this.currentSessionId,
-          this.status === 'streaming',
-        );
-      }
-      const sid = this.currentSessionId ?? this.agent?.sessionId;
-      try {
-        this.subagents = sid ? ((await this.agent?.listRunningSubagents(sid)) ?? []) : [];
-      } catch (error) {
-        logWarn(`subagents: ${error instanceof Error ? error.message : error}`);
-        this.subagents = [];
-      }
-      if (seq === this.dashSeq) {
-        this.emit();
-      }
-    } catch (error) {
-      logWarn(`dashboard: ${error instanceof Error ? error.message : error}`);
-    }
-    if (this.drawer === 'dashboard' && seq === this.dashSeq) {
-      this.dashTimer = setTimeout(() => {
-        if (this.drawer === 'dashboard') {
-          void this.refreshDashboardInner();
-        }
-      }, 2500);
-    }
-  }
-
-  openSettings(): void {
-    this.drawer = undefined;
-    this.stopDashboardPoll();
-    this.settingsOpen = true;
-    this.settingsPage = 'main';
-    this.emit();
-    void this.refreshRules();
-    void this.refreshSkills();
-    void this.refreshApis();
-    void this.refreshMcps();
-    void this.refreshAgents();
-    void this.refreshPersonas();
-  }
-
-  closeSettings(): void {
-    this.settingsOpen = false;
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  openRules(): void {
-    this.settingsOpen = true;
-    this.settingsPage = 'rules';
-    this.emit();
-    void this.refreshRules();
-  }
-
-  closeRules(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  async importRules(): Promise<void> {
-    const picked = await plat().openFiles({
-      title: tr('settingsRulesImport'),
-      filters: { Markdown: ['md'], Text: ['txt'] },
-    });
-    if (!picked?.length) {
-      return;
-    }
-    const n = await importRuleFiles(picked);
-    await this.refreshRules();
-    plat().info(tr('settingsRulesImported', { n }));
-  }
-
-  async toggleRule(id: string): Promise<void> {
-    await toggleRuleFile(id);
-    await this.refreshRules();
-  }
-
-  async deleteRule(id: string): Promise<void> {
-    const row = this.rules.find((item) => item.id === id);
-    const ok = await plat().confirm(
-      tr('settingsRulesDeleteConfirm', { name: row?.name ?? id }),
-      tr('settingsRulesDelete'),
-    );
-    if (!ok) {
-      return;
-    }
-    await removeRuleFile(id);
-    await this.refreshRules();
-  }
-
-  openRule(id: string): void {
-    void plat().openFile(id, false);
-  }
-
-  private async refreshRules(): Promise<void> {
-    try {
-      this.rules = await listRules();
-      this.emit();
-    } catch (error) {
-      logWarn(`rules list: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  openSkills(): void {
-    this.settingsOpen = true;
-    this.settingsPage = 'skills';
-    this.emit();
-    void this.refreshSkills();
-  }
-
-  closeSkills(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  async importSkillZip(): Promise<void> {
-    const picked = await plat().openFiles({
-      title: tr('settingsSkillsImportZip'),
-      filters: { Zip: ['zip'] },
-    });
-    if (!picked?.length) {
-      return;
-    }
-    const n = await importSkillZips(picked);
-    await this.refreshSkills();
-    plat().info(tr('settingsSkillsImported', { n }));
-  }
-
-  async importSkillFolder(): Promise<void> {
-    const picked = await plat().openFolders({ title: tr('settingsSkillsImportFolder') });
-    if (!picked?.length) {
-      return;
-    }
-    const n = await importSkillFolders(picked);
-    await this.refreshSkills();
-    plat().info(tr('settingsSkillsImported', { n }));
-  }
-
-  async toggleSkill(id: string): Promise<void> {
-    await toggleSkillDir(id);
-    await this.refreshSkills();
-  }
-
-  async deleteSkill(id: string): Promise<void> {
-    const row = this.skills.find((item) => item.id === id);
-    const ok = await plat().confirm(
-      tr('settingsSkillsDeleteConfirm', { name: row?.name ?? id }),
-      tr('settingsSkillsDelete'),
-    );
-    if (!ok) {
-      return;
-    }
-    await removeSkillDir(id);
-    await this.refreshSkills();
-  }
-
-  openSkill(id: string): void {
-    const row = this.skills.find((item) => item.id === id);
-    void plat().openFile(row?.skillFile ?? id, false);
-  }
-
-  private async refreshSkills(): Promise<void> {
-    try {
-      this.skills = await listSkills();
-      this.emit();
-    } catch (error) {
-      logWarn(`skills list: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  openApis(): void {
-    this.settingsOpen = true;
-    this.settingsPage = 'apis';
-    this.emit();
-    void this.refreshApis();
-  }
-
-  closeApis(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  openTheme(): void {
-    this.settingsOpen = true;
-    this.settingsPage = 'theme';
-    this.emit();
-  }
-
-  closeTheme(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  openMcps(): void {
-    this.settingsOpen = true;
-    this.settingsPage = 'mcps';
-    this.emit();
-    void this.refreshMcps();
-  }
-
-  closeMcps(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  openAgents(): void {
-    this.drawer = undefined;
-    this.stopDashboardPoll();
-    this.settingsOpen = true;
-    this.settingsPage = 'agents';
-    this.emit();
-    void this.refreshAgents();
-    void this.refreshPersonas();
-  }
-
-  closeAgents(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  async importAgents(): Promise<void> {
-    const picked = await plat().openFiles({
-      title: tr('settingsAgentsImport'),
-      filters: { Markdown: ['md'], Text: ['txt'] },
-    });
-    if (!picked?.length) {
-      return;
-    }
-    const n = await importAgentFiles(picked);
-    await this.refreshAgents();
-    plat().info(tr('settingsAgentsImported', { n }));
-  }
-
-  async toggleAgent(id: string): Promise<void> {
-    const row = this.agents.find((item) => item.id === id);
-    if (!row?.filePath) {
-      return;
-    }
-    await toggleAgentFile(row.filePath);
-    await this.refreshAgents();
-  }
-
-  async deleteAgent(id: string): Promise<void> {
-    const row = this.agents.find((item) => item.id === id);
-    if (!row?.filePath) {
-      return;
-    }
-    const ok = await plat().confirm(
-      tr('settingsAgentsDeleteConfirm', { name: row.name }),
-      tr('settingsRulesDelete'),
-    );
-    if (!ok) {
-      return;
-    }
-    await removeAgentFile(row.filePath);
-    if (this.agentProfile === row.name) {
-      await this.setAgentProfile('');
-    }
-    await this.refreshAgents();
-  }
-
-  openAgent(id: string): void {
-    const row = this.agents.find((item) => item.id === id);
-    if (row?.filePath) {
-      void plat().openFile(row.filePath, false);
-    }
-  }
-
-  async setAgentProfile(name: string): Promise<void> {
-    const next = name.trim() && name !== 'grok-build' ? name.trim() : undefined;
-    this.agentProfile = next;
-    await plat().setState('ui.agentProfile', next ?? '');
-    this.emit();
-    plat().info(tr('settingsAgentsApplied', { name: next ?? 'grok-build' }));
-  }
-
-  async importPersonas(): Promise<void> {
-    const picked = await plat().openFiles({
-      title: tr('settingsPersonasImport'),
-      filters: { TOML: ['toml'] },
-    });
-    if (!picked?.length) {
-      return;
-    }
-    const n = await importPersonaFiles(picked);
-    await this.refreshPersonas();
-    plat().info(tr('settingsPersonasImported', { n }));
-  }
-
-  async togglePersona(id: string): Promise<void> {
-    const row = this.personas.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    await togglePersonaFile(row.filePath);
-    await this.refreshPersonas();
-  }
-
-  async deletePersona(id: string): Promise<void> {
-    const row = this.personas.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    const ok = await plat().confirm(
-      tr('settingsPersonasDeleteConfirm', { name: row.name }),
-      tr('settingsRulesDelete'),
-    );
-    if (!ok) {
-      return;
-    }
-    await removePersonaFile(row.filePath);
-    await this.refreshPersonas();
-  }
-
-  openPersona(id: string): void {
-    const row = this.personas.find((item) => item.id === id);
-    if (row) {
-      void plat().openFile(row.filePath, false);
-    }
-  }
-
-  private async refreshAgents(): Promise<void> {
-    try {
-      this.agents = await listAgents();
-      this.emit();
-    } catch (error) {
-      logWarn(`agents list: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  private async refreshPersonas(): Promise<void> {
-    try {
-      this.personas = await listPersonas();
-      this.emit();
-    } catch (error) {
-      logWarn(`personas list: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  openWorktrees(): void {
-    this.drawer = undefined;
-    this.stopDashboardPoll();
-    this.settingsOpen = true;
-    this.settingsPage = 'worktrees';
-    this.emit();
-    void this.refreshWorktrees();
-  }
-
-  closeWorktrees(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  async applyWorktree(id: string): Promise<void> {
-    const agent = this.agent;
-    if (!agent) {
-      return;
-    }
-    if (!this.worktrees.length) {
-      await this.refreshWorktrees();
-    }
-    const wt =
-      this.worktrees.find((item) => item.id === id || item.path === id) ??
-      this.worktrees.find((item) => item.sessionId === id);
-    const roster = this.roster.find((item) => item.id === id || item.cwd === id);
-    const wtPath = wt?.path || roster?.cwd || id;
-    const sessionId = wt?.sessionId ?? roster?.id ?? this.currentSessionId;
-    if (!sessionId || !wtPath) {
-      plat().warn(tr('settingsWorktreesNeedSession'));
-      return;
-    }
-    const mode = await plat().pick(tr('settingsWorktreesApply'), [
-      { label: tr('settingsWorktreesMerge'), description: tr('settingsWorktreesMergeHint'), value: 'merge' as const },
-      {
-        label: tr('settingsWorktreesOverwrite'),
-        description: tr('settingsWorktreesOverwriteHint'),
-        value: 'overwrite' as const,
-      },
-    ]);
-    if (!mode) {
-      return;
-    }
-    try {
-      const result = await agent.applyWorktree(sessionId, wtPath, mode);
-      if (result.ok) {
-        plat().info(tr('settingsWorktreesApplyOk', { n: result.files ?? 0 }));
-      } else {
-        plat().warn(tr('settingsWorktreesApplyConflict', { n: result.conflicts ?? 0 }));
-      }
-      await this.refreshWorktrees();
-    } catch (error) {
-      this.fail('Worktree apply failed', error);
-    }
-  }
-
-  async removeWorktree(id: string): Promise<void> {
-    const row = this.worktrees.find((item) => item.id === id);
-    const ok = await plat().confirm(
-      tr('settingsWorktreesRemoveConfirm', { name: row?.label ?? row?.path ?? id }),
-      tr('settingsWorktreesRemove'),
-    );
-    if (!ok) {
-      return;
-    }
-    try {
-      await this.agent?.removeWorktree(row?.path ?? row?.id ?? id);
-      plat().info(tr('settingsWorktreesRemoved'));
-      await this.refreshWorktrees();
-    } catch (error) {
-      this.fail('Worktree remove failed', error);
-    }
-  }
-
-  private async refreshWorktrees(): Promise<void> {
-    try {
-      this.worktrees = (await this.agent?.listWorktrees()) ?? [];
-      this.emit();
-    } catch (error) {
-      logWarn(`worktrees: ${error instanceof Error ? error.message : error}`);
-      this.worktrees = [];
-      this.emit();
-    }
-  }
-
-  openExt(tab?: string): void {
-    this.drawer = undefined;
-    this.stopDashboardPoll();
-    this.settingsOpen = true;
-    this.settingsPage = 'extensions';
-    if (tab === 'marketplace' || tab === 'hooks' || tab === 'workflows' || tab === 'plugins') {
-      this.extTab = tab;
-    }
-    this.emit();
-    void this.refreshExt();
-  }
-
-  closeExt(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  setExtTab(tab: 'plugins' | 'marketplace' | 'hooks' | 'workflows'): void {
-    this.extTab = tab;
-    this.emit();
-    void this.refreshExt();
-  }
-
-  async togglePlugin(id: string): Promise<void> {
-    const row = this.plugins.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    const action = row.enabled
-      ? { type: 'disable', pluginId: row.id }
-      : { type: 'enable', pluginId: row.id };
-    await this.runPluginAction(action);
-  }
-
-  async uninstallPlugin(id: string): Promise<void> {
-    const row = this.plugins.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    const ok = await plat().confirm(tr('settingsPluginsDeleteConfirm', { name: row.name }), tr('settingsRulesDelete'));
-    if (!ok) {
-      return;
-    }
-    await this.runPluginAction({ type: 'uninstall', pluginId: row.id, confirmed: true });
-  }
-
-  async toggleHook(id: string): Promise<void> {
-    const row = this.hooks.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    const action = row.enabled
-      ? { type: 'disable', hookName: row.name }
-      : { type: 'enable', hookName: row.name };
-    try {
-      const result = await this.agent?.hookAction(action);
-      if (result && !result.ok) {
-        plat().warn(result.message);
-      }
-      await this.refreshExt();
-    } catch (error) {
-      plat().warn(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async installMarketplace(id: string): Promise<void> {
-    const row = this.marketplace.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    try {
-      const result = await this.agent?.marketplaceAction({
-        type: 'install',
-        sourceUrlOrPath: row.sourceUrl,
-        pluginRelativePath: row.relativePath,
-      });
-      plat().info(result?.message ?? tr('settingsMarketplaceInstalled'));
-      await this.refreshExt();
-    } catch (error) {
-      plat().warn(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async refreshMarketplace(): Promise<void> {
-    try {
-      await this.agent?.marketplaceAction({ type: 'refresh' });
-    } catch (error) {
-      logWarn(`marketplace refresh: ${error instanceof Error ? error.message : error}`);
-    }
-    await this.refreshExt();
-  }
-
-  async runWorkflow(name: string): Promise<void> {
-    this.closeSettings();
-    await this.sendAgentSlash(`/workflow ${name}`);
-  }
-
-  private async runPluginAction(action: Record<string, unknown>): Promise<void> {
-    try {
-      const result = await this.agent?.pluginAction(action);
-      if (result && !result.ok) {
-        plat().warn(result.message);
-      } else if (result?.message) {
-        plat().info(result.message);
-      }
-      await this.refreshExt();
-    } catch (error) {
-      plat().warn(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async refreshExt(): Promise<void> {
-    const tab = this.extTab;
-    try {
-      if (tab === 'plugins') {
-        this.plugins = (await this.agent?.listPlugins()) ?? [];
-      } else if (tab === 'hooks') {
-        this.hooks = (await this.agent?.listHooks()) ?? [];
-      } else if (tab === 'marketplace') {
-        this.marketplace = (await this.agent?.listMarketplace()) ?? [];
-      } else {
-        this.workflows = (await this.agent?.listWorkflows()) ?? [];
-      }
-      this.emit();
-    } catch (error) {
-      logWarn(`extensions ${tab}: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  async openTasks(): Promise<void> {
-    this.settingsOpen = false;
-    this.drawer = 'tasks';
-    this.emit();
-    await this.refreshTasksInner();
-  }
-
-  async killTask(taskId: string): Promise<void> {
-    try {
-      await this.agent?.killTask(taskId);
-    } catch (error) {
-      plat().warn(error instanceof Error ? error.message : String(error));
-    }
-    await this.refreshTasksInner();
-  }
-
-  private stopTaskPoll(): void {
-    this.taskSeq += 1;
-    if (this.taskTimer) {
-      clearTimeout(this.taskTimer);
-      this.taskTimer = undefined;
-    }
-  }
-
-  private async refreshTasksInner(): Promise<void> {
-    const seq = ++this.taskSeq;
-    if (this.taskTimer) {
-      clearTimeout(this.taskTimer);
-      this.taskTimer = undefined;
-    }
-    try {
-      this.tasks = (await this.agent?.listTasks()) ?? [];
-      const sid = this.currentSessionId ?? this.agent?.sessionId;
-      this.subagents = sid ? ((await this.agent?.listRunningSubagents(sid)) ?? []) : [];
-      if (seq === this.taskSeq) {
-        this.emit();
-      }
-    } catch (error) {
-      logWarn(`tasks: ${error instanceof Error ? error.message : error}`);
-    }
-    if (this.drawer === 'tasks' && seq === this.taskSeq) {
-      this.taskTimer = setTimeout(() => {
-        if (this.drawer === 'tasks') {
-          void this.refreshTasksInner();
-        }
-      }, 2500);
-    }
-  }
-
-  openMemory(): void {
-    this.drawer = undefined;
-    this.stopDashboardPoll();
-    this.stopTaskPoll();
-    this.settingsOpen = true;
-    this.settingsPage = 'memory';
-    this.emit();
-    void this.refreshMemory();
-  }
-
-  closeMemory(): void {
-    this.settingsPage = 'main';
-    this.emit();
-  }
-
-  openMemoryFile(id: string): void {
-    const row = this.memoryFiles.find((item) => item.id === id);
-    void plat().openFile(row?.filePath ?? id, false);
-  }
-
-  async flushMemory(): Promise<void> {
-    if (!this.agent?.sessionId) {
-      plat().warn(tr('settingsMemoryNeedSession'));
-      return;
-    }
-    try {
-      await this.agent.flushMemory();
-      plat().info(tr('settingsMemoryFlushed'));
-      await this.refreshMemory();
-    } catch (error) {
-      plat().warn(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async refreshMemory(): Promise<void> {
-    try {
-      this.memoryFiles = await listMemoryFiles();
-      this.emit();
-    } catch (error) {
-      logWarn(`memory: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  openPlan(): void {
-    const plan = latestPlan(this.messages);
-    if (!plan) {
-      plat().warn(tr('planEmpty'));
-      return;
-    }
-    this.settingsOpen = false;
-    this.drawer = 'plan';
-    this.drawerBody = plan;
-    this.emit();
-  }
-
-  refreshMcps(): void {
-    if (!this.settingsOpen) {
-      return;
-    }
-    void this.refreshMcpsInner();
-  }
-
-  async toggleMcp(id: string): Promise<void> {
-    const row = this.mcps.find((item) => item.id === id);
-    if (!row) {
-      return;
-    }
-    if (!this.agent?.sessionId) {
-      plat().warn(tr('settingsMcpsNeedSession'));
-      return;
-    }
-    try {
-      await this.agent.toggleMcp(row.id, !row.enabled);
-      await this.refreshMcpsInner();
-    } catch (error) {
-      plat().warn(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  private async refreshMcpsInner(): Promise<void> {
-    if (!this.agent) {
-      this.mcps = [];
-      this.emit();
-      return;
-    }
-    try {
-      const raw = await this.agent.listMcps(false);
-      this.mcps = parseMcpList(raw);
-      this.emit();
-    } catch (error) {
-      logWarn(`mcp list: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
+    await drawers.dashboardDispatch(this, text, sessionId);
+  }
+  openSettings(): void { drawers.openSettings(this); }
+  closeSettings(): void { drawers.closeSettings(this); }
+  openRules(): void { drawers.openRules(this); }
+  closeRules(): void { drawers.closeRules(this); }
+  async importRules(): Promise<void> { await drawers.importRules(this); }
+  async toggleRule(id: string): Promise<void> { await drawers.toggleRule(this, id); }
+  async deleteRule(id: string): Promise<void> { await drawers.deleteRule(this, id); }
+  openRule(id: string): void { drawers.openRule(id); }
+  openSkills(): void { drawers.openSkills(this); }
+  closeSkills(): void { drawers.closeSkills(this); }
+  async importSkillZip(): Promise<void> { await drawers.importSkillZip(this); }
+  async importSkillFolder(): Promise<void> { await drawers.importSkillFolder(this); }
+  async toggleSkill(id: string): Promise<void> { await drawers.toggleSkill(this, id); }
+  async deleteSkill(id: string): Promise<void> { await drawers.deleteSkill(this, id); }
+  openSkill(id: string): void { drawers.openSkill(this, id); }
+  openApis(): void { drawers.openApis(this); }
+  closeApis(): void { drawers.closeApis(this); }
+  openTheme(): void { drawers.openTheme(this); }
+  closeTheme(): void { drawers.closeTheme(this); }
+  openMcps(): void { drawers.openMcps(this); }
+  closeMcps(): void { drawers.closeMcps(this); }
+  openAgents(): void { drawers.openAgents(this); }
+  closeAgents(): void { drawers.closeAgents(this); }
+  async importAgents(): Promise<void> { await drawers.importAgents(this); }
+  async toggleAgent(id: string): Promise<void> { await drawers.toggleAgent(this, id); }
+  async deleteAgent(id: string): Promise<void> { await drawers.deleteAgent(this, id); }
+  openAgent(id: string): void { drawers.openAgent(this, id); }
+  async setAgentProfile(name: string): Promise<void> { await drawers.setAgentProfile(this, name); }
+  async importPersonas(): Promise<void> { await drawers.importPersonas(this); }
+  async togglePersona(id: string): Promise<void> { await drawers.togglePersona(this, id); }
+  async deletePersona(id: string): Promise<void> { await drawers.deletePersona(this, id); }
+  openPersona(id: string): void { drawers.openPersona(this, id); }
+  openWorktrees(): void { drawers.openWorktrees(this); }
+  closeWorktrees(): void { drawers.closeWorktrees(this); }
+  async applyWorktree(id: string): Promise<void> { await drawers.applyWorktree(this, id); }
+  async removeWorktree(id: string): Promise<void> { await drawers.removeWorktree(this, id); }
+  openExt(tab?: string): void { drawers.openExt(this, tab); }
+  closeExt(): void { drawers.closeExt(this); }
+  setExtTab(tab: 'plugins' | 'marketplace' | 'hooks' | 'workflows'): void { drawers.setExtTab(this, tab); }
+  async togglePlugin(id: string): Promise<void> { await drawers.togglePlugin(this, id); }
+  async uninstallPlugin(id: string): Promise<void> { await drawers.uninstallPlugin(this, id); }
+  async toggleHook(id: string): Promise<void> { await drawers.toggleHook(this, id); }
+  async installMarketplace(id: string): Promise<void> { await drawers.installMarketplace(this, id); }
+  async refreshMarketplace(): Promise<void> { await drawers.refreshMarketplace(this); }
+  async runWorkflow(name: string): Promise<void> { await drawers.runWorkflow(this, name); }
+  async openTasks(): Promise<void> { await drawers.openTasks(this); }
+  async killTask(taskId: string): Promise<void> { await drawers.killTask(this, taskId); }
+  openMemory(): void { drawers.openMemory(this); }
+  closeMemory(): void { drawers.closeMemory(this); }
+  openMemoryFile(id: string): void { drawers.openMemoryFile(this, id); }
+  async flushMemory(): Promise<void> { await drawers.flushMemory(this); }
+  openPlan(): void { drawers.openPlan(this); }
+  refreshMcps(): void { drawers.refreshMcps(this); }
+  async toggleMcp(id: string): Promise<void> { await drawers.toggleMcp(this, id); }
   setTheme(primary: string, secondary: string, background?: string): void {
-    const next = normalizeTheme({ primary, secondary, background });
-    if (
-      next.primary === this.theme.primary &&
-      next.secondary === this.theme.secondary &&
-      (next.background ?? '') === (this.theme.background ?? '')
-    ) {
-      return;
-    }
-    this.theme = next;
-    void plat().setState('ui.theme', this.theme);
-    this.emit();
+    drawers.setTheme(this, primary, secondary, background);
   }
-
   async saveApi(input: {
     id?: string;
     name: string;
@@ -2017,81 +1105,13 @@ export class GrokController implements SlashRuntime {
     baseUrl: string;
     backend: ApiEndpoint['backend'];
     apiKey?: string;
-  }): Promise<void> {
-    const saved = await saveApiEndpoint(input);
-    await this.refreshApis();
-    void this.reloadModelCatalog(saved.id);
-    plat().info(tr('settingsApisSaved'));
-  }
-
-  async deleteApi(id: string): Promise<void> {
-    const row = this.apis.find((item) => item.id === id);
-    const ok = await plat().confirm(
-      tr('settingsApisDeleteConfirm', { name: row?.name ?? id }),
-      tr('settingsApisDelete'),
-    );
-    if (!ok) {
-      return;
-    }
-    await removeApiEndpoint(id);
-    await this.refreshApis();
-    void this.reloadModelCatalog();
-  }
-
-  private async refreshApis(): Promise<void> {
-    try {
-      this.apis = await listApiEndpoints();
-      this.emit();
-    } catch (error) {
-      logWarn(`api list: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  private async reloadModelCatalog(expectId?: string): Promise<void> {
-    const agent = this.agent;
-    if (!agent) {
-      return;
-    }
-    const seq = ++this.modelsReloadSeq;
-    try {
-      await agent.reloadModels();
-    } catch (error) {
-      logWarn(`reload models: ${error instanceof Error ? error.message : error}`);
-    }
-    for (let i = 0; i < 8; i += 1) {
-      if (seq !== this.modelsReloadSeq) {
-        return;
-      }
-      try {
-        const next = mergeModelCatalog(this.models, await agent.listModels());
-        if (next) {
-          this.models = next;
-          this.emit();
-          if (!expectId || next.available.some((model) => model.id === expectId)) {
-            return;
-          }
-        }
-      } catch (error) {
-        logWarn(`models list: ${error instanceof Error ? error.message : error}`);
-        return;
-      }
-      await sleep(300);
-    }
-  }
-
+  }): Promise<void> { await drawers.saveApi(this, input); }
+  async deleteApi(id: string): Promise<void> { await drawers.deleteApi(this, id); }
   async updateSetting(key: keyof GrokSettings, value: string | boolean): Promise<void> {
-    const next = normalizeSetting(key, value);
-    if (next === undefined) {
-      return;
-    }
-    await writeGrokSetting(key, next);
-    this.emit();
+    await drawers.updateSetting(this, key, value);
   }
-
   toggleUiFlag(flag: 'compactMode' | 'timestamps' | 'multiline'): void {
-    this[flag] = !this[flag];
-    void plat().setState(`ui.${flag}`, this[flag]);
-    this.emit();
+    drawers.toggleUiFlag(this, flag);
   }
 
   async sendAgentSlash(text: string): Promise<void> {
@@ -2120,7 +1140,7 @@ export class GrokController implements SlashRuntime {
     const run = ++this.runGen;
     this.setStatus('streaming');
     try {
-      await agent.prompt([{ type: 'text', text }]);
+      await agent.prompt([{ type: 'text', text }], { mode: promptModeMeta(this.modeId) });
     } catch (error) {
       if (run !== this.runGen) {
         return;
@@ -2217,28 +1237,12 @@ export class GrokController implements SlashRuntime {
     this.commands = view.commands;
   }
 
+  allowsFileWrites(): boolean {
+    return this.modeId !== 'ask';
+  }
+
   async requestToolPermission(params: unknown): Promise<unknown> {
-    const parsed = parsePermissionOptions(params);
-    const settings = readGrokSettings();
-    if (shouldAutoApprove(settings, parsed.toolKind)) {
-      const allow = pickAllowOption(parsed.options);
-      if (allow) {
-        return selectedPermission(allow.optionId);
-      }
-    }
-    this.dismissPermissions();
-    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    this.permission = {
-      requestId,
-      title: parsed.title,
-      details: parsed.details,
-      toolKind: parsed.toolKind,
-      options: parsed.options,
-    };
-    this.emit();
-    return new Promise((resolve) => {
-      this.pendingPermissions.set(requestId, { resolve });
-    });
+    return requestToolPermissionRpc(this, params);
   }
 
   private async runHostAction(action: HostAction): Promise<void> {
@@ -2356,7 +1360,7 @@ export class GrokController implements SlashRuntime {
         this.emit();
       });
       this.setStatus('ready');
-      void this.refreshApis();
+      void drawers.refreshApis(this);
       setTimeout(() => {
         if (epoch === this.agentGen) {
           void this.refreshSessionsSilent();
@@ -2513,9 +1517,16 @@ export class GrokController implements SlashRuntime {
       }
     }
     this.applyPendingModelSelection();
+    if (this.modeId === 'ask' || this.modeId === 'plan') {
+      try {
+        await agent.setMode(this.modeId);
+      } catch (error) {
+        logWarn(`apply session mode: ${error instanceof Error ? error.message : error}`);
+      }
+    }
     void this.meter.refresh();
     if (this.settingsOpen && this.settingsPage === 'mcps') {
-      void this.refreshMcpsInner();
+      void drawers.refreshMcpsInner(this);
     }
   }
 
@@ -2573,7 +1584,7 @@ export class GrokController implements SlashRuntime {
     this.emit();
   }
 
-  private fail(message: string, error?: unknown): void {
+  fail(message: string, error?: unknown): void {
     const parsed = error !== undefined ? formatAgentError(error) : { message };
     const line =
       parsed.message === message ? formatErrorLine(parsed) : `${message}: ${formatErrorLine(parsed)}`;

@@ -38,13 +38,16 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       await controller.restart();
       return;
     case 'choosePermission':
-      controller.choosePermission(message.optionId);
+      await controller.choosePermission(message.optionId);
       return;
     case 'cancelPermission':
       controller.cancelPermission();
       return;
     case 'answerAsk':
-      controller.answerAsk(message.choiceId, message.notes);
+      controller.answerAsk(
+        message.choiceIds ?? (message.choiceId ? [message.choiceId] : []),
+        message.notes,
+      );
       return;
     case 'cancelAsk':
       controller.cancelAsk();

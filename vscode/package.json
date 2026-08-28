@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.1.61",
+  "version": "0.1.68",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -253,7 +253,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "test": "node esbuild.mjs --test && node --test dist/test/*.js",
+    "test": "node esbuild.mjs --test && node --test dist/test/*.js dist/test/webview/*.js",
     "package": "npx --yes @vscode/vsce package"
   },
   "devDependencies": {

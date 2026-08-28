@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, it } from 'node:test';
-import { parseSkillMeta, safeSkillDirName } from './skillsHost';
+import { parseSkillMeta, safeSkillDirName, zipEntryUnsafe } from './skillsHost';
 
 describe('skills files', () => {
   it('reads name and description from frontmatter', () => {
@@ -18,5 +20,15 @@ describe('skills files', () => {
   it('sanitizes skill directory names', () => {
     assert.equal(safeSkillDirName('Review PR'), 'Review-PR');
     assert.equal(safeSkillDirName('foo:bar'), 'foo-bar');
+  });
+
+  it('rejects zip members that escape the extract root', () => {
+    const dest = path.join(os.tmpdir(), 'grok-skill-safe');
+    assert.equal(zipEntryUnsafe(dest, 'skill/SKILL.md'), false);
+    assert.equal(zipEntryUnsafe(dest, './skill/SKILL.md'), false);
+    assert.equal(zipEntryUnsafe(dest, '../evil.md'), true);
+    assert.equal(zipEntryUnsafe(dest, 'skill/../../outside.md'), true);
+    assert.equal(zipEntryUnsafe(dest, '/tmp/evil.md'), true);
+    assert.equal(zipEntryUnsafe(dest, 'C:\\Windows\\evil.md'), true);
   });
 });

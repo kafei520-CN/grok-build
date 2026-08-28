@@ -306,6 +306,8 @@ export interface PermissionPrompt {
   details?: string;
   toolKind?: string;
   options: PermissionOption[];
+  /** Real ACP allow id when this card is the Ask-mode switch gate. */
+  allowOptionId?: string;
 }
 
 export interface AskChoice {
@@ -323,6 +325,7 @@ export interface AskCard {
   choices: AskChoice[];
   index?: number;
   total?: number;
+  multiSelect?: boolean;
 }
 
 export interface LoginView {
@@ -508,7 +511,7 @@ export type WebviewToHost =
   | { type: 'restart' }
   | { type: 'choosePermission'; optionId: string }
   | { type: 'cancelPermission' }
-  | { type: 'answerAsk'; choiceId: string; notes?: string }
+  | { type: 'answerAsk'; choiceId?: string; choiceIds?: string[]; notes?: string }
   | { type: 'cancelAsk' }
   | { type: 'removeAttachment'; id: string }
   | { type: 'openFile'; path: string }

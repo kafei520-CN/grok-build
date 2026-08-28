@@ -11,9 +11,39 @@ export function sessionPermissionMeta(settings: Pick<GrokSettings, 'alwaysApprov
   };
 }
 
+export const SWITCH_TO_AGENT_ID = 'switch_to_agent';
+export const STAY_IN_ASK_ID = 'stay_in_ask';
+
+export function isAskSessionMode(modeId?: string): boolean {
+  return modeId === 'ask';
+}
+
 export function isEditToolKind(kind?: string): boolean {
   const value = (kind ?? '').toLowerCase();
   return value === 'edit' || value === 'write' || value === 'delete' || value === 'move';
+}
+
+/** File edits and shell — the mutations Ask mode must not run. */
+export function isMutatingToolKind(kind?: string): boolean {
+  const value = (kind ?? '').toLowerCase();
+  return (
+    isEditToolKind(kind) ||
+    value === 'execute' ||
+    value === 'terminal' ||
+    value === 'shell' ||
+    value === 'bash'
+  );
+}
+
+export function askModeBlocksMutation(modeId: string | undefined, toolKind?: string): boolean {
+  return isAskSessionMode(modeId) && isMutatingToolKind(toolKind);
+}
+
+export function askModeGateOptions(): PermissionOption[] {
+  return [
+    { optionId: SWITCH_TO_AGENT_ID, name: 'Switch to Agent', kind: 'allow_once' },
+    { optionId: STAY_IN_ASK_ID, name: 'Stay in Ask', kind: 'reject_once' },
+  ];
 }
 
 export function pickAllowOption(options: PermissionOption[]): PermissionOption | undefined {
@@ -28,7 +58,11 @@ export function pickAllowOption(options: PermissionOption[]): PermissionOption |
 export function shouldAutoApprove(
   settings: Pick<GrokSettings, 'alwaysApprove' | 'permissionMode'>,
   toolKind?: string,
+  modeId?: string,
 ): boolean {
+  if (askModeBlocksMutation(modeId, toolKind)) {
+    return false;
+  }
   if (settings.alwaysApprove || settings.permissionMode === 'auto') {
     return true;
   }
@@ -59,7 +93,9 @@ export type PermLabelKey =
   | 'permAllowAlways'
   | 'permAllowEditsSession'
   | 'permReject'
-  | 'permRejectTell';
+  | 'permRejectTell'
+  | 'askModeSwitch'
+  | 'askModeStay';
 
 export function normalizePermissionKind(kind: string): string {
   return kind
@@ -69,9 +105,15 @@ export function normalizePermissionKind(kind: string): string {
 }
 
 export function permissionLabelKey(
-  option: Pick<PermissionOption, 'kind' | 'name'>,
+  option: Pick<PermissionOption, 'kind' | 'name'> & { optionId?: string },
   toolKind?: string,
 ): PermLabelKey {
+  if (option.optionId === SWITCH_TO_AGENT_ID) {
+    return 'askModeSwitch';
+  }
+  if (option.optionId === STAY_IN_ASK_ID) {
+    return 'askModeStay';
+  }
   const kind = normalizePermissionKind(option.kind);
   if (kind === 'allow_always') {
     return isEditToolKind(toolKind) ? 'permAllowEditsSession' : 'permAllowAlways';

@@ -3,6 +3,9 @@ import { clipboardToPath, splitClipboardPaths } from './clipboard';
 import { plat } from './platform';
 import type { Attachment } from './types';
 
+/** Inline file text above this size is dropped; the chip stays path-only. */
+export const ATTACH_TEXT_MAX = 256_000;
+
 export interface AttachmentHost {
   attachments: Attachment[];
   fileHits?: Array<{ path: string; label: string }>;
@@ -34,7 +37,7 @@ export function addActiveFile(host: AttachmentHost): void {
     id: file.path,
     label: path.basename(file.path),
     path: file.path,
-    text: file.text,
+    text: Buffer.byteLength(file.text, 'utf8') < ATTACH_TEXT_MAX ? file.text : undefined,
   });
   plat().focusChat();
 }
@@ -59,7 +62,7 @@ export async function attachPath(host: AttachmentHost, filePath: string): Promis
   let text: string | undefined;
   try {
     const bytes = await plat().readFile(filePath);
-    if (bytes.byteLength < 256_000) {
+    if (bytes.byteLength < ATTACH_TEXT_MAX) {
       text = Buffer.from(bytes).toString('utf8');
     }
   } catch {

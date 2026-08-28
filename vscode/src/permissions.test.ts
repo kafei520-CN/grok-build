@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  STAY_IN_ASK_ID,
+  SWITCH_TO_AGENT_ID,
+  askModeBlocksMutation,
   cancelledPermission,
   isEditToolKind,
   permissionLabelKey,
@@ -37,8 +40,15 @@ describe('permissions', () => {
     assert.equal(shouldAutoApprove(edits, 'execute'), false);
     assert.equal(shouldAutoApprove(auto, 'execute'), true);
     assert.equal(shouldAutoApprove(yolo, 'execute'), true);
+    assert.equal(shouldAutoApprove(yolo, 'edit', 'ask'), false);
+    assert.equal(shouldAutoApprove(auto, 'execute', 'ask'), false);
+    assert.equal(shouldAutoApprove(yolo, 'read', 'ask'), true);
     assert.equal(isEditToolKind('write'), true);
     assert.equal(isEditToolKind('terminal'), false);
+    assert.equal(askModeBlocksMutation('ask', 'edit'), true);
+    assert.equal(askModeBlocksMutation('ask', 'execute'), true);
+    assert.equal(askModeBlocksMutation('ask', 'read'), false);
+    assert.equal(askModeBlocksMutation('default', 'edit'), false);
   });
 
   it('settles every waiter with a cancelled outcome', () => {
@@ -71,6 +81,14 @@ describe('permissions', () => {
     assert.equal(
       permissionLabelKey({ kind: 'reject_once', name: 'No, and tell Grok what to do differently' }, 'write'),
       'permRejectTell',
+    );
+    assert.equal(
+      permissionLabelKey({ kind: 'allow_once', name: 'x', optionId: SWITCH_TO_AGENT_ID }),
+      'askModeSwitch',
+    );
+    assert.equal(
+      permissionLabelKey({ kind: 'reject_once', name: 'x', optionId: STAY_IN_ASK_ID }),
+      'askModeStay',
     );
   });
 });

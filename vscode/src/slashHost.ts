@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { pathInsideAny } from './grokDirs';
 import { tr } from './locale';
 import { plat } from './platform';
 import type { HostAction } from './slash';
@@ -95,13 +96,7 @@ export async function runSlashAction(host: SlashRuntime, action: HostAction): Pr
     case 'copy':
       host.copyLast(action.n ?? 1);
       if (action.path) {
-        const last = host.messages.filter((m) => m.role === 'assistant').at(-1);
-        if (last) {
-          const filePath = path.isAbsolute(action.path)
-            ? action.path
-            : path.join(host.cwd(), action.path);
-          await plat().writeFile(filePath, Buffer.from(last.text, 'utf8'));
-        }
+        await copyLastToPath(host, action.path);
       }
       return;
     case 'export':
@@ -282,5 +277,20 @@ async function showJsonNote(
 ): Promise<void> {
   const text = value ? JSON.stringify(value, null, 2) : `${title}: (empty)`;
   host.note(`**${title}**\n\n\`\`\`json\n${text}\n\`\`\``);
+}
+
+async function copyLastToPath(host: SlashRuntime, rawPath: string): Promise<void> {
+  const last = host.messages.filter((m) => m.role === 'assistant').at(-1);
+  if (!last) {
+    return;
+  }
+  const filePath = path.isAbsolute(rawPath) ? rawPath : path.join(host.cwd(), rawPath);
+  const roots = plat().workspaceFolders();
+  const allowed = roots.length ? roots : [host.cwd()];
+  if (!pathInsideAny(allowed, filePath, plat().os())) {
+    host.note(tr('copyOutsideWorkspace'));
+    return;
+  }
+  await plat().writeFile(filePath, Buffer.from(last.text, 'utf8'));
 }
 

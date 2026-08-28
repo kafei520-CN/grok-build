@@ -1,9 +1,28 @@
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
 import { describe, it } from 'node:test';
-import { resolveProjectGrokDir, sameFsPath } from './grokDirs';
+import { pathInside, pathInsideAny, resolveProjectGrokDir, sameFsPath } from './grokDirs';
 
 describe('grok dirs', () => {
+  it('accepts descendants and rejects parent escapes', () => {
+    assert.equal(pathInside('/work/app', '/work/app/notes.md', 'linux'), true);
+    assert.equal(pathInside('/work/app', '/work/app', 'linux'), true);
+    assert.equal(pathInside('/work/app', '/work/other/notes.md', 'linux'), false);
+    assert.equal(pathInside('/work/app', '/etc/passwd', 'linux'), false);
+    assert.equal(
+      pathInside('E:\\Project\\app', 'E:\\Project\\app\\out.md', 'win32'),
+      true,
+    );
+    assert.equal(
+      pathInside('E:\\Project\\app', 'C:\\Windows\\notes.md', 'win32'),
+      false,
+    );
+    assert.equal(
+      pathInsideAny(['E:\\Project\\app', 'D:\\other'], 'D:\\other\\a.md', 'win32'),
+      true,
+    );
+  });
+
   it('treats the same path as equal on windows regardless of case', () => {
     assert.equal(
       sameFsPath('C:\\Users\\dev\\.grok\\skills', 'c:\\users\\dev\\.grok\\skills', 'win32'),

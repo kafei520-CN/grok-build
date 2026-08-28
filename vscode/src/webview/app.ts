@@ -41,6 +41,8 @@ export const ui = {
   askOpen: new Map<string, boolean>(),
   askOtherOpen: false,
   askOtherDraft: '',
+  askPicked: new Set<string>(),
+  askPickStamp: '',
   lightboxSrc: undefined as string | undefined,
   stickToBottom: true,
   transcriptScroll: 0,

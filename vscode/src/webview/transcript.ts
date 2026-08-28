@@ -1,8 +1,11 @@
 import { totals } from '../edits';
 import { formatClock, formatDuration, toolKindLabel } from '../i18n';
 import { permissionButtonClass, permissionLabelKey } from '../permissions';
+import { permissionActions, permissionNeedsCancel, permissionTarget } from '../permissionView';
 import type { ChatMessage, ChatState, FileEdit, PermissionOption, PermissionPrompt } from '../types';
 import { loc, post, render, tr, ui } from './app';
+import { patchJumpBottom } from './composer';
+import { restoreScrollTop, shouldPinToBottom, userHeldScroll, type TranscriptScroll } from './scroll';
 import { bootStar, errorCard, home, loginCard, panel, setupCard } from './chrome';
 import { button, iconButton } from './dom';
 import { iconAskHint, iconCheck, iconChevron, iconClose, iconCopy, iconFork, iconStar, toolIcon } from './icons';
@@ -296,18 +299,26 @@ function patchAsk(body: HTMLElement): void {
     existing?.remove();
     ui.askOtherOpen = false;
     ui.askOtherDraft = '';
+    ui.askPicked.clear();
+    ui.askPickStamp = '';
     return;
   }
-  if (existing?.dataset.id !== ask.requestId) {
+  const stamp = `${ask.requestId}:${ask.index ?? 0}`;
+  if (ui.askPickStamp !== stamp) {
+    ui.askPickStamp = stamp;
     ui.askOtherOpen = false;
     ui.askOtherDraft = '';
+    ui.askPicked.clear();
   }
   const other = ui.askOtherOpen ? '1' : '0';
   const open = (ui.askOpen.get(ask.requestId) ?? true) ? '1' : '0';
+  const picked = [...ui.askPicked].sort().join('|');
   if (
     existing?.dataset.id === ask.requestId &&
+    existing.dataset.stamp === stamp &&
     existing.dataset.other === other &&
-    existing.dataset.open === open
+    existing.dataset.open === open &&
+    existing.dataset.picked === picked
   ) {
     return;
   }
@@ -349,13 +360,12 @@ function errorBanner(text: string): HTMLElement {
   return banner;
 }
 
-const USER_SCROLL_HOLD_MS = 480;
-let lastUserScroll = 0;
-let pinLock = false;
-
-function userHeldScroll(): boolean {
-  return Date.now() - lastUserScroll < USER_SCROLL_HOLD_MS;
-}
+const scrollState: TranscriptScroll = {
+  stickToBottom: true,
+  transcriptScroll: 0,
+  lastUserScroll: 0,
+  pinLock: false,
+};
 
 export function scrollTranscript(): void {
   const el = document.getElementById('transcript');
@@ -363,17 +373,29 @@ export function scrollTranscript(): void {
     return;
   }
   bindTranscriptScroll(el);
-  if (ui.lightboxSrc || userHeldScroll()) {
-    return;
-  }
-  if (ui.stickToBottom) {
-    pinLock = true;
+  scrollState.stickToBottom = ui.stickToBottom;
+  scrollState.transcriptScroll = ui.transcriptScroll;
+  const now = Date.now();
+  if (
+    shouldPinToBottom({
+      stickToBottom: ui.stickToBottom,
+      lightbox: Boolean(ui.lightboxSrc),
+      now,
+      lastUserScroll: scrollState.lastUserScroll,
+    })
+  ) {
+    scrollState.pinLock = true;
     el.scrollTop = el.scrollHeight;
-    pinLock = false;
+    scrollState.pinLock = false;
+    patchJumpBottom();
     return;
   }
-  if (el.scrollTop === 0 && ui.transcriptScroll > 0) {
-    el.scrollTop = ui.transcriptScroll;
+  if (ui.lightboxSrc || userHeldScroll(now, scrollState.lastUserScroll)) {
+    return;
+  }
+  const restored = restoreScrollTop(el.scrollTop, ui.transcriptScroll);
+  if (restored !== undefined) {
+    el.scrollTop = restored;
   }
 }
 
@@ -384,19 +406,21 @@ function bindTranscriptScroll(el?: HTMLElement | null): void {
   }
   node.dataset.scrollBound = '1';
   const markUser = () => {
-    lastUserScroll = Date.now();
+    scrollState.lastUserScroll = Date.now();
   };
   node.addEventListener('pointerdown', markUser, { passive: true });
   node.addEventListener('wheel', markUser, { passive: true });
   node.addEventListener(
     'scroll',
     () => {
-      if (pinLock) {
+      if (scrollState.pinLock) {
         return;
       }
-      lastUserScroll = Date.now();
-      ui.stickToBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 56;
+      scrollState.lastUserScroll = Date.now();
+      ui.stickToBottom =
+        node.scrollHeight - node.scrollTop - node.clientHeight < 56;
       ui.transcriptScroll = node.scrollTop;
+      patchJumpBottom();
     },
     { passive: true },
   );
@@ -856,28 +880,17 @@ function permissionBar(): HTMLElement {
   }
   const row = document.createElement('div');
   row.className = 'permission-actions';
-  for (const option of perm.options) {
-    row.append(permissionButton(option, perm.toolKind));
+  for (const action of permissionActions(perm)) {
+    const option = perm.options.find((item) => item.optionId === action.optionId);
+    if (option) {
+      row.append(permissionButton(option, perm.toolKind));
+    }
   }
-  if (perm.options.length === 0) {
+  if (permissionNeedsCancel(perm)) {
     row.append(button(tr('cancel'), () => post({ type: 'cancelPermission' })));
   }
   bar.append(fold, row);
   return bar;
-}
-
-function permissionTarget(perm: PermissionPrompt): string {
-  const tick = perm.title.match(/`([^`]+)`/);
-  if (tick) {
-    return fileName(tick[1]);
-  }
-  if (perm.details && !perm.details.trim().startsWith('{')) {
-    const first = perm.details.trim().split(/[\s\n]/)[0];
-    if (first.includes('/') || first.includes('\\')) {
-      return fileName(first);
-    }
-  }
-  return perm.title;
 }
 
 function askBar(): HTMLElement {
@@ -886,8 +899,10 @@ function askBar(): HTMLElement {
   const el = document.createElement('section');
   el.className = 'ask-card';
   el.dataset.id = ask.requestId;
+  el.dataset.stamp = `${ask.requestId}:${ask.index ?? 0}`;
   el.dataset.other = ui.askOtherOpen ? '1' : '0';
   el.dataset.open = open ? '1' : '0';
+  el.dataset.picked = [...ui.askPicked].sort().join('|');
   const head = document.createElement('header');
   head.className = 'ask-head';
   const brand = document.createElement('div');
@@ -897,9 +912,11 @@ function askBar(): HTMLElement {
   kicker.textContent =
     ask.kind === 'plan'
       ? tr('planReadyTitle')
-      : ask.total && ask.total > 1
-        ? tr('askQuestionOf', { n: (ask.index ?? 0) + 1, total: ask.total })
-        : tr('askTitle');
+      : ask.multiSelect
+        ? tr('askMultiHint')
+        : ask.total && ask.total > 1
+          ? tr('askQuestionOf', { n: (ask.index ?? 0) + 1, total: ask.total })
+          : tr('askTitle');
   const preview = document.createElement('span');
   preview.className = 'ask-preview';
   preview.textContent =
@@ -938,11 +955,13 @@ function askBar(): HTMLElement {
   const actions = document.createElement('div');
   actions.className = 'ask-actions';
   for (const choice of ask.choices) {
-    actions.append(askChoiceButton(choice, ask.kind));
+    actions.append(askChoiceButton(choice, ask.kind, Boolean(ask.multiSelect)));
   }
   el.append(actions);
   if (ui.askOtherOpen) {
-    el.append(askOtherForm(ask.kind));
+    el.append(askOtherForm(ask.kind, Boolean(ask.multiSelect)));
+  } else if (ask.multiSelect) {
+    el.append(askMultiSubmit());
   }
   return el;
 }
@@ -950,6 +969,7 @@ function askBar(): HTMLElement {
 function askChoiceButton(
   choice: import('../types').AskChoice,
   kind: 'question' | 'plan',
+  multiSelect: boolean,
 ): HTMLButtonElement {
   const el = document.createElement('button');
   el.type = 'button';
@@ -959,6 +979,9 @@ function askChoiceButton(
       : choice.id === 'decline'
         ? 'btn reject ask-choice'
         : 'btn allow ask-choice';
+  const picked = ui.askPicked.has(choice.id);
+  el.classList.toggle('picked', multiSelect && picked);
+  el.setAttribute('aria-pressed', multiSelect && picked ? 'true' : 'false');
   const label = document.createElement('span');
   label.className = 'ask-choice-label';
   label.textContent = askChoiceLabel(choice, kind);
@@ -974,6 +997,10 @@ function askChoiceButton(
     el.append(mark);
   }
   el.addEventListener('click', () => {
+    if (multiSelect) {
+      toggleAskChoice(choice);
+      return;
+    }
     if (choice.other) {
       ui.askOtherOpen = true;
       render();
@@ -982,6 +1009,51 @@ function askChoiceButton(
     post({ type: 'answerAsk', choiceId: choice.id });
   });
   return el;
+}
+
+function toggleAskChoice(choice: import('../types').AskChoice): void {
+  if (ui.askPicked.has(choice.id)) {
+    ui.askPicked.delete(choice.id);
+  } else {
+    ui.askPicked.add(choice.id);
+  }
+  ui.askOtherOpen = [...ui.askPicked].some((id) => {
+    const row = ui.state.ask?.choices.find((item) => item.id === id);
+    return Boolean(row?.other) || id === 'Other';
+  });
+  if (!ui.askOtherOpen) {
+    ui.askOtherDraft = '';
+  }
+  render();
+}
+
+function askMultiSubmit(): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'ask-other';
+  const send = button(tr('askSubmit'), submitAskPicked);
+  send.className = 'btn primary';
+  send.disabled = ui.askPicked.size === 0;
+  wrap.append(send);
+  return wrap;
+}
+
+function submitAskPicked(): void {
+  const ids = [...ui.askPicked];
+  if (!ids.length) {
+    return;
+  }
+  const other = ids.some((id) => {
+    const row = ui.state.ask?.choices.find((item) => item.id === id);
+    return Boolean(row?.other) || id === 'Other';
+  });
+  const notes = ui.askOtherDraft.trim();
+  if (other && !notes) {
+    return;
+  }
+  post({ type: 'answerAsk', choiceIds: ids, notes: notes || undefined });
+  ui.askOtherDraft = '';
+  ui.askOtherOpen = false;
+  ui.askPicked.clear();
 }
 
 function askChoiceHint(choice: import('../types').AskChoice, kind: 'question' | 'plan'): string {
@@ -1017,7 +1089,7 @@ function askChoiceLabel(choice: import('../types').AskChoice, kind: 'question' |
   return choice.other ? tr('askOther') : choice.label;
 }
 
-function askOtherForm(kind: 'question' | 'plan'): HTMLElement {
+function askOtherForm(kind: 'question' | 'plan', multiSelect: boolean): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'ask-other';
   const input = document.createElement('textarea');
@@ -1028,6 +1100,10 @@ function askOtherForm(kind: 'question' | 'plan'): HTMLElement {
     ui.askOtherDraft = input.value;
   });
   const send = button(tr('askSubmit'), () => {
+    if (multiSelect) {
+      submitAskPicked();
+      return;
+    }
     const notes = ui.askOtherDraft.trim();
     if (!notes) {
       return;

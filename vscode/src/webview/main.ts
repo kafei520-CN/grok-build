@@ -84,17 +84,21 @@ function boot(): void {
       return;
     }
     if (ui.lightboxSrc) {
+      event.preventDefault();
       ui.lightboxSrc = undefined;
       render();
       return;
     }
-    if (ui.moreOpen || ui.picker) {
+    if (ui.moreOpen || ui.picker || ui.menu) {
+      event.preventDefault();
       ui.moreOpen = false;
       ui.picker = undefined;
+      ui.menu = undefined;
       render();
       return;
     }
     if (ui.state.settingsOpen) {
+      event.preventDefault();
       post({
         type:
           ui.state.settingsPage === 'rules'
@@ -117,6 +121,11 @@ function boot(): void {
                             ? 'closeMemory'
                             : 'closeSettings',
       });
+      return;
+    }
+    if (ui.state.drawer) {
+      event.preventDefault();
+      post({ type: 'closeDrawer' });
     }
   });
   document.addEventListener('click', (event) => {

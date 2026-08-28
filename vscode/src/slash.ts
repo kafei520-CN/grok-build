@@ -324,3 +324,11 @@ export function modeLabel(id: string): string {
       return 'Agent';
   }
 }
+
+/** `_meta.mode` on session/prompt. CLI maps ask/plan; anything else is Agent. */
+export function promptModeMeta(modeId: string): string {
+  if (modeId === 'ask' || modeId === 'plan') {
+    return modeId;
+  }
+  return 'agent';
+}

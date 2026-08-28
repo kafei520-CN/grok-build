@@ -255,14 +255,18 @@ export class GrokAgent {
     return result;
   }
 
-  async prompt(blocks: ContentBlock[]): Promise<unknown> {
+  async prompt(blocks: ContentBlock[], extraMeta?: Record<string, unknown>): Promise<unknown> {
     if (!this.sessionId) {
       throw new Error('No active session');
     }
-    return this.rpc.request('session/prompt', {
+    const params: Record<string, unknown> = {
       sessionId: this.sessionId,
       prompt: blocks,
-    });
+    };
+    if (extraMeta && Object.keys(extraMeta).length > 0) {
+      params._meta = extraMeta;
+    }
+    return this.rpc.request('session/prompt', params);
   }
 
   cancelTurn(): void {
