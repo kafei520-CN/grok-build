@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  cancelledPermission,
   isEditToolKind,
   permissionLabelKey,
   pickAllowOption,
+  selectedPermission,
   sessionPermissionMeta,
+  settlePending,
   shouldAutoApprove,
 } from './permissions';
 
@@ -36,6 +39,18 @@ describe('permissions', () => {
     assert.equal(shouldAutoApprove(yolo, 'execute'), true);
     assert.equal(isEditToolKind('write'), true);
     assert.equal(isEditToolKind('terminal'), false);
+  });
+
+  it('settles every waiter with a cancelled outcome', () => {
+    const pending = new Map<string, { resolve: (value: unknown) => void }>();
+    const seen: unknown[] = [];
+    pending.set('a', { resolve: (value) => seen.push(value) });
+    pending.set('b', { resolve: (value) => seen.push(value) });
+    settlePending(pending, cancelledPermission());
+    assert.equal(pending.size, 0);
+    assert.equal(seen.length, 2);
+    assert.deepEqual(seen[0], { outcome: { outcome: 'cancelled' } });
+    assert.notDeepEqual(selectedPermission('yes'), cancelledPermission());
   });
 
   it('prefers allow_once over later options', () => {

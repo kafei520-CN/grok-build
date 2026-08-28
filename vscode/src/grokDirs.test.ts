@@ -39,5 +39,13 @@ describe('grok dirs', () => {
       resolveProjectGrokDir(['/work/app'], '/home/dev', 'rules', 'linux'),
       path.join('/work/app', '.grok', 'rules'),
     );
+    assert.equal(
+      resolveProjectGrokDir(['/work/app'], '/home/dev', 'agents', 'linux'),
+      path.join('/work/app', '.grok', 'agents'),
+    );
+    assert.equal(
+      resolveProjectGrokDir(['/work/app'], '/home/dev', 'personas', 'linux'),
+      path.join('/work/app', '.grok', 'personas'),
+    );
   });
 });

@@ -1,5 +1,4 @@
 import * as path from 'node:path';
-import { EXT } from './constants';
 import { tr } from './locale';
 import { plat } from './platform';
 import type { HostAction } from './slash';
@@ -17,7 +16,12 @@ export interface SlashRuntime {
   drawerTab?: string;
   drawerBody?: string;
   agent?: {
-    forkSession(): Promise<string | undefined>;
+    forkSession(params: {
+      sourceSessionId: string;
+      sourceCwd: string;
+      newCwd: string;
+      sessionKind?: string;
+    }): Promise<string | undefined>;
     renameSession(title: string, resetToAuto?: boolean): Promise<void>;
     deleteSession(): Promise<void>;
     sessionInfo(): Promise<Record<string, unknown>>;
@@ -33,6 +37,8 @@ export interface SlashRuntime {
   note(text: string): void;
   newSession(): Promise<void>;
   resumePicker(): Promise<void>;
+  openDashboard(): Promise<void>;
+  openAgents(): void;
   login(): Promise<void>;
   logout(): Promise<void>;
   send(text: string): Promise<void>;
@@ -50,6 +56,12 @@ export interface SlashRuntime {
   sendAgentSlash(text: string): Promise<void>;
   openSettings(): void;
   openMcps(): void;
+  openSkills(): void;
+  openWorktrees(): void;
+  openExt(tab?: string): void;
+  openTasks(): Promise<void>;
+  openMemory(): void;
+  openPlan(): void;
   toggleUiFlag(flag: 'timestamps' | 'compactMode' | 'multiline'): void;
 }
 
@@ -61,6 +73,12 @@ export async function runSlashAction(host: SlashRuntime, action: HostAction): Pr
     case 'resume':
     case 'home':
       await host.resumePicker();
+      return;
+    case 'dashboard':
+      await host.openDashboard();
+      return;
+    case 'agents':
+      host.openAgents();
       return;
     case 'login':
       await host.login();
@@ -193,8 +211,24 @@ export async function runSlashAction(host: SlashRuntime, action: HostAction): Pr
     case 'mcpSettings':
       host.openMcps();
       return;
+    case 'worktrees':
+      host.openWorktrees();
+      return;
+    case 'tasks':
+      await host.openTasks();
+      return;
+    case 'memory':
+      host.openMemory();
+      return;
+    case 'viewPlan':
+      host.openPlan();
+      return;
     case 'extensions':
-      await openExtensions(host, action.tab);
+      if (action.tab === 'skills') {
+        host.openSkills();
+        return;
+      }
+      host.openExt(action.tab);
       return;
     case 'editPrompt': {
       const filePath = path.join(host.cwd(), '.grok-prompt.md');
@@ -239,27 +273,6 @@ async function openDocs(target?: string): Promise<void> {
   await plat().openExternal(
     `https://docs.x.ai/build/overview?q=${encodeURIComponent(target)}`,
   );
-}
-
-async function openExtensions(host: SlashRuntime, tab: string): Promise<void> {
-  const method: Record<string, string> = {
-    mcps: EXT.mcpList,
-    skills: EXT.skillsList,
-    plugins: EXT.pluginsList,
-    hooks: EXT.hooksList,
-    marketplace: EXT.marketplaceList,
-    workflows: EXT.workflowsList,
-  };
-  host.drawer = 'extensions';
-  host.drawerTab = tab;
-  host.drawerBody = 'Loading…';
-  host.emit();
-  try {
-    host.drawerBody = await host.agent?.extDump(method[tab] ?? EXT.mcpList, { cache: false });
-  } catch (error) {
-    host.drawerBody = error instanceof Error ? error.message : String(error);
-  }
-  host.emit();
 }
 
 async function showJsonNote(

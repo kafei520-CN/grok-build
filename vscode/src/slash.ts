@@ -7,6 +7,8 @@ export interface SlashCommand {
 export type HostAction =
   | { kind: 'newSession' }
   | { kind: 'resume' }
+  | { kind: 'dashboard' }
+  | { kind: 'agents' }
   | { kind: 'home' }
   | { kind: 'login' }
   | { kind: 'logout' }
@@ -31,6 +33,10 @@ export type HostAction =
   | { kind: 'btw'; text?: string }
   | { kind: 'extensions'; tab: string }
   | { kind: 'mcpSettings' }
+  | { kind: 'worktrees' }
+  | { kind: 'tasks' }
+  | { kind: 'memory' }
+  | { kind: 'viewPlan' }
   | { kind: 'editPrompt' }
   | { kind: 'toggle'; flag: 'timestamps' | 'compactMode' | 'multiline' }
   | { kind: 'tutorial' }
@@ -58,9 +64,12 @@ const ALIASES: Record<string, string> = {
   t: 'theme',
   ml: 'multiline',
   mem: 'memory',
+  worktree: 'worktrees',
   sessions: 'dashboard',
   'agents-dashboard': 'dashboard',
-  agents: 'config-agents',
+  agents: 'agents',
+  'config-agents': 'agents',
+  personas: 'agents',
   'show-plan': 'view-plan',
   'plan-view': 'view-plan',
 };
@@ -69,6 +78,7 @@ export const HOST_COMMANDS = new Set([
   'new',
   'resume',
   'dashboard',
+  'agents',
   'home',
   'login',
   'logout',
@@ -107,6 +117,10 @@ export const HOST_COMMANDS = new Set([
   'release-notes',
   'always-approve',
   'theme',
+  'worktrees',
+  'tasks',
+  'memory',
+  'view-plan',
 ]);
 
 export function parseSlash(text: string): { command: string; args: string } | undefined {
@@ -139,8 +153,11 @@ export function classifySlash(text: string): HostAction {
     case 'new':
       return { kind: 'newSession' };
     case 'resume':
-    case 'dashboard':
       return { kind: 'resume' };
+    case 'dashboard':
+      return { kind: 'dashboard' };
+    case 'agents':
+      return { kind: 'agents' };
     case 'home':
       return { kind: 'home' };
     case 'login':
@@ -198,6 +215,14 @@ export function classifySlash(text: string): HostAction {
       return { kind: 'btw', text: args || undefined };
     case 'mcps':
       return { kind: 'mcpSettings' };
+    case 'worktrees':
+      return { kind: 'worktrees' };
+    case 'tasks':
+      return { kind: 'tasks' };
+    case 'memory':
+      return { kind: 'memory' };
+    case 'view-plan':
+      return { kind: 'viewPlan' };
     case 'skills':
     case 'plugins':
     case 'hooks':
@@ -264,7 +289,13 @@ export const FALLBACK_COMMANDS: SlashCommand[] = [
   { name: 'hooks', description: 'Hooks' },
   { name: 'marketplace', description: 'Plugin marketplace' },
   { name: 'workflows', description: 'Saved workflow catalog' },
-  { name: 'fork', description: 'Branch this session' },
+  { name: 'worktrees', description: 'List, apply, or remove git worktrees' },
+  { name: 'tasks', description: 'Background tasks' },
+  { name: 'memory', description: 'Browse memory files' },
+  { name: 'view-plan', description: 'View the current plan' },
+  { name: 'dashboard', description: 'Multi-agent session dashboard' },
+  { name: 'agents', description: 'Manage agent definitions and personas' },
+  { name: 'fork', description: 'Branch this session (optional git worktree)' },
   { name: 'rename', description: 'Rename this session', hint: '<title> | --auto' },
   { name: 'delete', description: 'Delete this session' },
   { name: 'session-info', description: 'Show session details' },

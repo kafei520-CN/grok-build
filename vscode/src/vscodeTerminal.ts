@@ -101,6 +101,7 @@ class VscodeAgentTerminal implements AgentTerminal {
   release(): void {
     if (!this.exit) {
       this.kill();
+      this.finish({ signal: 'SIGTERM' });
     }
     this.child = undefined;
     this.write.dispose();

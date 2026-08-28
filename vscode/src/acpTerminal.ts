@@ -46,6 +46,19 @@ export async function handleTerminalMethod(name: string, params: unknown): Promi
   return {};
 }
 
+/** Kill every ACP PTY. Called when the agent or extension shuts down. */
+export function disposeAllTerminals(): void {
+  const all = [...terms.values()];
+  terms.clear();
+  for (const term of all) {
+    try {
+      term.release();
+    } catch {
+      /* ignore teardown errors */
+    }
+  }
+}
+
 export function spawnProcessTerminal(opts: AgentTerminalSpawn): AgentTerminal {
   return new ProcessTerminal(opts);
 }
@@ -158,6 +171,7 @@ class ProcessTerminal implements AgentTerminal {
   release(): void {
     if (!this.exit) {
       this.kill();
+      this.finish({ signal: 'SIGTERM' });
     }
     this.child = undefined;
   }

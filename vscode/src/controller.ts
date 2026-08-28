@@ -47,33 +47,93 @@ import {
   toggleSkill as toggleSkillDir,
 } from './skillsHost';
 import { listApiEndpoints, removeApiEndpoint, saveApiEndpoint } from './apiEndpoints';
+import {
+  deleteAgent as removeAgentFile,
+  importAgentFiles,
+  listAgents,
+  toggleAgent as toggleAgentFile,
+} from './agentsHost';
+import {
+  deletePersona as removePersonaFile,
+  importPersonaFiles,
+  listPersonas,
+  togglePersona as togglePersonaFile,
+} from './personasHost';
+import { gitProbePaths } from './fork';
+import { listMemoryFiles, latestPlan } from './memoryHost';
+import {
+  OTHER_LABEL,
+  PLAN_DECLINE,
+  PLAN_DECLINE_FEEDBACK,
+  PLAN_EXECUTE,
+  PLAN_SUPPLEMENT,
+  acceptedAskResponse,
+  askCardForPlan,
+  askCardForQuestion,
+  cancelledAskResponse,
+  exitPlanResponse,
+  parseAskQuestions,
+  parseExitPlan,
+  type AskQuestion,
+} from './planAsk';
+import { rosterFromHistory } from './roster';
 import { runSlashAction, type SlashRuntime } from './slashHost';
 import type {
   AccountInfo,
+  AgentDefItem,
   Attachment,
   ChatMessage,
   ChatState,
   ChatStatus,
   DrawerId,
+  AskCard,
   GrokSettings,
   PermissionPrompt,
+  PersonaItem,
+  RosterEntry,
   RuleItem,
   SessionRow,
   SkillItem,
   SessionUpdate,
   SettingsPage,
   SlashCommandInfo,
+  SubagentLive,
   ApiEndpoint,
   McpItem,
   ThemeColors,
+  WorktreeItem,
+  PluginItem,
+  HookItem,
+  MarketplacePlugin,
+  WorkflowItem,
+  TaskItem,
+  MemoryFile,
 } from './types';
 import { parseMcpList } from './mcpHost';
-import { pickAllowOption, selectedPermission, sessionPermissionMeta, shouldAutoApprove } from './permissions';
+import {
+  cancelledPermission,
+  pickAllowOption,
+  selectedPermission,
+  sessionPermissionMeta,
+  settlePending,
+  shouldAutoApprove,
+} from './permissions';
+import { disposeAllTerminals } from './acpTerminal';
+import { AGENT_RECONNECT_MAX, reconnectDelayMs } from './reconnect';
 import { workspaceStartupHints } from './startup';
 import { DEFAULT_THEME, normalizeTheme } from './theme';
 
 interface PendingPermission {
   resolve: (value: unknown) => void;
+}
+
+interface PendingAsk {
+  resolve: (value: unknown) => void;
+  kind: 'question' | 'plan';
+  questions: AskQuestion[];
+  index: number;
+  answers: Record<string, string[]>;
+  annotations: Record<string, { notes?: string }>;
 }
 
 export class GrokController implements SlashRuntime {
@@ -91,6 +151,19 @@ export class GrokController implements SlashRuntime {
   skills: SkillItem[] = [];
   apis: ApiEndpoint[] = [];
   mcps: McpItem[] = [];
+  agents: AgentDefItem[] = [];
+  personas: PersonaItem[] = [];
+  roster: RosterEntry[] = [];
+  subagents: SubagentLive[] = [];
+  agentProfile?: string;
+  worktrees: WorktreeItem[] = [];
+  plugins: PluginItem[] = [];
+  hooks: HookItem[] = [];
+  marketplace: MarketplacePlugin[] = [];
+  workflows: WorkflowItem[] = [];
+  tasks: TaskItem[] = [];
+  memoryFiles: MemoryFile[] = [];
+  extTab: 'plugins' | 'marketplace' | 'hooks' | 'workflows' = 'plugins';
   theme: ThemeColors = DEFAULT_THEME;
   history?: string[];
   drawer?: DrawerId;
@@ -102,18 +175,23 @@ export class GrokController implements SlashRuntime {
   private loginView?: ChatState['login'];
   private models?: ChatState['models'];
   private permission?: PermissionPrompt;
+  private ask?: AskCard;
+  private askPending?: PendingAsk;
   private cliPath?: string;
   private agentVersion?: string;
   private modeId = 'default';
   private commands: SlashCommandInfo[] = FALLBACK_COMMANDS;
   private sessions?: SessionRow[];
   private currentSessionId?: string;
+  private sessionCwd?: string;
   private restoringSession = false;
   private replaying = false;
   private authSeq = 0;
   private turn = 0;
   private starting?: Promise<void>;
   private wantAgent = false;
+  private reconnectFails = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   private readonly listeners = new Set<(state: ChatState) => void>();
   private readonly streamListeners = new Set<(tail: import('./types').StreamTail) => void>();
@@ -124,8 +202,13 @@ export class GrokController implements SlashRuntime {
   private pendingModelId?: string;
   private pendingEffort?: string;
   private runGen = 0;
+  private agentGen = 0;
   private sessionOp = 0;
   private hideSessionPreview = false;
+  private dashSeq = 0;
+  private dashTimer?: ReturnType<typeof setTimeout>;
+  private taskSeq = 0;
+  private taskTimer?: ReturnType<typeof setTimeout>;
   private readonly disposables: Array<{ dispose(): void }> = [];
   readonly journal: EditJournal;
   readonly meter: ContextMeter;
@@ -138,6 +221,8 @@ export class GrokController implements SlashRuntime {
     this.timestamps = plat().getState('ui.timestamps', true);
     this.multiline = Boolean(plat().getState('ui.multiline', false));
     this.theme = normalizeTheme(plat().getState('ui.theme', DEFAULT_THEME));
+    const profile = plat().getState('ui.agentProfile', '');
+    this.agentProfile = typeof profile === 'string' && profile.trim() ? profile.trim() : undefined;
     this.journal = new EditJournal({
       messages: () => this.messages,
       replaying: () => this.replaying,
@@ -163,8 +248,26 @@ export class GrokController implements SlashRuntime {
   }
 
   dispose(): void {
+    this.wantAgent = false;
+    this.abortClientRpcs('cancel');
     this.flushEmitTimer();
-    this.agent?.dispose();
+    this.dashSeq += 1;
+    if (this.dashTimer) {
+      clearTimeout(this.dashTimer);
+      this.dashTimer = undefined;
+    }
+    this.taskSeq += 1;
+    if (this.taskTimer) {
+      clearTimeout(this.taskTimer);
+      this.taskTimer = undefined;
+    }
+    if (this.searchTimer) {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = undefined;
+    }
+    this.clearReconnectTimer();
+    this.reconnectFails = 0;
+    this.dropAgent();
     for (const d of this.disposables) {
       d.dispose();
     }
@@ -198,6 +301,7 @@ export class GrokController implements SlashRuntime {
           : message,
       ),
       permission: this.permission,
+      ask: this.ask,
       attachments: this.attachments,
       agentVersion: this.agentVersion,
       commands: this.commands,
@@ -225,6 +329,19 @@ export class GrokController implements SlashRuntime {
       skills: this.skills,
       apis: this.apis,
       mcps: this.mcps,
+      agents: this.agents,
+      personas: this.personas,
+      roster: this.roster,
+      subagents: this.subagents,
+      agentProfile: this.agentProfile,
+      worktrees: this.worktrees,
+      plugins: this.plugins,
+      hooks: this.hooks,
+      marketplace: this.marketplace,
+      workflows: this.workflows,
+      tasks: this.tasks,
+      memoryFiles: this.memoryFiles,
+      extTab: this.extTab,
       theme: this.theme,
     };
   }
@@ -235,13 +352,22 @@ export class GrokController implements SlashRuntime {
       this.emit();
       return;
     }
+    this.clearReconnectTimer();
     if (this.starting) {
       return this.starting;
     }
-    this.starting = this.startInner().finally(() => {
-      this.starting = undefined;
+    this.reconnectFails = 0;
+    return this.beginStart();
+  }
+
+  private beginStart(): Promise<void> {
+    const run = this.startInner().finally(() => {
+      if (this.starting === run) {
+        this.starting = undefined;
+      }
     });
-    return this.starting;
+    this.starting = run;
+    return run;
   }
 
   private async ensureAgent(): Promise<void> {
@@ -252,12 +378,16 @@ export class GrokController implements SlashRuntime {
   }
 
   async restart(): Promise<void> {
-    this.agent?.dispose();
-    this.agent = undefined;
+    this.wantAgent = true;
+    this.runGen += 1;
+    this.sessionOp += 1;
+    this.reconnectFails = 0;
+    this.abortClientRpcs('cancel');
+    this.queue = [];
+    this.dropAgent();
     this.messages = [];
     this.journal.clear();
-    this.permission = undefined;
-    await this.start();
+    await this.beginStart();
   }
 
   async newSession(): Promise<void> {
@@ -266,12 +396,13 @@ export class GrokController implements SlashRuntime {
     this.agent?.clearSession();
     this.messages = [];
     this.journal.clear();
-    this.permission = undefined;
     this.drawer = undefined;
+    this.stopDashboardPoll();
     this.replaying = false;
     this.restoringSession = false;
     this.hideSessionPreview = true;
     this.currentSessionId = undefined;
+    this.sessionCwd = undefined;
     this.setStatus('ready');
   }
 
@@ -348,6 +479,7 @@ export class GrokController implements SlashRuntime {
     } catch (error) {
       logError('logout failed', error);
     }
+    this.abortClientRpcs('cancel');
     this.account = undefined;
     this.messages = [];
     this.journal.clear();
@@ -410,12 +542,11 @@ export class GrokController implements SlashRuntime {
       }
     }
     if (this.status === 'streaming') {
-      this.queue = [...this.queue, trimmed];
-      this.emit();
       try {
         await agent.interject(trimmed);
       } catch {
-        /* queued locally; flushed after the current turn */
+        this.queue = [...this.queue, trimmed];
+        this.emit();
       }
       return;
     }
@@ -473,6 +604,7 @@ export class GrokController implements SlashRuntime {
 
   cancelTurn(): void {
     this.runGen += 1;
+    this.abortClientRpcs('cancel');
     this.agent?.cancelTurn();
     this.queue = [];
     if (this.status === 'streaming') {
@@ -501,10 +633,204 @@ export class GrokController implements SlashRuntime {
       return;
     }
     const pending = this.pendingPermissions.get(current.requestId);
-    pending?.resolve({ outcome: { outcome: 'cancelled' } });
+    pending?.resolve(cancelledPermission());
     this.pendingPermissions.delete(current.requestId);
     this.permission = undefined;
     this.emit();
+  }
+
+  async askUserQuestion(params: unknown): Promise<unknown> {
+    const questions = parseAskQuestions(params);
+    if (!questions.length) {
+      return cancelledAskResponse();
+    }
+    this.dismissAsk('replace');
+    const requestId = `ask-${++this.turn}`;
+    this.ask = askCardForQuestion(requestId, questions, 0);
+    this.emit();
+    return new Promise((resolve) => {
+      this.askPending = {
+        resolve,
+        kind: 'question',
+        questions,
+        index: 0,
+        answers: {},
+        annotations: {},
+      };
+    });
+  }
+
+  async reviewPlan(params: unknown): Promise<unknown> {
+    const parsed = parseExitPlan(params);
+    const plan = parsed.plan?.trim() || latestPlan(this.messages);
+    this.dismissAsk('replace');
+    const requestId = `plan-${++this.turn}`;
+    this.ask = askCardForPlan(requestId, plan);
+    this.emit();
+    return new Promise((resolve) => {
+      this.askPending = {
+        resolve,
+        kind: 'plan',
+        questions: [],
+        index: 0,
+        answers: {},
+        annotations: {},
+      };
+    });
+  }
+
+  answerAsk(choiceId: string, notes?: string): void {
+    const pending = this.askPending;
+    const card = this.ask;
+    if (!pending || !card) {
+      return;
+    }
+    if (pending.kind === 'plan') {
+      this.finishPlanAsk(choiceId, notes);
+      return;
+    }
+    const question = pending.questions[pending.index];
+    if (!question) {
+      this.finishAsk(cancelledAskResponse());
+      return;
+    }
+    const choice = question.options.find((row) => row.id === choiceId || row.label === choiceId);
+    const other = Boolean(choice?.other) || choiceId === OTHER_LABEL;
+    const note = notes?.trim();
+    if (other && !note) {
+      return;
+    }
+    pending.answers[question.text] = [other ? OTHER_LABEL : choice?.label ?? choiceId];
+    if (other && note) {
+      pending.annotations[question.text] = { notes: note };
+    }
+    pending.index += 1;
+    if (pending.index >= pending.questions.length) {
+      this.finishAsk(acceptedAskResponse(pending.answers, pending.annotations));
+      return;
+    }
+    this.ask = askCardForQuestion(card.requestId, pending.questions, pending.index);
+    this.emit();
+  }
+
+  cancelAsk(): void {
+    this.dismissAsk('cancel');
+    this.emit();
+  }
+
+  private finishPlanAsk(choiceId: string, notes?: string): void {
+    if (choiceId === PLAN_EXECUTE) {
+      this.finishAsk(exitPlanResponse('approved'));
+      return;
+    }
+    if (choiceId === PLAN_SUPPLEMENT) {
+      const note = notes?.trim();
+      if (!note) {
+        return;
+      }
+      this.finishAsk(exitPlanResponse('cancelled', note));
+      return;
+    }
+    if (choiceId === PLAN_DECLINE) {
+      this.finishAsk(exitPlanResponse('cancelled', PLAN_DECLINE_FEEDBACK));
+    }
+  }
+
+  private finishAsk(value: unknown): void {
+    const pending = this.askPending;
+    this.askPending = undefined;
+    this.ask = undefined;
+    pending?.resolve(value);
+    this.emit();
+  }
+
+  private dismissAsk(reason: 'cancel' | 'replace'): void {
+    const pending = this.askPending;
+    if (!pending) {
+      this.ask = undefined;
+      return;
+    }
+    this.askPending = undefined;
+    this.ask = undefined;
+    pending.resolve(
+      pending.kind === 'plan'
+        ? exitPlanResponse('cancelled', reason === 'cancel' ? PLAN_DECLINE_FEEDBACK : undefined)
+        : cancelledAskResponse(),
+    );
+  }
+
+  private dismissPermissions(): void {
+    settlePending(this.pendingPermissions, cancelledPermission());
+    this.permission = undefined;
+  }
+
+  /** Answer every reverse ACP request so the CLI is not left waiting. */
+  private abortClientRpcs(reason: 'cancel' | 'replace'): void {
+    this.dismissAsk(reason);
+    this.dismissPermissions();
+  }
+
+  private dropAgent(): void {
+    this.agentGen += 1;
+    this.clearReconnectTimer();
+    const agent = this.agent;
+    this.agent = undefined;
+    try {
+      agent?.dispose();
+    } catch {
+      /* already dead */
+    }
+    disposeAllTerminals();
+  }
+
+  private onAgentLost(epoch: number, error: Error): void {
+    if (epoch !== this.agentGen) {
+      return;
+    }
+    this.agent = undefined;
+    this.abortClientRpcs('cancel');
+    disposeAllTerminals();
+    this.agentGen += 1;
+    if (!this.wantAgent) {
+      return;
+    }
+    this.scheduleReconnect(error);
+  }
+
+  private clearReconnectTimer(): void {
+    if (!this.reconnectTimer) {
+      return;
+    }
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+  }
+
+  private scheduleReconnect(error: Error): void {
+    if (this.status === 'streaming') {
+      this.finishAssistant();
+      this.status = 'ready';
+    }
+    this.reconnectFails += 1;
+    const delay = reconnectDelayMs(this.reconnectFails);
+    if (delay === undefined) {
+      logWarn(`agent exited, giving up after ${this.reconnectFails} attempts: ${error.message}`);
+      this.fail(tr('agentExitedGiveUp'), error);
+      return;
+    }
+    logWarn(
+      `agent exited, retry ${this.reconnectFails}/${AGENT_RECONNECT_MAX} in ${delay}ms: ${error.message}`,
+    );
+    this.error = tr('agentExited');
+    this.emit();
+    this.clearReconnectTimer();
+    const epoch = this.agentGen;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      if (!this.wantAgent || epoch !== this.agentGen || this.agent || this.starting) {
+        return;
+      }
+      void this.beginStart();
+    }, delay);
   }
 
   addSelection(): void {
@@ -644,13 +970,45 @@ export class GrokController implements SlashRuntime {
   }
 
   async forkCurrent(): Promise<void> {
+    const agent = this.agent;
+    const sourceId = this.currentSessionId ?? agent?.sessionId;
+    if (!agent || !sourceId) {
+      plat().warn(tr('forkNeedSession'));
+      return;
+    }
+    const sourceCwd = this.sessionCwd ?? this.cwd();
     try {
-      const id = await this.agent?.forkSession();
+      let worktree = false;
+      if (await isGitCwd(sourceCwd)) {
+        const pick = await plat().pick(tr('forkWorktreeQ'), [
+          { label: tr('forkWorktreeYes'), description: tr('forkWorktreeYesHint'), value: 'yes' },
+          { label: tr('forkWorktreeNo'), description: tr('forkWorktreeNoHint'), value: 'no' },
+        ]);
+        if (!pick) {
+          return;
+        }
+        worktree = pick === 'yes';
+      }
+      if (worktree) {
+        const resumed = await agent.resumeInWorktree(sourceId, sourceCwd);
+        if (!resumed?.sessionId) {
+          plat().warn(tr('forkWorktreeFailed'));
+          return;
+        }
+        await this.loadSession(resumed.sessionId, resumed.cwd || sourceCwd);
+        return;
+      }
+      const id = await agent.forkSession({
+        sourceSessionId: sourceId,
+        sourceCwd,
+        newCwd: sourceCwd,
+        sessionKind: 'fork',
+      });
       if (!id) {
         plat().warn(tr('forkFailed'));
         return;
       }
-      await this.loadSession(id, this.cwd());
+      await this.loadSession(id, sourceCwd);
     } catch (error) {
       this.fail('Fork failed', error);
     }
@@ -740,12 +1098,13 @@ export class GrokController implements SlashRuntime {
       this.cwd();
     this.messages = [];
     this.journal.clear();
-    this.permission = undefined;
     this.drawer = undefined;
+    this.stopDashboardPoll();
     this.hideSessionPreview = false;
     this.restoringSession = true;
     this.replaying = true;
     this.currentSessionId = sessionId;
+    this.sessionCwd = cwd;
     this.emit();
     try {
       const result = await agent.loadSession(sessionId, cwd, this.sessionMeta());
@@ -863,11 +1222,114 @@ export class GrokController implements SlashRuntime {
   closeDrawer(): void {
     this.drawer = undefined;
     this.drawerBody = undefined;
+    this.stopDashboardPoll();
+    this.stopTaskPoll();
     this.emit();
+  }
+
+  async openDashboard(): Promise<void> {
+    this.settingsOpen = false;
+    this.drawer = 'dashboard';
+    this.emit();
+    await this.refreshDashboardInner();
+  }
+
+  refreshDashboard(): void {
+    if (this.drawer !== 'dashboard') {
+      return;
+    }
+    void this.refreshDashboardInner();
+  }
+
+  stopRosterSession(sessionId: string): void {
+    if (sessionId === this.currentSessionId) {
+      this.cancelTurn();
+      this.refreshDashboard();
+      return;
+    }
+    this.agent?.cancelSession(sessionId);
+    this.refreshDashboard();
+  }
+
+  async cancelSubagent(subagentId: string): Promise<void> {
+    try {
+      await this.agent?.cancelSubagent(subagentId);
+    } catch (error) {
+      plat().warn(error instanceof Error ? error.message : String(error));
+    }
+    this.refreshDashboard();
+  }
+
+  async dashboardDispatch(text: string, sessionId?: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    if (sessionId && sessionId !== this.currentSessionId) {
+      const row = this.roster.find((item) => item.id === sessionId);
+      await this.loadSession(sessionId, row?.cwd);
+    } else {
+      this.closeDrawer();
+    }
+    await this.send(trimmed);
+  }
+
+  private stopDashboardPoll(): void {
+    this.dashSeq += 1;
+    if (this.dashTimer) {
+      clearTimeout(this.dashTimer);
+      this.dashTimer = undefined;
+    }
+  }
+
+  private async refreshDashboardInner(): Promise<void> {
+    const seq = ++this.dashSeq;
+    if (this.dashTimer) {
+      clearTimeout(this.dashTimer);
+      this.dashTimer = undefined;
+    }
+    try {
+      try {
+        this.roster = (await this.agent?.listRoster()) ?? [];
+      } catch (error) {
+        logWarn(`roster: ${error instanceof Error ? error.message : error}`);
+        this.roster = [];
+      }
+      if (!this.roster.length) {
+        if (!this.sessions?.length) {
+          await this.refreshSessionsSilent();
+        }
+        this.roster = rosterFromHistory(
+          this.sessions ?? [],
+          this.currentSessionId,
+          this.status === 'streaming',
+        );
+      }
+      const sid = this.currentSessionId ?? this.agent?.sessionId;
+      try {
+        this.subagents = sid ? ((await this.agent?.listRunningSubagents(sid)) ?? []) : [];
+      } catch (error) {
+        logWarn(`subagents: ${error instanceof Error ? error.message : error}`);
+        this.subagents = [];
+      }
+      if (seq === this.dashSeq) {
+        this.emit();
+      }
+    } catch (error) {
+      logWarn(`dashboard: ${error instanceof Error ? error.message : error}`);
+    }
+    if (this.drawer === 'dashboard' && seq === this.dashSeq) {
+      this.dashTimer = setTimeout(() => {
+        if (this.drawer === 'dashboard') {
+          void this.refreshDashboardInner();
+        }
+      }, 2500);
+    }
   }
 
   openSettings(): void {
     this.drawer = undefined;
+    this.stopDashboardPoll();
     this.settingsOpen = true;
     this.settingsPage = 'main';
     this.emit();
@@ -875,6 +1337,8 @@ export class GrokController implements SlashRuntime {
     void this.refreshSkills();
     void this.refreshApis();
     void this.refreshMcps();
+    void this.refreshAgents();
+    void this.refreshPersonas();
   }
 
   closeSettings(): void {
@@ -1038,6 +1502,458 @@ export class GrokController implements SlashRuntime {
 
   closeMcps(): void {
     this.settingsPage = 'main';
+    this.emit();
+  }
+
+  openAgents(): void {
+    this.drawer = undefined;
+    this.stopDashboardPoll();
+    this.settingsOpen = true;
+    this.settingsPage = 'agents';
+    this.emit();
+    void this.refreshAgents();
+    void this.refreshPersonas();
+  }
+
+  closeAgents(): void {
+    this.settingsPage = 'main';
+    this.emit();
+  }
+
+  async importAgents(): Promise<void> {
+    const picked = await plat().openFiles({
+      title: tr('settingsAgentsImport'),
+      filters: { Markdown: ['md'], Text: ['txt'] },
+    });
+    if (!picked?.length) {
+      return;
+    }
+    const n = await importAgentFiles(picked);
+    await this.refreshAgents();
+    plat().info(tr('settingsAgentsImported', { n }));
+  }
+
+  async toggleAgent(id: string): Promise<void> {
+    const row = this.agents.find((item) => item.id === id);
+    if (!row?.filePath) {
+      return;
+    }
+    await toggleAgentFile(row.filePath);
+    await this.refreshAgents();
+  }
+
+  async deleteAgent(id: string): Promise<void> {
+    const row = this.agents.find((item) => item.id === id);
+    if (!row?.filePath) {
+      return;
+    }
+    const ok = await plat().confirm(
+      tr('settingsAgentsDeleteConfirm', { name: row.name }),
+      tr('settingsRulesDelete'),
+    );
+    if (!ok) {
+      return;
+    }
+    await removeAgentFile(row.filePath);
+    if (this.agentProfile === row.name) {
+      await this.setAgentProfile('');
+    }
+    await this.refreshAgents();
+  }
+
+  openAgent(id: string): void {
+    const row = this.agents.find((item) => item.id === id);
+    if (row?.filePath) {
+      void plat().openFile(row.filePath, false);
+    }
+  }
+
+  async setAgentProfile(name: string): Promise<void> {
+    const next = name.trim() && name !== 'grok-build' ? name.trim() : undefined;
+    this.agentProfile = next;
+    await plat().setState('ui.agentProfile', next ?? '');
+    this.emit();
+    plat().info(tr('settingsAgentsApplied', { name: next ?? 'grok-build' }));
+  }
+
+  async importPersonas(): Promise<void> {
+    const picked = await plat().openFiles({
+      title: tr('settingsPersonasImport'),
+      filters: { TOML: ['toml'] },
+    });
+    if (!picked?.length) {
+      return;
+    }
+    const n = await importPersonaFiles(picked);
+    await this.refreshPersonas();
+    plat().info(tr('settingsPersonasImported', { n }));
+  }
+
+  async togglePersona(id: string): Promise<void> {
+    const row = this.personas.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    await togglePersonaFile(row.filePath);
+    await this.refreshPersonas();
+  }
+
+  async deletePersona(id: string): Promise<void> {
+    const row = this.personas.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    const ok = await plat().confirm(
+      tr('settingsPersonasDeleteConfirm', { name: row.name }),
+      tr('settingsRulesDelete'),
+    );
+    if (!ok) {
+      return;
+    }
+    await removePersonaFile(row.filePath);
+    await this.refreshPersonas();
+  }
+
+  openPersona(id: string): void {
+    const row = this.personas.find((item) => item.id === id);
+    if (row) {
+      void plat().openFile(row.filePath, false);
+    }
+  }
+
+  private async refreshAgents(): Promise<void> {
+    try {
+      this.agents = await listAgents();
+      this.emit();
+    } catch (error) {
+      logWarn(`agents list: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  private async refreshPersonas(): Promise<void> {
+    try {
+      this.personas = await listPersonas();
+      this.emit();
+    } catch (error) {
+      logWarn(`personas list: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  openWorktrees(): void {
+    this.drawer = undefined;
+    this.stopDashboardPoll();
+    this.settingsOpen = true;
+    this.settingsPage = 'worktrees';
+    this.emit();
+    void this.refreshWorktrees();
+  }
+
+  closeWorktrees(): void {
+    this.settingsPage = 'main';
+    this.emit();
+  }
+
+  async applyWorktree(id: string): Promise<void> {
+    const agent = this.agent;
+    if (!agent) {
+      return;
+    }
+    if (!this.worktrees.length) {
+      await this.refreshWorktrees();
+    }
+    const wt =
+      this.worktrees.find((item) => item.id === id || item.path === id) ??
+      this.worktrees.find((item) => item.sessionId === id);
+    const roster = this.roster.find((item) => item.id === id || item.cwd === id);
+    const wtPath = wt?.path || roster?.cwd || id;
+    const sessionId = wt?.sessionId ?? roster?.id ?? this.currentSessionId;
+    if (!sessionId || !wtPath) {
+      plat().warn(tr('settingsWorktreesNeedSession'));
+      return;
+    }
+    const mode = await plat().pick(tr('settingsWorktreesApply'), [
+      { label: tr('settingsWorktreesMerge'), description: tr('settingsWorktreesMergeHint'), value: 'merge' as const },
+      {
+        label: tr('settingsWorktreesOverwrite'),
+        description: tr('settingsWorktreesOverwriteHint'),
+        value: 'overwrite' as const,
+      },
+    ]);
+    if (!mode) {
+      return;
+    }
+    try {
+      const result = await agent.applyWorktree(sessionId, wtPath, mode);
+      if (result.ok) {
+        plat().info(tr('settingsWorktreesApplyOk', { n: result.files ?? 0 }));
+      } else {
+        plat().warn(tr('settingsWorktreesApplyConflict', { n: result.conflicts ?? 0 }));
+      }
+      await this.refreshWorktrees();
+    } catch (error) {
+      this.fail('Worktree apply failed', error);
+    }
+  }
+
+  async removeWorktree(id: string): Promise<void> {
+    const row = this.worktrees.find((item) => item.id === id);
+    const ok = await plat().confirm(
+      tr('settingsWorktreesRemoveConfirm', { name: row?.label ?? row?.path ?? id }),
+      tr('settingsWorktreesRemove'),
+    );
+    if (!ok) {
+      return;
+    }
+    try {
+      await this.agent?.removeWorktree(row?.path ?? row?.id ?? id);
+      plat().info(tr('settingsWorktreesRemoved'));
+      await this.refreshWorktrees();
+    } catch (error) {
+      this.fail('Worktree remove failed', error);
+    }
+  }
+
+  private async refreshWorktrees(): Promise<void> {
+    try {
+      this.worktrees = (await this.agent?.listWorktrees()) ?? [];
+      this.emit();
+    } catch (error) {
+      logWarn(`worktrees: ${error instanceof Error ? error.message : error}`);
+      this.worktrees = [];
+      this.emit();
+    }
+  }
+
+  openExt(tab?: string): void {
+    this.drawer = undefined;
+    this.stopDashboardPoll();
+    this.settingsOpen = true;
+    this.settingsPage = 'extensions';
+    if (tab === 'marketplace' || tab === 'hooks' || tab === 'workflows' || tab === 'plugins') {
+      this.extTab = tab;
+    }
+    this.emit();
+    void this.refreshExt();
+  }
+
+  closeExt(): void {
+    this.settingsPage = 'main';
+    this.emit();
+  }
+
+  setExtTab(tab: 'plugins' | 'marketplace' | 'hooks' | 'workflows'): void {
+    this.extTab = tab;
+    this.emit();
+    void this.refreshExt();
+  }
+
+  async togglePlugin(id: string): Promise<void> {
+    const row = this.plugins.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    const action = row.enabled
+      ? { type: 'disable', pluginId: row.id }
+      : { type: 'enable', pluginId: row.id };
+    await this.runPluginAction(action);
+  }
+
+  async uninstallPlugin(id: string): Promise<void> {
+    const row = this.plugins.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    const ok = await plat().confirm(tr('settingsPluginsDeleteConfirm', { name: row.name }), tr('settingsRulesDelete'));
+    if (!ok) {
+      return;
+    }
+    await this.runPluginAction({ type: 'uninstall', pluginId: row.id, confirmed: true });
+  }
+
+  async toggleHook(id: string): Promise<void> {
+    const row = this.hooks.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    const action = row.enabled
+      ? { type: 'disable', hookName: row.name }
+      : { type: 'enable', hookName: row.name };
+    try {
+      const result = await this.agent?.hookAction(action);
+      if (result && !result.ok) {
+        plat().warn(result.message);
+      }
+      await this.refreshExt();
+    } catch (error) {
+      plat().warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async installMarketplace(id: string): Promise<void> {
+    const row = this.marketplace.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    try {
+      const result = await this.agent?.marketplaceAction({
+        type: 'install',
+        sourceUrlOrPath: row.sourceUrl,
+        pluginRelativePath: row.relativePath,
+      });
+      plat().info(result?.message ?? tr('settingsMarketplaceInstalled'));
+      await this.refreshExt();
+    } catch (error) {
+      plat().warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async refreshMarketplace(): Promise<void> {
+    try {
+      await this.agent?.marketplaceAction({ type: 'refresh' });
+    } catch (error) {
+      logWarn(`marketplace refresh: ${error instanceof Error ? error.message : error}`);
+    }
+    await this.refreshExt();
+  }
+
+  async runWorkflow(name: string): Promise<void> {
+    this.closeSettings();
+    await this.sendAgentSlash(`/workflow ${name}`);
+  }
+
+  private async runPluginAction(action: Record<string, unknown>): Promise<void> {
+    try {
+      const result = await this.agent?.pluginAction(action);
+      if (result && !result.ok) {
+        plat().warn(result.message);
+      } else if (result?.message) {
+        plat().info(result.message);
+      }
+      await this.refreshExt();
+    } catch (error) {
+      plat().warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async refreshExt(): Promise<void> {
+    const tab = this.extTab;
+    try {
+      if (tab === 'plugins') {
+        this.plugins = (await this.agent?.listPlugins()) ?? [];
+      } else if (tab === 'hooks') {
+        this.hooks = (await this.agent?.listHooks()) ?? [];
+      } else if (tab === 'marketplace') {
+        this.marketplace = (await this.agent?.listMarketplace()) ?? [];
+      } else {
+        this.workflows = (await this.agent?.listWorkflows()) ?? [];
+      }
+      this.emit();
+    } catch (error) {
+      logWarn(`extensions ${tab}: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  async openTasks(): Promise<void> {
+    this.settingsOpen = false;
+    this.drawer = 'tasks';
+    this.emit();
+    await this.refreshTasksInner();
+  }
+
+  async killTask(taskId: string): Promise<void> {
+    try {
+      await this.agent?.killTask(taskId);
+    } catch (error) {
+      plat().warn(error instanceof Error ? error.message : String(error));
+    }
+    await this.refreshTasksInner();
+  }
+
+  private stopTaskPoll(): void {
+    this.taskSeq += 1;
+    if (this.taskTimer) {
+      clearTimeout(this.taskTimer);
+      this.taskTimer = undefined;
+    }
+  }
+
+  private async refreshTasksInner(): Promise<void> {
+    const seq = ++this.taskSeq;
+    if (this.taskTimer) {
+      clearTimeout(this.taskTimer);
+      this.taskTimer = undefined;
+    }
+    try {
+      this.tasks = (await this.agent?.listTasks()) ?? [];
+      const sid = this.currentSessionId ?? this.agent?.sessionId;
+      this.subagents = sid ? ((await this.agent?.listRunningSubagents(sid)) ?? []) : [];
+      if (seq === this.taskSeq) {
+        this.emit();
+      }
+    } catch (error) {
+      logWarn(`tasks: ${error instanceof Error ? error.message : error}`);
+    }
+    if (this.drawer === 'tasks' && seq === this.taskSeq) {
+      this.taskTimer = setTimeout(() => {
+        if (this.drawer === 'tasks') {
+          void this.refreshTasksInner();
+        }
+      }, 2500);
+    }
+  }
+
+  openMemory(): void {
+    this.drawer = undefined;
+    this.stopDashboardPoll();
+    this.stopTaskPoll();
+    this.settingsOpen = true;
+    this.settingsPage = 'memory';
+    this.emit();
+    void this.refreshMemory();
+  }
+
+  closeMemory(): void {
+    this.settingsPage = 'main';
+    this.emit();
+  }
+
+  openMemoryFile(id: string): void {
+    const row = this.memoryFiles.find((item) => item.id === id);
+    void plat().openFile(row?.filePath ?? id, false);
+  }
+
+  async flushMemory(): Promise<void> {
+    if (!this.agent?.sessionId) {
+      plat().warn(tr('settingsMemoryNeedSession'));
+      return;
+    }
+    try {
+      await this.agent.flushMemory();
+      plat().info(tr('settingsMemoryFlushed'));
+      await this.refreshMemory();
+    } catch (error) {
+      plat().warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async refreshMemory(): Promise<void> {
+    try {
+      this.memoryFiles = await listMemoryFiles();
+      this.emit();
+    } catch (error) {
+      logWarn(`memory: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  openPlan(): void {
+    const plan = latestPlan(this.messages);
+    if (!plan) {
+      plat().warn(tr('planEmpty'));
+      return;
+    }
+    this.settingsOpen = false;
+    this.drawer = 'plan';
+    this.drawerBody = plan;
     this.emit();
   }
 
@@ -1310,6 +2226,7 @@ export class GrokController implements SlashRuntime {
         return selectedPermission(allow.optionId);
       }
     }
+    this.dismissPermissions();
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.permission = {
       requestId,
@@ -1352,6 +2269,7 @@ export class GrokController implements SlashRuntime {
   }
 
   private async startInner(): Promise<void> {
+    const epoch = this.agentGen;
     this.error = undefined;
     if (this.messages.length === 0) {
       this.setStatus('connecting');
@@ -1361,6 +2279,9 @@ export class GrokController implements SlashRuntime {
       return;
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
+    if (epoch !== this.agentGen) {
+      return;
+    }
     const cliPath = resolveGrokBinary({
       configuredPath: plat().getConfig('cliPath', ''),
       preferWorkspaceBinary: plat().getConfig('preferWorkspaceBinary', false),
@@ -1374,12 +2295,13 @@ export class GrokController implements SlashRuntime {
       return;
     }
     this.cliPath = cliPath;
+    let spawned: GrokAgent | undefined;
     try {
       const hints = this.startupHints();
       if (hints) {
         logInfo('heavy workspace: skip git status and project layout at session start');
       }
-      const agent = GrokAgent.spawn(
+      spawned = GrokAgent.spawn(
         {
           cliPath,
           cwd: this.cwd(),
@@ -1387,14 +2309,24 @@ export class GrokController implements SlashRuntime {
           startupHints: hints,
         },
         (method, params, id) => this.onIncoming(method, params, id),
+        (error) => this.onAgentLost(epoch, error),
       );
-      this.agent = agent;
-      const init = await agent.initialize();
-      this.agentVersion = agent.agentVersion();
+      if (epoch !== this.agentGen) {
+        spawned.dispose();
+        return;
+      }
+      const init = await spawned.initialize();
+      if (epoch !== this.agentGen) {
+        spawned.dispose();
+        return;
+      }
+      this.agent = spawned;
+      this.reconnectFails = 0;
+      this.agentVersion = spawned.agentVersion();
       this.models = modelsFromResult(init) ?? this.models;
       this.applyPendingModelSelection();
-      const methods = agent.authMethods();
-      const defaultId = agent.defaultAuthMethodId();
+      const methods = spawned.authMethods();
+      const defaultId = spawned.defaultAuthMethodId();
       logInfo(
         `initialize methods=${methods.map((m) => m.id).join(',')} default=${defaultId ?? ''}`,
       );
@@ -1406,20 +2338,46 @@ export class GrokController implements SlashRuntime {
       }
       const methodId = selectEagerAuthMethod(methods, defaultId);
       if (methodId) {
-        await agent.authenticate(methodId);
+        await spawned.authenticate(methodId);
       }
-      this.account = await agent.authInfo().catch(() => undefined);
-      this.commands = mergeCommands(agent.availableCommands(), FALLBACK_COMMANDS);
-      void agent.commandsList().then((cmds) => {
+      if (epoch !== this.agentGen) {
+        return;
+      }
+      this.account = await spawned.authInfo().catch(() => undefined);
+      if (epoch !== this.agentGen) {
+        return;
+      }
+      this.commands = mergeCommands(spawned.availableCommands(), FALLBACK_COMMANDS);
+      void spawned.commandsList().then((cmds) => {
+        if (epoch !== this.agentGen) {
+          return;
+        }
         this.commands = mergeCommands(cmds, FALLBACK_COMMANDS);
         this.emit();
       });
       this.setStatus('ready');
       void this.refreshApis();
       setTimeout(() => {
-        void this.refreshSessionsSilent();
+        if (epoch === this.agentGen) {
+          void this.refreshSessionsSilent();
+        }
       }, 800);
     } catch (error) {
+      const stillThisAttempt = epoch === this.agentGen;
+      if (this.agent === spawned) {
+        this.agent = undefined;
+      }
+      if (stillThisAttempt) {
+        this.agentGen += 1;
+      }
+      try {
+        spawned?.dispose();
+      } catch {
+        /* already dead */
+      }
+      if (!stillThisAttempt) {
+        return;
+      }
       this.fail('Could not start the Grok agent', error);
     }
   }
@@ -1533,6 +2491,9 @@ export class GrokController implements SlashRuntime {
     if (wantedEffort) {
       extra.reasoningEffort = wantedEffort;
     }
+    if (this.agentProfile) {
+      extra.agentProfile = this.agentProfile;
+    }
     return extra;
   }
 
@@ -1542,6 +2503,7 @@ export class GrokController implements SlashRuntime {
     const wantedEffort = this.selectedEffort();
     const result = await agent.newSession(this.cwd(), extra);
     this.currentSessionId = agent.sessionId ?? result.sessionId;
+    this.sessionCwd = this.cwd();
     this.models = modelsFromResult(result) ?? this.models;
     if (wantedId && this.models?.currentId !== wantedId) {
       try {
@@ -1630,6 +2592,15 @@ export class GrokController implements SlashRuntime {
     logError(message, error);
     this.emit();
   }
+}
+
+async function isGitCwd(cwd: string): Promise<boolean> {
+  for (const gitPath of gitProbePaths(cwd)) {
+    if (await plat().fileExists(gitPath)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function sleep(ms: number): Promise<void> {

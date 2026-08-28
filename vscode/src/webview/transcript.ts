@@ -4,8 +4,8 @@ import { permissionButtonClass, permissionLabelKey } from '../permissions';
 import type { ChatMessage, ChatState, FileEdit, PermissionOption, PermissionPrompt } from '../types';
 import { loc, post, render, tr, ui } from './app';
 import { bootStar, errorCard, home, loginCard, panel, setupCard } from './chrome';
-import { button } from './dom';
-import { iconCheck, iconCopy, iconFork, iconStar, toolIcon } from './icons';
+import { button, iconButton } from './dom';
+import { iconAskHint, iconCheck, iconChevron, iconClose, iconCopy, iconFork, iconStar, toolIcon } from './icons';
 import { fileName, renderMarkdown } from './markdown';
 
 type Turn = { user?: ChatMessage; assistant?: ChatMessage };
@@ -46,6 +46,7 @@ export function patchBody(parent: HTMLElement): void {
   if (kind === 'chat') {
     patchTranscript();
     patchPermission(body);
+    patchAsk(body);
     patchErrorBanner(body);
     return;
   }
@@ -121,6 +122,9 @@ function fillBody(el: HTMLElement): void {
   }
   if (ui.state.permission) {
     el.append(permissionBar());
+  }
+  if (ui.state.ask) {
+    el.append(askBar());
   }
   if (ui.state.error && status === 'error') {
     el.append(errorBanner(ui.state.error));
@@ -285,6 +289,32 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
   el.innerHTML = renderMarkdown(src);
 }
 
+function patchAsk(body: HTMLElement): void {
+  const existing = body.querySelector('.ask-card') as HTMLElement | null;
+  const ask = ui.state.ask;
+  if (!ask) {
+    existing?.remove();
+    ui.askOtherOpen = false;
+    ui.askOtherDraft = '';
+    return;
+  }
+  if (existing?.dataset.id !== ask.requestId) {
+    ui.askOtherOpen = false;
+    ui.askOtherDraft = '';
+  }
+  const other = ui.askOtherOpen ? '1' : '0';
+  const open = (ui.askOpen.get(ask.requestId) ?? true) ? '1' : '0';
+  if (
+    existing?.dataset.id === ask.requestId &&
+    existing.dataset.other === other &&
+    existing.dataset.open === open
+  ) {
+    return;
+  }
+  existing?.remove();
+  body.append(askBar());
+}
+
 function patchPermission(body: HTMLElement): void {
   const existing = body.querySelector('.permission') as HTMLElement | null;
   const perm = ui.state.permission;
@@ -319,17 +349,31 @@ function errorBanner(text: string): HTMLElement {
   return banner;
 }
 
+const USER_SCROLL_HOLD_MS = 480;
+let lastUserScroll = 0;
+let pinLock = false;
+
+function userHeldScroll(): boolean {
+  return Date.now() - lastUserScroll < USER_SCROLL_HOLD_MS;
+}
+
 export function scrollTranscript(): void {
   const el = document.getElementById('transcript');
   if (!el) {
     return;
   }
   bindTranscriptScroll(el);
-  if (ui.lightboxSrc) {
+  if (ui.lightboxSrc || userHeldScroll()) {
     return;
   }
   if (ui.stickToBottom) {
+    pinLock = true;
     el.scrollTop = el.scrollHeight;
+    pinLock = false;
+    return;
+  }
+  if (el.scrollTop === 0 && ui.transcriptScroll > 0) {
+    el.scrollTop = ui.transcriptScroll;
   }
 }
 
@@ -339,9 +383,18 @@ function bindTranscriptScroll(el?: HTMLElement | null): void {
     return;
   }
   node.dataset.scrollBound = '1';
+  const markUser = () => {
+    lastUserScroll = Date.now();
+  };
+  node.addEventListener('pointerdown', markUser, { passive: true });
+  node.addEventListener('wheel', markUser, { passive: true });
   node.addEventListener(
     'scroll',
     () => {
+      if (pinLock) {
+        return;
+      }
+      lastUserScroll = Date.now();
       ui.stickToBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 56;
       ui.transcriptScroll = node.scrollTop;
     },
@@ -825,6 +878,172 @@ function permissionTarget(perm: PermissionPrompt): string {
     }
   }
   return perm.title;
+}
+
+function askBar(): HTMLElement {
+  const ask = ui.state.ask!;
+  const open = ui.askOpen.get(ask.requestId) ?? true;
+  const el = document.createElement('section');
+  el.className = 'ask-card';
+  el.dataset.id = ask.requestId;
+  el.dataset.other = ui.askOtherOpen ? '1' : '0';
+  el.dataset.open = open ? '1' : '0';
+  const head = document.createElement('header');
+  head.className = 'ask-head';
+  const brand = document.createElement('div');
+  brand.className = 'ask-brand';
+  const kicker = document.createElement('span');
+  kicker.className = 'ask-kicker';
+  kicker.textContent =
+    ask.kind === 'plan'
+      ? tr('planReadyTitle')
+      : ask.total && ask.total > 1
+        ? tr('askQuestionOf', { n: (ask.index ?? 0) + 1, total: ask.total })
+        : tr('askTitle');
+  const preview = document.createElement('span');
+  preview.className = 'ask-preview';
+  preview.textContent =
+    ask.kind === 'question' ? ask.title : (ask.body ?? '').replace(/\s+/g, ' ').trim().slice(0, 72);
+  brand.append(kicker, preview);
+  const tools = document.createElement('div');
+  tools.className = 'ask-head-tools';
+  const foldBtn = iconButton(open ? tr('permDetails') : tr('planReadyTitle'), iconChevron(), () => {
+    ui.askOpen.set(ask.requestId, !open);
+    render();
+  });
+  foldBtn.classList.toggle('open', open);
+  const closeBtn = iconButton(tr('settingsClose'), iconClose(), () => post({ type: 'cancelAsk' }));
+  tools.append(foldBtn, closeBtn);
+  head.append(brand, tools);
+  el.append(head);
+  if (!open) {
+    return el;
+  }
+  if (ask.kind === 'question' && ask.title) {
+    const title = document.createElement('div');
+    title.className = 'ask-title';
+    title.textContent = ask.title;
+    el.append(title);
+  }
+  if (ask.kind === 'plan') {
+    const body = document.createElement('div');
+    body.className = 'ask-plan';
+    if (ask.body) {
+      body.innerHTML = renderMarkdown(ask.body);
+    } else {
+      body.textContent = tr('planReadyEmpty');
+    }
+    el.append(body);
+  }
+  const actions = document.createElement('div');
+  actions.className = 'ask-actions';
+  for (const choice of ask.choices) {
+    actions.append(askChoiceButton(choice, ask.kind));
+  }
+  el.append(actions);
+  if (ui.askOtherOpen) {
+    el.append(askOtherForm(ask.kind));
+  }
+  return el;
+}
+
+function askChoiceButton(
+  choice: import('../types').AskChoice,
+  kind: 'question' | 'plan',
+): HTMLButtonElement {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className =
+    choice.id === 'execute'
+      ? 'btn primary ask-choice'
+      : choice.id === 'decline'
+        ? 'btn reject ask-choice'
+        : 'btn allow ask-choice';
+  const label = document.createElement('span');
+  label.className = 'ask-choice-label';
+  label.textContent = askChoiceLabel(choice, kind);
+  el.append(label);
+  const hint = askChoiceHint(choice, kind);
+  if (hint) {
+    const mark = document.createElement('span');
+    mark.className = 'ask-hint';
+    mark.setAttribute('aria-label', tr('askHint'));
+    mark.dataset.tip = hint.replace(/"/g, "'");
+    mark.innerHTML = iconAskHint();
+    mark.addEventListener('click', (event) => event.stopPropagation());
+    el.append(mark);
+  }
+  el.addEventListener('click', () => {
+    if (choice.other) {
+      ui.askOtherOpen = true;
+      render();
+      return;
+    }
+    post({ type: 'answerAsk', choiceId: choice.id });
+  });
+  return el;
+}
+
+function askChoiceHint(choice: import('../types').AskChoice, kind: 'question' | 'plan'): string {
+  if (kind === 'plan') {
+    if (choice.id === 'execute') {
+      return tr('planExecuteHint');
+    }
+    if (choice.id === 'decline') {
+      return tr('planDeclineHint');
+    }
+    if (choice.id === 'supplement') {
+      return tr('planSupplementHint');
+    }
+  }
+  if (choice.other) {
+    return choice.description ?? tr('askOtherHint');
+  }
+  return choice.description ?? '';
+}
+
+function askChoiceLabel(choice: import('../types').AskChoice, kind: 'question' | 'plan'): string {
+  if (kind === 'plan') {
+    if (choice.id === 'execute') {
+      return tr('planExecute');
+    }
+    if (choice.id === 'decline') {
+      return tr('planDecline');
+    }
+    if (choice.id === 'supplement') {
+      return tr('planSupplement');
+    }
+  }
+  return choice.other ? tr('askOther') : choice.label;
+}
+
+function askOtherForm(kind: 'question' | 'plan'): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'ask-other';
+  const input = document.createElement('textarea');
+  input.rows = 3;
+  input.placeholder = kind === 'plan' ? tr('planSupplementHint') : tr('askOtherHint');
+  input.value = ui.askOtherDraft;
+  input.addEventListener('input', () => {
+    ui.askOtherDraft = input.value;
+  });
+  const send = button(tr('askSubmit'), () => {
+    const notes = ui.askOtherDraft.trim();
+    if (!notes) {
+      return;
+    }
+    post({
+      type: 'answerAsk',
+      choiceId: kind === 'plan' ? 'supplement' : 'Other',
+      notes,
+    });
+    ui.askOtherDraft = '';
+    ui.askOtherOpen = false;
+  });
+  send.className = 'btn primary';
+  wrap.append(input, send);
+  queueMicrotask(() => input.focus());
+  return wrap;
 }
 
 function permissionButton(option: PermissionOption, toolKind?: string): HTMLButtonElement {

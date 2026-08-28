@@ -9,6 +9,44 @@ export function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+export function unwrapPayload(raw: unknown): Record<string, unknown> {
+  const obj = asObject(raw);
+  const inner = obj['result'];
+  if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+    return asObject(inner);
+  }
+  return obj;
+}
+
+export function unwrapArray(raw: unknown, keys: string[]): unknown[] {
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  const obj = asObject(raw);
+  const inner = obj['result'];
+  if (Array.isArray(inner)) {
+    return inner;
+  }
+  const payload = unwrapPayload(raw);
+  for (const key of keys) {
+    const value = payload[key];
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+  return [];
+}
+
+export function asPath(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value && typeof value === 'object') {
+    return asString(asObject(value)['path']);
+  }
+  return undefined;
+}
+
 export function asNum(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;

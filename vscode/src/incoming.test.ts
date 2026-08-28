@@ -52,4 +52,29 @@ describe('handleIncoming', () => {
     await handleIncoming(host({ refreshMcps: () => { n += 1; } }), 'x.ai/mcp/servers_updated', {}, '');
     assert.equal(n, 1);
   });
+
+  it('refreshes the dashboard on roster broadcasts', async () => {
+    let n = 0;
+    await handleIncoming(host({ refreshDashboard: () => { n += 1; } }), 'x.ai/sessions/changed', {}, '');
+    assert.equal(n, 1);
+  });
+
+  it('routes plan-mode reverse requests to the host', async () => {
+    const asks: unknown[] = [];
+    const plans: unknown[] = [];
+    const controller = host({
+      async askUserQuestion(params) {
+        asks.push(params);
+        return { outcome: 'cancelled' };
+      },
+      async reviewPlan(params) {
+        plans.push(params);
+        return { outcome: 'approved' };
+      },
+    });
+    await handleIncoming(controller, '_x.ai/ask_user_question', { questions: [] }, 1);
+    await handleIncoming(controller, 'x.ai/exit_plan_mode', { planContent: '# p' }, 2);
+    assert.equal(asks.length, 1);
+    assert.equal(plans.length, 1);
+  });
 });

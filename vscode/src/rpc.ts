@@ -17,6 +17,8 @@ export class RpcError extends Error {
   }
 }
 
+export const MAX_RPC_BUFFER = 4_000_000;
+
 export class JsonRpcConnection extends EventEmitter {
   private nextId = 1;
   private buffer = '';
@@ -29,23 +31,35 @@ export class JsonRpcConnection extends EventEmitter {
     this.stdin = stdin;
   }
 
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
   feed(chunk: Buffer | string): void {
-    this.buffer += chunk.toString('utf8');
-    if (this.buffer.length > 4_000_000) {
-      this.buffer = '';
-      this.emit('log', 'ACP stdout overflow, dropping buffer');
+    if (this.closed) {
       return;
     }
+    this.buffer += chunk.toString('utf8');
     while (true) {
       const idx = this.buffer.indexOf('\n');
       if (idx < 0) {
         break;
+      }
+      if (idx > MAX_RPC_BUFFER) {
+        this.overflow('ACP stdout line overflow');
+        return;
       }
       const line = this.buffer.slice(0, idx).trim();
       this.buffer = this.buffer.slice(idx + 1);
       if (line) {
         this.handleLine(line);
       }
+      if (this.closed) {
+        return;
+      }
+    }
+    if (this.buffer.length > MAX_RPC_BUFFER) {
+      this.overflow('ACP stdout overflow');
     }
   }
 
@@ -81,10 +95,17 @@ export class JsonRpcConnection extends EventEmitter {
       return;
     }
     this.closed = true;
+    this.buffer = '';
     for (const [id, pending] of this.pending) {
       pending.reject(error ?? new Error('ACP connection closed'));
       this.pending.delete(id);
     }
+  }
+
+  private overflow(reason: string): void {
+    const error = new Error(reason);
+    this.emit('overflow', error);
+    this.close(error);
   }
 
   private write(payload: unknown): void {
@@ -112,15 +133,16 @@ export class JsonRpcConnection extends EventEmitter {
       this.emit('request', method, message['params'], id);
       return;
     }
-    if (id === undefined || typeof id !== 'number') {
+    const key = rpcId(id);
+    if (key === undefined) {
       return;
     }
-    const pending = this.pending.get(id);
+    const pending = this.pending.get(key);
     if (!pending) {
       this.emit('log', `no pending RPC for id ${id}`);
       return;
     }
-    this.pending.delete(id);
+    this.pending.delete(key);
     if (message['error']) {
       const err = message['error'] as { message?: string; code?: number; data?: unknown };
       pending.reject(
@@ -130,6 +152,19 @@ export class JsonRpcConnection extends EventEmitter {
     }
     pending.resolve(message['result']);
   }
+}
+
+function rpcId(id: unknown): number | undefined {
+  if (typeof id === 'number' && Number.isFinite(id)) {
+    return id;
+  }
+  if (typeof id === 'string' && id.trim() !== '') {
+    const n = Number(id);
+    if (Number.isFinite(n)) {
+      return n;
+    }
+  }
+  return undefined;
 }
 
 export { asObject, asString } from './wire';

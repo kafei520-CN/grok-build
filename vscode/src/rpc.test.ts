@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import { describe, it } from 'node:test';
-import { JsonRpcConnection, RpcError } from './rpc';
+import { JsonRpcConnection, MAX_RPC_BUFFER, RpcError } from './rpc';
 
 describe('JsonRpcConnection', () => {
   it('matches responses to request ids', async () => {
@@ -43,5 +43,33 @@ describe('JsonRpcConnection', () => {
     );
     assert.deepEqual(requests, ['session/request_permission']);
     assert.deepEqual(notes, ['session/update']);
+  });
+
+  it('matches string response ids to numeric requests', async () => {
+    const stdin = new PassThrough();
+    const conn = new JsonRpcConnection(stdin);
+    const pending = conn.request('initialize', {});
+    conn.feed(Buffer.from('{"jsonrpc":"2.0","id":"1","result":{"ok":true}}\n'));
+    assert.deepEqual(await pending, { ok: true });
+  });
+
+  it('parses complete lines then closes on leftover overflow', async () => {
+    const stdin = new PassThrough();
+    const conn = new JsonRpcConnection(stdin);
+    const notes: string[] = [];
+    let overflow = false;
+    conn.on('notification', (method: string) => notes.push(method));
+    conn.on('overflow', () => {
+      overflow = true;
+    });
+    const pending = conn.request('initialize', {});
+    conn.feed(
+      Buffer.from(`{"jsonrpc":"2.0","method":"session/update","params":{}}\n${'x'.repeat(MAX_RPC_BUFFER + 1)}`),
+    );
+    assert.deepEqual(notes, ['session/update']);
+    assert.equal(overflow, true);
+    assert.equal(conn.isClosed, true);
+    await assert.rejects(pending);
+    conn.feed(Buffer.from('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n'));
   });
 });

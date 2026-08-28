@@ -88,6 +88,12 @@ function boot(): void {
       render();
       return;
     }
+    if (ui.moreOpen || ui.picker) {
+      ui.moreOpen = false;
+      ui.picker = undefined;
+      render();
+      return;
+    }
     if (ui.state.settingsOpen) {
       post({
         type:
@@ -101,7 +107,15 @@ function boot(): void {
                   ? 'closeTheme'
                   : ui.state.settingsPage === 'mcps'
                     ? 'closeMcps'
-                    : 'closeSettings',
+                    : ui.state.settingsPage === 'agents'
+                      ? 'closeAgents'
+                      : ui.state.settingsPage === 'worktrees'
+                        ? 'closeWorktrees'
+                        : ui.state.settingsPage === 'extensions'
+                          ? 'closeExt'
+                          : ui.state.settingsPage === 'memory'
+                            ? 'closeMemory'
+                            : 'closeSettings',
       });
     }
   });
@@ -111,11 +125,11 @@ function boot(): void {
       event.preventDefault();
       post({ type: 'openUrl', url: href });
     }
-    if (!ui.picker) {
-      return;
+    if (ui.moreOpen || ui.picker) {
+      ui.moreOpen = false;
+      ui.picker = undefined;
+      render();
     }
-    ui.picker = undefined;
-    render();
   });
   root.addEventListener('dragover', (event) => {
     event.preventDefault();

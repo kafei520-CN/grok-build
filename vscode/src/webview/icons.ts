@@ -2,6 +2,10 @@ export function iconClock(): string {
   return '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg>';
 }
 
+export function iconGrid(): string {
+  return '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2.5" y="2.5" width="4.4" height="4.4" rx="1"/><rect x="9.1" y="2.5" width="4.4" height="4.4" rx="1"/><rect x="2.5" y="9.1" width="4.4" height="4.4" rx="1"/><rect x="9.1" y="9.1" width="4.4" height="4.4" rx="1"/></svg>';
+}
+
 export function iconEdit(): string {
   return '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M9.2 3.4 12.6 6.8 6 13.4H2.6V10z"/></svg>';
 }
@@ -40,6 +44,11 @@ export function iconChevron(): string {
 
 export function iconClose(): string {
   return '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+}
+
+/** Circled inverted exclamation (¡) for option hints. */
+export function iconAskHint(): string {
+  return '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.6"/><circle cx="8" cy="5.15" r="0.95" fill="currentColor" stroke="none"/><path d="M8 7.35v4.05" stroke-linecap="round"/></svg>';
 }
 
 export function iconBack(): string {

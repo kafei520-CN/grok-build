@@ -2,9 +2,11 @@ import type { StringKey } from '../i18n';
 import { formatRelativeTime } from '../i18n';
 import { isBooting, loc, post, render, tr, ui } from './app';
 import { button, iconButton } from './dom';
-import { iconClock, iconEdit, iconMore, iconStar } from './icons';
+import { iconClock, iconClose, iconEdit, iconGrid, iconMore, iconStar } from './icons';
 import { escapeHtml } from './markdown';
+import { mountDashboard } from './dashboard';
 import { listedSessions, mountSessionsDrawer } from './sessions';
+import { mountTasks } from './tasks';
 
 let headerLocale: string | undefined;
 
@@ -58,18 +60,23 @@ export function renderHeader(): HTMLElement {
     post({ type: 'openDrawer', drawer: 'sessions' }),
   );
   sessions.dataset.act = 'sessions';
+  const dash = iconButton(tr('menuDashboard'), iconGrid(), () =>
+    post({ type: 'openDrawer', drawer: 'dashboard' }),
+  );
+  dash.dataset.act = 'dashboard';
   const more = iconButton(tr('more'), iconMore(), () => {
     ui.moreOpen = !ui.moreOpen;
     ui.picker = undefined;
     render();
   });
   more.dataset.act = 'more';
+  more.addEventListener('click', (event) => event.stopPropagation());
   if (ui.moreOpen) {
     more.classList.add('open');
   }
   const fresh = iconButton(tr('newSession'), iconEdit(), () => post({ type: 'newSession' }));
   fresh.dataset.act = 'new';
-  actions.append(sessions, more, fresh);
+  actions.append(sessions, dash, more, fresh);
   if (ui.moreOpen) {
     actions.append(moreMenu());
   }
@@ -80,7 +87,10 @@ export function renderHeader(): HTMLElement {
 function moreMenu(): HTMLElement {
   const el = document.createElement('div');
   el.className = 'more-menu';
+  el.addEventListener('click', (event) => event.stopPropagation());
   const items: Array<[StringKey, () => void]> = [
+    ['menuDashboard', () => post({ type: 'openDrawer', drawer: 'dashboard' })],
+    ['drawerTasks', () => post({ type: 'openDrawer', drawer: 'tasks' })],
     ['menuCompact', () => post({ type: 'runSlash', command: 'compact' })],
     ['menuRewind', () => post({ type: 'runSlash', command: 'rewind' })],
     ['menuFork', () => post({ type: 'runSlash', command: 'fork' })],
@@ -110,14 +120,29 @@ export function renderDrawer(): HTMLElement {
   title.textContent =
     ui.state.drawer === 'sessions'
       ? tr('drawerSessions')
-      : ui.state.drawer === 'history'
-        ? tr('drawerHistory')
-        : ui.state.drawerTab ?? 'Extensions';
-  const close = button(tr('drawerClose'), () => post({ type: 'closeDrawer' }));
+      : ui.state.drawer === 'dashboard'
+        ? tr('drawerDashboard')
+        : ui.state.drawer === 'tasks'
+          ? tr('drawerTasks')
+          : ui.state.drawer === 'plan'
+            ? tr('drawerPlan')
+            : ui.state.drawer === 'history'
+              ? tr('drawerHistory')
+              : ui.state.drawerTab ?? 'Extensions';
+  const close = iconButton(tr('drawerClose'), iconClose(), () => post({ type: 'closeDrawer' }));
   head.append(title, close);
   el.append(head);
   if (ui.state.drawer === 'sessions') {
     mountSessionsDrawer(el);
+  } else if (ui.state.drawer === 'dashboard') {
+    mountDashboard(el);
+  } else if (ui.state.drawer === 'tasks') {
+    mountTasks(el);
+  } else if (ui.state.drawer === 'plan') {
+    const pre = document.createElement('pre');
+    pre.className = 'code';
+    pre.textContent = ui.state.drawerBody ?? '';
+    el.append(pre);
   } else if (ui.state.drawer === 'history') {
     for (const prompt of ui.state.history ?? []) {
       const item = button(prompt.slice(0, 80), () => {
@@ -336,7 +361,7 @@ export function home(): HTMLElement {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className =
-        row.id === ui.state.currentSessionId ? 'session-row active' : 'session-row';
+        row.id === ui.state.currentSessionId ? 'recent-card active' : 'recent-card';
       btn.innerHTML = `<span class="session-title">${escapeHtml(row.title)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
       btn.addEventListener('click', () =>
         post({ type: 'loadSession', sessionId: row.id, cwd: row.cwd }),

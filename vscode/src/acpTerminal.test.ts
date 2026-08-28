@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { handleTerminalMethod, spawnProcessTerminal } from './acpTerminal';
+import { disposeAllTerminals, handleTerminalMethod, spawnProcessTerminal } from './acpTerminal';
 import { bindPlatform, type Platform } from './platform';
 
 function fakePlat(): Platform {
@@ -12,6 +12,7 @@ function fakePlat(): Platform {
     extensionVersion: () => '0',
     pathEnv: () => '',
     os: () => process.platform,
+    language: () => 'en',
     getConfig: (_key, fallback) => fallback,
     setConfig: async () => {},
     getState: (_key, fallback) => fallback,
@@ -64,5 +65,23 @@ describe('acp terminal', () => {
     assert.match(out.output, /hello-acp/);
     assert.equal(out.truncated, false);
     await handleTerminalMethod('terminal/release', { terminalId: created.terminalId });
+  });
+
+  it('disposeAllTerminals releases waiters instead of leaving them hung', async () => {
+    bindPlatform(fakePlat());
+    const created = (await handleTerminalMethod('terminal/create', {
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1000)'],
+    })) as { terminalId: string };
+    const waiting = handleTerminalMethod('terminal/wait_for_exit', {
+      terminalId: created.terminalId,
+    });
+    disposeAllTerminals();
+    const exit = (await waiting) as { signal?: string; exitCode?: number };
+    assert.ok(exit.signal || exit.exitCode !== undefined);
+    await assert.rejects(
+      () => handleTerminalMethod('terminal/output', { terminalId: created.terminalId }),
+      /terminal not found/,
+    );
   });
 });

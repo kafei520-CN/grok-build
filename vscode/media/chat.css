@@ -59,6 +59,11 @@ textarea {
   color: inherit;
 }
 
+button {
+  background: transparent;
+  border: none;
+}
+
 button:hover,
 button:focus-visible {
   transition:
@@ -281,6 +286,27 @@ textarea:focus-visible {
   margin-bottom: 6px;
 }
 
+.recent-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 9px 12px;
+  text-align: left;
+  background: var(--elev);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.recent-card:hover,
+.recent-card.active {
+  border-color: color-mix(in srgb, var(--ice) 42%, var(--line));
+  background: color-mix(in srgb, var(--ice) 8%, var(--elev));
+}
+
 .session-row {
   display: flex;
   align-items: center;
@@ -337,12 +363,14 @@ textarea:focus-visible {
 
 .transcript {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   overflow-anchor: none;
+  overscroll-behavior: contain;
   padding: 12px 14px 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  /* block, not flex: Chromium maps the thumb wrong on a flex scrollport and jumps to 0 */
+  display: block;
+  scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
@@ -948,6 +976,169 @@ textarea:focus-visible {
 .permission-actions .btn.reject {
   color: var(--error);
   border-color: color-mix(in srgb, var(--error) 32%, var(--line));
+}
+
+.ask-card {
+  margin: 0 12px 8px;
+  border: 1px solid color-mix(in srgb, var(--ice) 22%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--elev) 78%, var(--bg));
+  box-shadow: 0 8px 22px color-mix(in srgb, #000 14%, transparent);
+}
+
+.ask-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  background: color-mix(in srgb, var(--ice) 8%, transparent);
+  border-bottom: 1px solid var(--line);
+}
+
+.ask-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ask-head-tools {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ask-head-tools .icon-btn svg {
+  transition: transform 140ms ease;
+}
+
+.ask-head-tools .icon-btn:not(.open) svg {
+  transform: rotate(-90deg);
+}
+
+.ask-kicker {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ice);
+}
+
+.ask-preview {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ask-title {
+  padding: 10px 12px 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  border-top: 1px solid var(--line);
+}
+
+.ask-plan {
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.ask-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.ask-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.ask-choice-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-hint {
+  position: relative;
+  flex-shrink: 0;
+  color: var(--muted);
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+}
+
+.ask-hint svg {
+  display: block;
+}
+
+.ask-hint::after {
+  content: attr(data-tip);
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+  width: max-content;
+  max-width: 240px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--elev);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 20px color-mix(in srgb, #000 22%, transparent);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(4px);
+}
+
+.ask-hint:hover::after,
+.ask-hint:focus::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.ask-other {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+
+.ask-other textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 70%, var(--elev));
+  color: var(--fg);
+  padding: 8px 10px;
+  font: inherit;
 }
 
 .error-banner {
@@ -2105,6 +2296,102 @@ kbd {
 .switch.on .knob {
   transform: translateX(16px);
   background: var(--bg);
+}
+
+.dash-dispatch {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.dash-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 70%, var(--elev));
+  color: var(--fg);
+  padding: 7px 10px;
+}
+
+.dash-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.dash-kicker {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dash-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 2px;
+}
+
+.dash-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--elev) 70%, var(--bg));
+  cursor: pointer;
+}
+
+.dash-card.current {
+  border-color: color-mix(in srgb, var(--ice) 40%, var(--line));
+}
+
+.dash-card.selected {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ice) 50%, transparent);
+}
+
+.dash-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dash-copy strong {
+  font-size: 12px;
+}
+
+.dash-copy span,
+.dash-copy em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dash-actions .btn,
+.dash-card > .btn {
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.btn.on {
+  border-color: color-mix(in srgb, var(--ice) 48%, var(--line));
+  color: var(--ice);
 }
 
 @media (prefers-reduced-motion: reduce) {

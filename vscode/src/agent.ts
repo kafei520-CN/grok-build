@@ -6,6 +6,23 @@ import {
 } from './constants';
 import { logError, logInfo, logWarn } from './logger';
 import { JsonRpcConnection, RpcError } from './rpc';
+import {
+  forkSessionPayload,
+  parseForkNewSessionId,
+  parseWorktreeResume,
+  worktreeResumePayload,
+  type ForkParams,
+} from './fork';
+import {
+  parseActionOutcome,
+  parseHookList,
+  parseMarketplaceList,
+  parsePluginList,
+  parseWorkflowList,
+} from './extensionsHost';
+import { parseRosterList, parseSubagentList } from './roster';
+import { parseTaskList } from './tasksHost';
+import { parseWorktreeApply, parseWorktreeList } from './worktreeHost';
 import { parseSessionRow, sessionHasHistory } from './sessionRow';
 import { asNum, asObject, asString, timesFromMeta } from './wire';
 import type {
@@ -14,10 +31,19 @@ import type {
   AuthUrlMode,
   ContentBlock,
   InitializeResult,
+  RosterEntry,
   SessionNewResult,
   SessionRow,
   SessionUpdate,
+  HookItem,
+  MarketplacePlugin,
+  PluginItem,
   SlashCommandInfo,
+  SubagentLive,
+  TaskItem,
+  WorkflowItem,
+  WorktreeApplyResult,
+  WorktreeItem,
 } from './types';
 import type { AuthMethodInfo } from './authMethods';
 
@@ -33,6 +59,8 @@ export type IncomingHandler = (
   params: unknown,
   id: number | string,
 ) => Promise<unknown> | unknown;
+
+export type AgentLostHandler = (error: Error) => void;
 
 export class GrokAgent {
   private child: ChildProcessWithoutNullStreams;
@@ -50,7 +78,11 @@ export class GrokAgent {
     this.rpc = rpc;
   }
 
-  static spawn(options: AgentOptions, onIncoming: IncomingHandler): GrokAgent {
+  static spawn(
+    options: AgentOptions,
+    onIncoming: IncomingHandler,
+    onLost?: AgentLostHandler,
+  ): GrokAgent {
     const args = ['agent', 'stdio'];
     logInfo(`spawning ${options.cliPath} ${args.join(' ')} (cwd=${options.cwd})`);
     const child = spawn(options.cliPath, args, {
@@ -67,7 +99,24 @@ export class GrokAgent {
     agent.extensionVersion = options.extensionVersion;
     agent.startupHints = options.startupHints;
 
+    let ended = false;
+    const lost = (error: Error) => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      rpc.close(error);
+      onLost?.(error);
+    };
+
     rpc.on('log', (message: string) => logWarn(message));
+    rpc.on('overflow', (error: Error) => {
+      logError('ACP stdout overflow', error);
+      lost(error);
+      if (!child.killed) {
+        child.kill();
+      }
+    });
     child.stdout.on('data', (chunk: Buffer) => {
       setImmediate(() => rpc.feed(chunk));
     });
@@ -79,11 +128,11 @@ export class GrokAgent {
     });
     child.on('error', (error) => {
       logError('failed to spawn grok agent', error);
-      rpc.close(error);
+      lost(error);
     });
     child.on('exit', (code, signal) => {
       logInfo(`agent exited code=${code} signal=${signal ?? ''}`);
-      rpc.close(new Error(`grok agent exited (${code ?? signal})`));
+      lost(new Error(`grok agent exited (${code ?? signal})`));
     });
 
     rpc.on('request', (method: string, params: unknown, id: number | string) => {
@@ -217,11 +266,15 @@ export class GrokAgent {
   }
 
   cancelTurn(): void {
-    if (!this.sessionId) {
+    this.cancelSession(this.sessionId);
+  }
+
+  cancelSession(sessionId?: string): void {
+    if (!sessionId) {
       return;
     }
     this.rpc.notify('session/cancel', {
-      sessionId: this.sessionId,
+      sessionId,
       _meta: { cancelTrigger: 'stop_click', cancelSubagents: true },
     });
   }
@@ -346,13 +399,130 @@ export class GrokAgent {
     await this.extMethod(EXT.sessionDelete, { sessionId: id });
   }
 
-  async forkSession(): Promise<string | undefined> {
-    if (!this.sessionId) {
-      return undefined;
+  async forkSession(params: ForkParams): Promise<string | undefined> {
+    const raw = await this.extMethod(EXT.sessionFork, forkSessionPayload(params));
+    return parseForkNewSessionId(raw) ?? parseForkNewSessionId(unwrapExt(raw));
+  }
+
+  async resumeInWorktree(
+    sessionId: string,
+    sourceCwd: string,
+  ): Promise<{ sessionId: string; cwd: string } | undefined> {
+    const raw = await this.extMethod(
+      EXT.worktreeResume,
+      worktreeResumePayload(sessionId, sourceCwd),
+    );
+    return parseWorktreeResume(raw) ?? parseWorktreeResume(unwrapExt(raw));
+  }
+
+  async listRoster(): Promise<RosterEntry[]> {
+    const raw = await this.extMethod(EXT.sessionsRoster, {});
+    const rows = parseRosterList(raw);
+    return rows.length ? rows : parseRosterList(unwrapExt(raw));
+  }
+
+  async listRunningSubagents(sessionId?: string): Promise<SubagentLive[]> {
+    const id = sessionId ?? this.sessionId;
+    if (!id) {
+      return [];
     }
-    const raw = await this.extMethod(EXT.sessionFork, { sessionId: this.sessionId });
-    const value = unwrapExt(raw);
-    return asString(value['sessionId']) ?? asString(value['session_id']);
+    const raw = await this.extMethod(EXT.subagentList, { sessionId: id });
+    const rows = parseSubagentList(raw);
+    return rows.length ? rows : parseSubagentList(unwrapExt(raw));
+  }
+
+  async cancelSubagent(subagentId: string): Promise<void> {
+    await this.extMethod(EXT.subagentCancel, { subagentId });
+  }
+
+  async listWorktrees(): Promise<WorktreeItem[]> {
+    const raw = await this.extMethod(EXT.worktreeList, {
+      include_all: true,
+      includeAll: true,
+      type: [],
+    });
+    return parseWorktreeList(raw);
+  }
+
+  async applyWorktree(
+    sessionId: string,
+    worktreePath: string,
+    mode: 'merge' | 'overwrite',
+  ): Promise<WorktreeApplyResult> {
+    const raw = await this.extMethod(EXT.worktreeApply, {
+      sessionId,
+      worktreePath,
+      mode,
+    });
+    return parseWorktreeApply(raw);
+  }
+
+  async removeWorktree(idOrPath: string): Promise<void> {
+    await this.extMethod(EXT.worktreeRemove, { idOrPath, id_or_path: idOrPath });
+  }
+
+  async listPlugins(): Promise<PluginItem[]> {
+    const raw = await this.extMethod(EXT.pluginsList, this.sessionPayload());
+    return parsePluginList(raw);
+  }
+
+  async pluginAction(action: Record<string, unknown>): Promise<{ ok: boolean; message: string }> {
+    const raw = await this.extMethod(EXT.pluginsAction, {
+      ...this.sessionPayload(),
+      action,
+    });
+    return parseActionOutcome(raw);
+  }
+
+  async listHooks(): Promise<HookItem[]> {
+    const raw = await this.extMethod(EXT.hooksList, this.sessionPayload());
+    return parseHookList(raw);
+  }
+
+  async hookAction(action: Record<string, unknown>): Promise<{ ok: boolean; message: string }> {
+    const raw = await this.extMethod(EXT.hooksAction, {
+      ...this.sessionPayload(),
+      action,
+    });
+    return parseActionOutcome(raw);
+  }
+
+  async listMarketplace(): Promise<MarketplacePlugin[]> {
+    const raw = await this.extMethod(EXT.marketplaceList, {});
+    return parseMarketplaceList(raw);
+  }
+
+  async marketplaceAction(action: Record<string, unknown>): Promise<{ ok: boolean; message: string }> {
+    const raw = await this.extMethod(EXT.marketplaceAction, {
+      ...this.sessionPayload(),
+      action,
+    });
+    return parseActionOutcome(raw);
+  }
+
+  async listWorkflows(): Promise<WorkflowItem[]> {
+    const raw = await this.extMethod(EXT.workflowsList, this.sessionPayload());
+    return parseWorkflowList(raw);
+  }
+
+  async listTasks(): Promise<TaskItem[]> {
+    if (!this.sessionId) {
+      return [];
+    }
+    const raw = await this.extMethod(EXT.taskList, this.sessionPayload());
+    return parseTaskList(raw);
+  }
+
+  async killTask(taskId: string): Promise<void> {
+    await this.extMethod(EXT.taskKill, { ...this.sessionPayload(), taskId, task_id: taskId });
+  }
+
+  async flushMemory(): Promise<void> {
+    await this.extMethod(EXT.memoryFlush, this.sessionPayload());
+  }
+
+  private sessionPayload(): Record<string, unknown> {
+    return this.sessionId ? { sessionId: this.sessionId, session_id: this.sessionId } : {};
   }
 
   async usage(): Promise<Record<string, unknown>> {

@@ -6,6 +6,10 @@ import { apiEditStamp, apisNavRow, mountApisBody } from './settingsApi';
 import { mountRulesBody, rulesNavRow } from './settingsRules';
 import { mountSkillsBody, skillsNavRow } from './settingsSkills';
 import { mcpsNavRow, mountMcpsBody } from './settingsMcps';
+import { agentsNavRow, mountAgentsBody } from './settingsAgents';
+import { extNavRow, mountExtBody } from './settingsExt';
+import { memoryNavRow, mountMemoryBody } from './settingsMemory';
+import { mountWorktreesBody, worktreesNavRow } from './settingsWorktrees';
 import { mountThemeBody, themeNavRow } from './settingsTheme';
 
 let paintedKey: string | undefined;
@@ -24,6 +28,17 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.skills ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     (ui.state.apis ?? []).map((row) => row.id).join('|'),
     (ui.state.mcps ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
+    (ui.state.agents ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
+    (ui.state.personas ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
+    ui.state.agentProfile ?? '',
+    ui.agentsTab,
+    ui.state.extTab ?? '',
+    (ui.state.worktrees ?? []).map((row) => row.id).join('|'),
+    (ui.state.plugins ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
+    (ui.state.hooks ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
+    (ui.state.marketplace ?? []).map((row) => row.id).join('|'),
+    (ui.state.workflows ?? []).map((row) => row.id).join('|'),
+    (ui.state.memoryFiles ?? []).map((row) => row.id).join('|'),
     apiEditStamp(),
     `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}`,
   ].join(':');
@@ -60,11 +75,29 @@ function mountSettings(): HTMLElement {
             ? tr('settingsTheme')
             : page === 'mcps'
               ? tr('settingsMcps')
-              : tr('settingsTitle');
+              : page === 'agents'
+                ? tr('settingsAgents')
+                : page === 'worktrees'
+                  ? tr('settingsWorktrees')
+                  : page === 'extensions'
+                    ? tr('settingsExt')
+                    : page === 'memory'
+                      ? tr('settingsMemory')
+                      : tr('settingsTitle');
   brand.append(mark, title);
   const tools = document.createElement('div');
   tools.className = 'settings-head-tools';
-  if (page === 'rules' || page === 'skills' || page === 'apis' || page === 'theme' || page === 'mcps') {
+  if (
+    page === 'rules' ||
+    page === 'skills' ||
+    page === 'apis' ||
+    page === 'theme' ||
+    page === 'mcps' ||
+    page === 'agents' ||
+    page === 'worktrees' ||
+    page === 'extensions' ||
+    page === 'memory'
+  ) {
     tools.append(
       iconButton(tr('settingsRulesBack'), iconBack(), () =>
         post({
@@ -77,7 +110,15 @@ function mountSettings(): HTMLElement {
                   ? 'closeTheme'
                   : page === 'mcps'
                     ? 'closeMcps'
-                    : 'closeRules',
+                    : page === 'agents'
+                      ? 'closeAgents'
+                      : page === 'worktrees'
+                        ? 'closeWorktrees'
+                        : page === 'extensions'
+                          ? 'closeExt'
+                          : page === 'memory'
+                            ? 'closeMemory'
+                            : 'closeRules',
         }),
       ),
     );
@@ -102,6 +143,22 @@ function mountSettings(): HTMLElement {
   }
   if (page === 'mcps') {
     el.append(head, mountMcpsBody());
+    return el;
+  }
+  if (page === 'agents') {
+    el.append(head, mountAgentsBody());
+    return el;
+  }
+  if (page === 'worktrees') {
+    el.append(head, mountWorktreesBody());
+    return el;
+  }
+  if (page === 'extensions') {
+    el.append(head, mountExtBody());
+    return el;
+  }
+  if (page === 'memory') {
+    el.append(head, mountMemoryBody());
     return el;
   }
   const body = document.createElement('div');
@@ -155,6 +212,10 @@ function mountSettings(): HTMLElement {
       ),
       rulesNavRow(),
       skillsNavRow(),
+      agentsNavRow(),
+      worktreesNavRow(),
+      extNavRow(),
+      memoryNavRow(),
       mcpsNavRow(),
       apisNavRow(),
     ]),

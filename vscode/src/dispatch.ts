@@ -43,6 +43,12 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'cancelPermission':
       controller.cancelPermission();
       return;
+    case 'answerAsk':
+      controller.answerAsk(message.choiceId, message.notes);
+      return;
+    case 'cancelAsk':
+      controller.cancelAsk();
+      return;
     case 'removeAttachment':
       controller.removeAttachment(message.id);
       return;
@@ -71,6 +77,12 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'openDrawer':
       if (message.drawer === 'sessions') {
         await controller.resumePicker();
+      } else if (message.drawer === 'dashboard') {
+        await controller.openDashboard();
+      } else if (message.drawer === 'tasks') {
+        await controller.openTasks();
+      } else if (message.drawer === 'plan') {
+        controller.openPlan();
       } else if (message.drawer === 'history') {
         await controller.send('/history');
       } else {
@@ -178,6 +190,105 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       return;
     case 'toggleMcp':
       await controller.toggleMcp(message.id);
+      return;
+    case 'openAgents':
+      controller.openAgents();
+      return;
+    case 'closeAgents':
+      controller.closeAgents();
+      return;
+    case 'importAgents':
+      await controller.importAgents();
+      return;
+    case 'toggleAgent':
+      await controller.toggleAgent(message.id);
+      return;
+    case 'deleteAgent':
+      await controller.deleteAgent(message.id);
+      return;
+    case 'openAgent':
+      controller.openAgent(message.id);
+      return;
+    case 'setAgentProfile':
+      await controller.setAgentProfile(message.name);
+      return;
+    case 'importPersonas':
+      await controller.importPersonas();
+      return;
+    case 'togglePersona':
+      await controller.togglePersona(message.id);
+      return;
+    case 'deletePersona':
+      await controller.deletePersona(message.id);
+      return;
+    case 'openPersona':
+      controller.openPersona(message.id);
+      return;
+    case 'openWorktrees':
+      controller.openWorktrees();
+      return;
+    case 'closeWorktrees':
+      controller.closeWorktrees();
+      return;
+    case 'applyWorktree':
+      await controller.applyWorktree(message.id);
+      return;
+    case 'removeWorktree':
+      await controller.removeWorktree(message.id);
+      return;
+    case 'openExt':
+      controller.openExt();
+      return;
+    case 'closeExt':
+      controller.closeExt();
+      return;
+    case 'setExtTab':
+      controller.setExtTab(message.tab);
+      return;
+    case 'togglePlugin':
+      await controller.togglePlugin(message.id);
+      return;
+    case 'uninstallPlugin':
+      await controller.uninstallPlugin(message.id);
+      return;
+    case 'toggleHook':
+      await controller.toggleHook(message.id);
+      return;
+    case 'installMarketplace':
+      await controller.installMarketplace(message.id);
+      return;
+    case 'refreshMarketplace':
+      await controller.refreshMarketplace();
+      return;
+    case 'runWorkflow':
+      await controller.runWorkflow(message.name);
+      return;
+    case 'killTask':
+      await controller.killTask(message.taskId);
+      return;
+    case 'openMemory':
+      controller.openMemory();
+      return;
+    case 'closeMemory':
+      controller.closeMemory();
+      return;
+    case 'openMemoryFile':
+      controller.openMemoryFile(message.id);
+      return;
+    case 'flushMemory':
+      await controller.flushMemory();
+      return;
+    case 'switchRosterSession':
+      await controller.loadSession(message.sessionId, message.cwd);
+      return;
+    case 'stopRosterSession':
+      controller.stopRosterSession(message.sessionId);
+      return;
+    case 'cancelSubagent':
+      await controller.cancelSubagent(message.subagentId);
+      return;
+    case 'dashboardDispatch':
+      await controller.dashboardDispatch(message.text, message.sessionId);
       return;
     case 'saveApi':
       await controller.saveApi(message);

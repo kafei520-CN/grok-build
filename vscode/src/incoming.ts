@@ -14,6 +14,9 @@ export interface IncomingHost {
   journal: { remember(filePath: string): Promise<void> };
   applyModelsUpdate?(params: unknown): void;
   refreshMcps?(): void;
+  refreshDashboard?(): void;
+  askUserQuestion?(params: unknown): Promise<unknown>;
+  reviewPlan?(params: unknown): Promise<unknown>;
 }
 
 export async function handleIncoming(
@@ -36,8 +39,24 @@ export async function handleIncoming(
     controller.refreshMcps?.();
     return {};
   }
+  if (name === 'x.ai/sessions/changed') {
+    controller.refreshDashboard?.();
+    return {};
+  }
   if (name === 'session/request_permission') {
     return controller.requestToolPermission(params);
+  }
+  if (name === 'x.ai/ask_user_question') {
+    if (!controller.askUserQuestion) {
+      throw new RpcError(`Method not found: ${method}`, METHOD_NOT_FOUND);
+    }
+    return controller.askUserQuestion(params);
+  }
+  if (name === 'x.ai/exit_plan_mode') {
+    if (!controller.reviewPlan) {
+      throw new RpcError(`Method not found: ${method}`, METHOD_NOT_FOUND);
+    }
+    return controller.reviewPlan(params);
   }
   if (name === 'fs/read_text_file') {
     return readWorkspaceFile(params);

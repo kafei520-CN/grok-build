@@ -16,6 +16,16 @@ describe('slash routing', () => {
     assert.equal(classifySlash('/undo').kind, 'rewind');
     assert.equal(classifySlash('/cost manage').kind, 'usage');
     assert.equal(classifySlash('/mcps').kind, 'mcpSettings');
+    assert.equal(classifySlash('/dashboard').kind, 'dashboard');
+    assert.equal(classifySlash('/sessions').kind, 'dashboard');
+    assert.equal(classifySlash('/agents').kind, 'agents');
+    assert.equal(classifySlash('/personas').kind, 'agents');
+    assert.equal(classifySlash('/resume').kind, 'resume');
+    assert.equal(classifySlash('/worktrees').kind, 'worktrees');
+    assert.equal(classifySlash('/tasks').kind, 'tasks');
+    assert.equal(classifySlash('/memory').kind, 'memory');
+    assert.equal(classifySlash('/view-plan').kind, 'viewPlan');
+    assert.equal(classifySlash('/plugins').kind, 'extensions');
   });
 
   it('passes agent-owned commands through', () => {

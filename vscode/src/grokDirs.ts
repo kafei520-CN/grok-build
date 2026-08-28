@@ -12,10 +12,12 @@ export function sameFsPath(a: string, b: string, os: NodeJS.Platform): boolean {
  * Project `.grok/<kind>` directory, or undefined when there is no workspace
  * or it would be the same as `~/.grok/<kind>` (empty window, home folder).
  */
+export type GrokKind = 'skills' | 'rules' | 'agents' | 'personas';
+
 export function resolveProjectGrokDir(
   workspaceFolders: string[],
   homeDir: string,
-  kind: 'skills' | 'rules',
+  kind: GrokKind,
   os: NodeJS.Platform,
 ): string | undefined {
   const folder = workspaceFolders[0];
@@ -29,7 +31,7 @@ export function resolveProjectGrokDir(
   return dir;
 }
 
-export function projectGrokDir(kind: 'skills' | 'rules'): string | undefined {
+export function projectGrokDir(kind: GrokKind): string | undefined {
   return resolveProjectGrokDir(
     plat().workspaceFolders(),
     plat().homeDir(),

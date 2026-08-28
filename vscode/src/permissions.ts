@@ -39,6 +39,21 @@ export function selectedPermission(optionId: string): unknown {
   return { outcome: { outcome: 'selected', optionId } };
 }
 
+/** ACP `RequestPermissionOutcome::Cancelled` — session gone or the user stopped. */
+export function cancelledPermission(): unknown {
+  return { outcome: { outcome: 'cancelled' } };
+}
+
+export function settlePending<T>(
+  pending: Map<string, { resolve: (value: T) => void }>,
+  value: T,
+): void {
+  for (const item of pending.values()) {
+    item.resolve(value);
+  }
+  pending.clear();
+}
+
 export type PermLabelKey =
   | 'permAllowOnce'
   | 'permAllowAlways'
