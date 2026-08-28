@@ -1,5 +1,6 @@
 import type { ChatState, WebviewToHost } from '../types';
 import { t, type StringKey, type UiLocale } from '../i18n';
+import { normalizeTheme } from '../theme';
 
 type VsCodeApi = {
   postMessage(message: WebviewToHost): void;
@@ -22,6 +23,7 @@ export const root = document.getElementById('app') ?? document.body;
 
 export const ui = {
   state: prefsOnly(vscode.getState()),
+  sessionsMode: readSessionsMode(vscode.getState()),
   draft: '',
   menu: undefined as 'slash' | 'files' | undefined,
   picker: undefined as 'model' | 'effort' | undefined,
@@ -31,6 +33,7 @@ export const ui = {
   copiedId: undefined as string | undefined,
   copiedTimer: undefined as ReturnType<typeof setTimeout> | undefined,
   workOpen: new Map<string, boolean>(),
+  sessionGroupOpen: new Map<string, boolean>(),
   lightboxSrc: undefined as string | undefined,
   stickToBottom: true,
   transcriptScroll: 0,
@@ -70,7 +73,16 @@ export function persistUi(): void {
     compactMode: ui.state.compactMode,
     timestamps: ui.state.timestamps,
     multiline: ui.state.multiline,
+    sessionsMode: ui.sessionsMode,
+    theme: normalizeTheme(ui.state.theme),
   });
+}
+
+function readSessionsMode(raw: unknown): 'list' | 'workspace' {
+  if (raw && typeof raw === 'object' && (raw as { sessionsMode?: string }).sessionsMode === 'workspace') {
+    return 'workspace';
+  }
+  return 'list';
 }
 
 function prefsOnly(raw: unknown): ChatState {
@@ -85,6 +97,7 @@ function prefsOnly(raw: unknown): ChatState {
     compactMode: value.compactMode,
     timestamps: value.timestamps,
     multiline: value.multiline,
+    theme: normalizeTheme((value as { theme?: unknown }).theme),
   };
 }
 

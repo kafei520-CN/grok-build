@@ -1,4 +1,5 @@
 import type { ChatState, StreamTail } from '../types';
+import { applyThemeTo } from '../theme';
 import { bindRender, isBooting, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
 import { mountComposer, patchComposer } from './composer';
@@ -40,6 +41,7 @@ function applyTail(tail: StreamTail): void {
 function render(): void {
   try {
     document.documentElement.lang = ui.state.locale === 'zh-CN' ? 'zh-CN' : 'en';
+    applyThemeTo(document.documentElement.style, ui.state.theme);
     root.dataset.status = ui.state.status;
     root.classList.toggle('compact', Boolean(ui.state.compactMode));
     root.classList.toggle('focused', ui.composerFocused);
@@ -93,7 +95,11 @@ function boot(): void {
             ? 'closeRules'
             : ui.state.settingsPage === 'skills'
               ? 'closeSkills'
-              : 'closeSettings',
+              : ui.state.settingsPage === 'apis'
+                ? 'closeApis'
+                : ui.state.settingsPage === 'theme'
+                  ? 'closeTheme'
+                  : 'closeSettings',
       });
     }
   });

@@ -5,9 +5,10 @@ import type { PermissionOption, SessionUpdate } from './types';
 import { asObject, asString } from './wire';
 
 export interface IncomingHost {
-  applyIncomingUpdate(update: SessionUpdate, isReplay: boolean): void;
+  applyIncomingUpdate(update: SessionUpdate, isReplay: boolean, sessionId?: string): void;
   requestToolPermission(params: unknown): Promise<unknown>;
   journal: { remember(filePath: string): Promise<void> };
+  applyModelsUpdate?(params: unknown): void;
 }
 
 export async function handleIncoming(
@@ -19,7 +20,11 @@ export async function handleIncoming(
   const name = method.startsWith('_') ? method.slice(1) : method;
   if (name === 'session/update' || name === 'x.ai/session_notification' || name === 'x.ai/session/update') {
     const parsed = parseSessionUpdate(params);
-    controller.applyIncomingUpdate(parsed.update, parsed.isReplay);
+    controller.applyIncomingUpdate(parsed.update, parsed.isReplay, parsed.sessionId);
+    return {};
+  }
+  if (name === 'x.ai/models/update') {
+    controller.applyModelsUpdate?.(params);
     return {};
   }
   if (name === 'session/request_permission') {

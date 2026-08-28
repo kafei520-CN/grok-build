@@ -2,8 +2,10 @@ import { DEFAULT_SETTINGS, type GrokSettings } from '../types';
 import { post, tr, ui } from './app';
 import { iconButton } from './dom';
 import { iconBack, iconClose, iconStar } from './icons';
+import { apiEditStamp, apisNavRow, mountApisBody } from './settingsApi';
 import { mountRulesBody, rulesNavRow } from './settingsRules';
 import { mountSkillsBody, skillsNavRow } from './settingsSkills';
+import { mountThemeBody, themeNavRow } from './settingsTheme';
 
 let paintedKey: string | undefined;
 
@@ -19,6 +21,9 @@ export function patchSettings(parent: HTMLElement): void {
     ui.state.settingsPage ?? 'main',
     (ui.state.rules ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     (ui.state.skills ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
+    (ui.state.apis ?? []).map((row) => row.id).join('|'),
+    apiEditStamp(),
+    `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}`,
   ].join(':');
   if (!existing || paintedKey !== key) {
     existing?.remove();
@@ -43,14 +48,31 @@ function mountSettings(): HTMLElement {
   const title = document.createElement('span');
   const page = ui.state.settingsPage ?? 'main';
   title.textContent =
-    page === 'rules' ? tr('settingsRules') : page === 'skills' ? tr('settingsSkills') : tr('settingsTitle');
+    page === 'rules'
+      ? tr('settingsRules')
+      : page === 'skills'
+        ? tr('settingsSkills')
+        : page === 'apis'
+          ? tr('settingsApis')
+          : page === 'theme'
+            ? tr('settingsTheme')
+            : tr('settingsTitle');
   brand.append(mark, title);
   const tools = document.createElement('div');
   tools.className = 'settings-head-tools';
-  if (page === 'rules' || page === 'skills') {
+  if (page === 'rules' || page === 'skills' || page === 'apis' || page === 'theme') {
     tools.append(
       iconButton(tr('settingsRulesBack'), iconBack(), () =>
-        post({ type: page === 'skills' ? 'closeSkills' : 'closeRules' }),
+        post({
+          type:
+            page === 'skills'
+              ? 'closeSkills'
+              : page === 'apis'
+                ? 'closeApis'
+                : page === 'theme'
+                  ? 'closeTheme'
+                  : 'closeRules',
+        }),
       ),
     );
   }
@@ -64,10 +86,19 @@ function mountSettings(): HTMLElement {
     el.append(head, mountSkillsBody());
     return el;
   }
+  if (page === 'apis') {
+    el.append(head, mountApisBody());
+    return el;
+  }
+  if (page === 'theme') {
+    el.append(head, mountThemeBody());
+    return el;
+  }
   const body = document.createElement('div');
   body.className = 'settings-body';
   body.append(
     section(tr('settingsUi'), [
+      themeNavRow(),
       localeRow(),
       toggleRow(
         'compactMode',
@@ -114,6 +145,7 @@ function mountSettings(): HTMLElement {
       ),
       rulesNavRow(),
       skillsNavRow(),
+      apisNavRow(),
     ]),
     section(tr('settingsCli'), [
       textRow(
@@ -305,16 +337,6 @@ function accountCard(): HTMLElement {
   login.dataset.account = 'login';
   login.textContent = tr('loginGrok');
   login.addEventListener('click', () => post({ type: 'login' }));
-  const api = document.createElement('button');
-  api.type = 'button';
-  api.className = 'btn';
-  api.textContent = tr('settingsApiKey');
-  api.addEventListener('click', () => {
-    const key = window.prompt(tr('promptApiKey'));
-    if (key) {
-      post({ type: 'setApiKey', key });
-    }
-  });
   const logout = document.createElement('button');
   logout.type = 'button';
   logout.className = 'btn';
@@ -329,7 +351,7 @@ function accountCard(): HTMLElement {
   const restartHint = document.createElement('div');
   restartHint.className = 'settings-hint';
   restartHint.textContent = tr('settingsRestartHint');
-  actions.append(login, api, logout, restart);
+  actions.append(login, logout, restart);
   card.append(status, actions, restartHint);
   wrap.append(kicker, card);
   return wrap;

@@ -21,12 +21,14 @@ import { handleIncoming, parsePermissionOptions } from './incoming';
 import { tr, uiLocale } from './locale';
 import { logError, logInfo, logWarn, showLog } from './logger';
 import { buildPromptBlocks } from './prompt';
+import { formatAgentError, formatErrorLine, isCancelError } from './errors';
 import { RpcError } from './rpc';
 import { normalizeSetting, readGrokSettings, writeGrokSetting } from './settings';
 import {
   applySessionUpdate,
   finalizeReplayTimes,
   mergeCommands,
+  mergeModelCatalog,
   modelsFromResult,
 } from './sessionUpdates';
 import { FALLBACK_COMMANDS, classifySlash, modeLabel, type HostAction } from './slash';
@@ -44,6 +46,7 @@ import {
   listSkills,
   toggleSkill as toggleSkillDir,
 } from './skillsHost';
+import { listApiEndpoints, removeApiEndpoint, saveApiEndpoint } from './apiEndpoints';
 import { runSlashAction, type SlashRuntime } from './slashHost';
 import type {
   AccountInfo,
@@ -60,7 +63,10 @@ import type {
   SessionUpdate,
   SettingsPage,
   SlashCommandInfo,
+  ApiEndpoint,
+  ThemeColors,
 } from './types';
+import { DEFAULT_THEME, normalizeTheme } from './theme';
 
 interface PendingPermission {
   resolve: (value: unknown) => void;
@@ -79,6 +85,8 @@ export class GrokController implements SlashRuntime {
   settingsPage: SettingsPage = 'main';
   rules: RuleItem[] = [];
   skills: SkillItem[] = [];
+  apis: ApiEndpoint[] = [];
+  theme: ThemeColors = DEFAULT_THEME;
   history?: string[];
   drawer?: DrawerId;
   drawerTab?: string;
@@ -107,6 +115,12 @@ export class GrokController implements SlashRuntime {
   private emitTimer?: ReturnType<typeof setTimeout>;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
+  private modelsReloadSeq = 0;
+  private pendingModelId?: string;
+  private pendingEffort?: string;
+  private runGen = 0;
+  private sessionOp = 0;
+  private hideSessionPreview = false;
   private readonly disposables: Array<{ dispose(): void }> = [];
   readonly journal: EditJournal;
   readonly meter: ContextMeter;
@@ -118,6 +132,7 @@ export class GrokController implements SlashRuntime {
     this.compactMode = Boolean(plat().getState('ui.compactMode', false));
     this.timestamps = plat().getState('ui.timestamps', true);
     this.multiline = Boolean(plat().getState('ui.multiline', false));
+    this.theme = normalizeTheme(plat().getState('ui.theme', DEFAULT_THEME));
     this.journal = new EditJournal({
       messages: () => this.messages,
       replaying: () => this.replaying,
@@ -193,6 +208,8 @@ export class GrokController implements SlashRuntime {
       queue: this.queue,
       currentSessionId: this.currentSessionId,
       restoringSession: this.restoringSession,
+      hideSessionPreview: this.hideSessionPreview,
+      workspacePath: this.cwd(),
       alwaysApprove: settings.alwaysApprove,
       locale: uiLocale(),
       context: this.meter.usage,
@@ -201,6 +218,8 @@ export class GrokController implements SlashRuntime {
       settingsPage: this.settingsPage,
       rules: this.rules,
       skills: this.skills,
+      apis: this.apis,
+      theme: this.theme,
     };
   }
 
@@ -232,24 +251,18 @@ export class GrokController implements SlashRuntime {
   }
 
   async newSession(): Promise<void> {
-    if (!this.agent) {
-      await this.start();
-    }
-    const agent = this.agent;
-    if (!agent) {
-      return;
-    }
+    this.sessionOp += 1;
+    this.cancelTurn();
+    this.agent?.clearSession();
     this.messages = [];
     this.journal.clear();
     this.permission = undefined;
-    try {
-      await this.createSession(agent);
-      this.currentSessionId = agent.sessionId;
-      this.setStatus('ready');
-      void this.refreshSessionsSilent();
-    } catch (error) {
-      this.fail('Could not create a session', error);
-    }
+    this.drawer = undefined;
+    this.replaying = false;
+    this.restoringSession = false;
+    this.hideSessionPreview = true;
+    this.currentSessionId = undefined;
+    this.setStatus('ready');
   }
 
   async login(): Promise<void> {
@@ -396,6 +409,8 @@ export class GrokController implements SlashRuntime {
       }
       return;
     }
+    this.error = undefined;
+    const run = ++this.runGen;
     const blocks = await buildPromptBlocks(trimmed, this.attachments);
     const now = new Date().toISOString();
     const userMessage: ChatMessage = {
@@ -426,13 +441,19 @@ export class GrokController implements SlashRuntime {
     try {
       await agent.prompt(blocks);
     } catch (error) {
-      if (error instanceof RpcError && /cancel/i.test(error.message)) {
+      if (run !== this.runGen) {
+        return;
+      }
+      if (isCancelError(error)) {
         this.finishAssistant();
         this.setStatus('ready');
         return;
       }
       this.finishAssistant();
-      this.fail('The agent could not complete that turn', error);
+      this.fail(tr('turnError'), error);
+      return;
+    }
+    if (run !== this.runGen) {
       return;
     }
     this.finishAssistant();
@@ -441,7 +462,13 @@ export class GrokController implements SlashRuntime {
   }
 
   cancelTurn(): void {
+    this.runGen += 1;
     this.agent?.cancelTurn();
+    this.queue = [];
+    if (this.status === 'streaming') {
+      this.finishAssistant();
+      this.setStatus('ready');
+    }
   }
 
   choosePermission(optionId: string): void {
@@ -502,31 +529,40 @@ export class GrokController implements SlashRuntime {
     if (this.busyTurn()) {
       return;
     }
-    if (this.models?.currentId) {
-      try {
-        await this.agent?.setModel(this.models.currentId, {
-          reasoningEffort: level,
-        });
-        this.patchCurrentEffort(level);
-        return;
-      } catch (error) {
-        logWarn(`set effort via model meta failed: ${error}`);
-      }
-    }
-    await this.sendAgentSlash(`/effort ${level}`);
+    this.pendingEffort = level;
     this.patchCurrentEffort(level);
+    const modelId = this.selectedModelId();
+    if (!this.agent?.sessionId || !modelId) {
+      this.emit();
+      return;
+    }
+    try {
+      await this.agent.setModel(modelId, { reasoningEffort: level });
+    } catch (error) {
+      logWarn(`set effort via model meta failed: ${error}`);
+      await this.sendAgentSlash(`/effort ${level}`);
+    }
   }
 
   async setModel(modelId: string): Promise<void> {
     if (this.busyTurn()) {
       return;
     }
-    try {
-      await this.agent?.setModel(modelId);
-      if (this.models) {
-        this.models = { ...this.models, currentId: modelId };
-        this.emit();
+    this.pendingModelId = modelId;
+    if (this.models) {
+      this.models = { ...this.models, currentId: modelId };
+      const effort = this.selectedEffort();
+      if (effort) {
+        this.patchCurrentEffort(effort);
       }
+      this.emit();
+    }
+    if (!this.agent?.sessionId) {
+      return;
+    }
+    try {
+      const effort = this.selectedEffort();
+      await this.agent.setModel(modelId, effort ? { reasoningEffort: effort } : undefined);
     } catch (error) {
       this.fail('Could not switch models', error);
     }
@@ -623,6 +659,8 @@ export class GrokController implements SlashRuntime {
     if (!agent) {
       return;
     }
+    const op = ++this.sessionOp;
+    this.cancelTurn();
     const cwd =
       sessionCwd ??
       this.sessions?.find((row) => row.id === sessionId)?.cwd ??
@@ -631,12 +669,16 @@ export class GrokController implements SlashRuntime {
     this.journal.clear();
     this.permission = undefined;
     this.drawer = undefined;
+    this.hideSessionPreview = false;
     this.restoringSession = true;
     this.replaying = true;
     this.currentSessionId = sessionId;
     this.emit();
     try {
       const result = await agent.loadSession(sessionId, cwd);
+      if (op !== this.sessionOp) {
+        return;
+      }
       this.models = modelsFromResult(result) ?? this.models;
       this.currentSessionId = agent.sessionId ?? sessionId;
       finalizeReplayTimes(this.messages);
@@ -644,11 +686,17 @@ export class GrokController implements SlashRuntime {
       void this.journal.hydrateFromGit().then(() => this.emit());
       void this.meter.refresh();
     } catch (error) {
+      if (op !== this.sessionOp) {
+        return;
+      }
       this.fail('Could not restore that session', error);
     } finally {
-      this.replaying = false;
-      this.restoringSession = false;
-      this.emit();
+      if (op === this.sessionOp) {
+        this.replaying = false;
+        this.restoringSession = false;
+        finalizeReplayTimes(this.messages);
+        this.emit();
+      }
     }
   }
 
@@ -719,6 +767,7 @@ export class GrokController implements SlashRuntime {
       locale: uiLocale(),
       files,
       messageId: assistant?.id,
+      theme: this.theme,
       onRevert: () => {
         void this.journal.revert(assistant?.id).then(async (result) => {
           if (result === 'cancelled' || result === 'empty') {
@@ -751,6 +800,7 @@ export class GrokController implements SlashRuntime {
     this.emit();
     void this.refreshRules();
     void this.refreshSkills();
+    void this.refreshApis();
   }
 
   closeSettings(): void {
@@ -882,6 +932,112 @@ export class GrokController implements SlashRuntime {
     }
   }
 
+  openApis(): void {
+    this.settingsOpen = true;
+    this.settingsPage = 'apis';
+    this.emit();
+    void this.refreshApis();
+  }
+
+  closeApis(): void {
+    this.settingsPage = 'main';
+    this.emit();
+  }
+
+  openTheme(): void {
+    this.settingsOpen = true;
+    this.settingsPage = 'theme';
+    this.emit();
+  }
+
+  closeTheme(): void {
+    this.settingsPage = 'main';
+    this.emit();
+  }
+
+  setTheme(primary: string, secondary: string, background?: string): void {
+    const next = normalizeTheme({ primary, secondary, background });
+    if (
+      next.primary === this.theme.primary &&
+      next.secondary === this.theme.secondary &&
+      (next.background ?? '') === (this.theme.background ?? '')
+    ) {
+      return;
+    }
+    this.theme = next;
+    void plat().setState('ui.theme', this.theme);
+    this.emit();
+  }
+
+  async saveApi(input: {
+    id?: string;
+    name: string;
+    model: string;
+    baseUrl: string;
+    backend: ApiEndpoint['backend'];
+    apiKey?: string;
+  }): Promise<void> {
+    const saved = await saveApiEndpoint(input);
+    await this.refreshApis();
+    void this.reloadModelCatalog(saved.id);
+    plat().info(tr('settingsApisSaved'));
+  }
+
+  async deleteApi(id: string): Promise<void> {
+    const row = this.apis.find((item) => item.id === id);
+    const ok = await plat().confirm(
+      tr('settingsApisDeleteConfirm', { name: row?.name ?? id }),
+      tr('settingsApisDelete'),
+    );
+    if (!ok) {
+      return;
+    }
+    await removeApiEndpoint(id);
+    await this.refreshApis();
+    void this.reloadModelCatalog();
+  }
+
+  private async refreshApis(): Promise<void> {
+    try {
+      this.apis = await listApiEndpoints();
+      this.emit();
+    } catch (error) {
+      logWarn(`api list: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  private async reloadModelCatalog(expectId?: string): Promise<void> {
+    const agent = this.agent;
+    if (!agent) {
+      return;
+    }
+    const seq = ++this.modelsReloadSeq;
+    try {
+      await agent.reloadModels();
+    } catch (error) {
+      logWarn(`reload models: ${error instanceof Error ? error.message : error}`);
+    }
+    for (let i = 0; i < 8; i += 1) {
+      if (seq !== this.modelsReloadSeq) {
+        return;
+      }
+      try {
+        const next = mergeModelCatalog(this.models, await agent.listModels());
+        if (next) {
+          this.models = next;
+          this.emit();
+          if (!expectId || next.available.some((model) => model.id === expectId)) {
+            return;
+          }
+        }
+      } catch (error) {
+        logWarn(`models list: ${error instanceof Error ? error.message : error}`);
+        return;
+      }
+      await sleep(300);
+    }
+  }
+
   async updateSetting(key: keyof GrokSettings, value: string | boolean): Promise<void> {
     const next = normalizeSetting(key, value);
     if (next === undefined) {
@@ -920,12 +1076,24 @@ export class GrokController implements SlashRuntime {
       createdAt: now,
     };
     this.messages = [...this.messages, userMessage, assistant];
+    const run = ++this.runGen;
     this.setStatus('streaming');
     try {
       await agent.prompt([{ type: 'text', text }]);
     } catch (error) {
+      if (run !== this.runGen) {
+        return;
+      }
+      if (isCancelError(error)) {
+        this.finishAssistant();
+        this.setStatus('ready');
+        return;
+      }
       this.finishAssistant();
       this.fail('Command failed', error);
+      return;
+    }
+    if (run !== this.runGen) {
       return;
     }
     this.finishAssistant();
@@ -969,7 +1137,22 @@ export class GrokController implements SlashRuntime {
     }
   }
 
-  applyIncomingUpdate(update: SessionUpdate, isReplay = false): void {
+  applyModelsUpdate(params: unknown): void {
+    const next = mergeModelCatalog(this.models, params);
+    if (!next) {
+      return;
+    }
+    this.models = next;
+    this.emit();
+  }
+
+  applyIncomingUpdate(update: SessionUpdate, isReplay = false, sessionId?: string): void {
+    if (this.hideSessionPreview && !this.agent?.sessionId) {
+      return;
+    }
+    if (sessionId && this.currentSessionId && sessionId !== this.currentSessionId) {
+      return;
+    }
     const view = {
       replaying: this.replaying || isReplay,
       messages: this.messages,
@@ -1080,6 +1263,7 @@ export class GrokController implements SlashRuntime {
       const init = await agent.initialize();
       this.agentVersion = agent.agentVersion();
       this.models = modelsFromResult(init) ?? this.models;
+      this.applyPendingModelSelection();
       const methods = agent.authMethods();
       const defaultId = agent.defaultAuthMethodId();
       logInfo(
@@ -1102,6 +1286,7 @@ export class GrokController implements SlashRuntime {
         this.emit();
       });
       this.setStatus('ready');
+      void this.refreshApis();
     } catch (error) {
       this.fail('Could not start the Grok agent', error);
     }
@@ -1198,10 +1383,66 @@ export class GrokController implements SlashRuntime {
   }
 
   private async createSession(agent: GrokAgent): Promise<void> {
-    const result = await agent.newSession(this.cwd());
+    const wantedId = this.selectedModelId();
+    const wantedEffort = this.selectedEffort();
+    const extra: Record<string, unknown> = {};
+    if (wantedId) {
+      extra.modelId = wantedId;
+    }
+    if (wantedEffort) {
+      extra.reasoningEffort = wantedEffort;
+    }
+    const result = await agent.newSession(
+      this.cwd(),
+      Object.keys(extra).length ? extra : undefined,
+    );
     this.currentSessionId = agent.sessionId ?? result.sessionId;
     this.models = modelsFromResult(result) ?? this.models;
+    if (wantedId && this.models?.currentId !== wantedId) {
+      try {
+        await agent.setModel(wantedId, wantedEffort ? { reasoningEffort: wantedEffort } : undefined);
+      } catch (error) {
+        logWarn(`apply selected model: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+    this.applyPendingModelSelection();
     void this.meter.refresh();
+  }
+
+  private selectedModelId(): string | undefined {
+    return this.pendingModelId ?? this.models?.currentId;
+  }
+
+  private selectedEffort(): string | undefined {
+    if (this.pendingEffort) {
+      return this.pendingEffort;
+    }
+    const id = this.selectedModelId();
+    const model = this.models?.available.find((item) => item.id === id);
+    if (model?.currentEffort) {
+      return model.currentEffort;
+    }
+    if (model?.efforts?.length) {
+      return model.efforts.includes('high') ? 'high' : model.efforts[0];
+    }
+    if (id && this.apis.some((item) => item.id === id)) {
+      return 'high';
+    }
+    return undefined;
+  }
+
+  private applyPendingModelSelection(): void {
+    if (!this.models) {
+      return;
+    }
+    const wantedId = this.selectedModelId();
+    if (wantedId && this.models.currentId !== wantedId) {
+      this.models = { ...this.models, currentId: wantedId };
+    }
+    const effort = this.selectedEffort();
+    if (effort) {
+      this.patchCurrentEffort(effort);
+    }
   }
 
   private finishAssistant(): void {
@@ -1223,10 +1464,18 @@ export class GrokController implements SlashRuntime {
   }
 
   private fail(message: string, error?: unknown): void {
-    const detail = error instanceof Error ? error.message : error ? String(error) : '';
-    this.error = detail ? `${message}: ${detail}` : message;
+    const parsed = error !== undefined ? formatAgentError(error) : { message };
+    const line =
+      parsed.message === message ? formatErrorLine(parsed) : `${message}: ${formatErrorLine(parsed)}`;
+    this.error = line;
+    const assistant = this.messages.filter((item) => item.role === 'assistant').at(-1);
+    if (assistant) {
+      assistant.error = parsed;
+      assistant.streaming = false;
+    }
     if (this.status === 'streaming' || this.status === 'ready') {
       this.status = 'ready';
+      plat().warn(line);
     } else if (this.status !== 'login' && this.status !== 'authenticating') {
       this.status = 'error';
     }

@@ -2,11 +2,13 @@ import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import type { FileDiff } from './diff';
 import type { UiLocale } from './i18n';
+import type { ThemeColors } from './types';
 
 export interface DiffPayload {
   locale: UiLocale;
   files: FileDiff[];
   messageId?: string;
+  theme?: ThemeColors;
 }
 
 type DiffHostMessage =

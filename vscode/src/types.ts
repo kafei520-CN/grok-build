@@ -48,7 +48,24 @@ export interface ContextUsage {
   categories?: ContextCategory[];
 }
 
-export type SettingsPage = 'main' | 'rules' | 'skills';
+export type SettingsPage = 'main' | 'rules' | 'skills' | 'apis' | 'theme';
+
+export interface ThemeColors {
+  primary: string;
+  secondary: string;
+  background?: string;
+}
+
+export type ApiBackend = 'chat_completions' | 'responses' | 'messages';
+
+export interface ApiEndpoint {
+  id: string;
+  name: string;
+  model: string;
+  baseUrl: string;
+  backend: ApiBackend;
+  hasKey: boolean;
+}
 
 export interface RuleItem {
   id: string;
@@ -110,6 +127,14 @@ export interface ToolCard {
   detail?: string;
 }
 
+export interface TurnError {
+  message: string;
+  code?: string;
+  retrying?: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -122,6 +147,7 @@ export interface ChatMessage {
   streaming?: boolean;
   createdAt?: string;
   endedAt?: string;
+  error?: TurnError;
 }
 
 export interface PermissionOption {
@@ -201,6 +227,8 @@ export interface ChatState {
   alwaysApprove?: boolean;
   currentSessionId?: string;
   restoringSession?: boolean;
+  hideSessionPreview?: boolean;
+  workspacePath?: string;
   locale?: 'en' | 'zh-CN';
   context?: ContextUsage;
   settings?: GrokSettings;
@@ -208,6 +236,8 @@ export interface ChatState {
   settingsPage?: SettingsPage;
   rules?: RuleItem[];
   skills?: SkillItem[];
+  apis?: ApiEndpoint[];
+  theme?: ThemeColors;
 }
 
 export interface AuthMethodWire {
@@ -255,6 +285,15 @@ export interface SessionUpdate {
   title?: string;
   kind?: string;
   status?: string;
+  type?: string;
+  attempt?: number;
+  maxRetries?: number;
+  attempts?: number;
+  reason?: string;
+  errorType?: string;
+  message?: string;
+  error?: string;
+  isRateLimited?: boolean;
   rawInput?: unknown;
   rawOutput?: unknown;
   locations?: Array<{ path?: string }>;
@@ -329,6 +368,21 @@ export type WebviewToHost =
   | { type: 'toggleSkill'; id: string }
   | { type: 'deleteSkill'; id: string }
   | { type: 'openSkill'; id: string }
+  | { type: 'openApis' }
+  | { type: 'closeApis' }
+  | { type: 'openTheme' }
+  | { type: 'closeTheme' }
+  | { type: 'setTheme'; primary: string; secondary: string; background?: string }
+  | {
+      type: 'saveApi';
+      id?: string;
+      name: string;
+      model: string;
+      baseUrl: string;
+      backend: ApiBackend;
+      apiKey?: string;
+    }
+  | { type: 'deleteApi'; id: string }
   | {
       type: 'updateSetting';
       key: keyof GrokSettings;

@@ -120,11 +120,14 @@ export function patchComposer(): void {
   }
   const bar = document.getElementById('composer-bar');
   const nextBarKey = composerBarKey();
-  if (bar && nextBarKey !== barKey) {
+  if (bar && (nextBarKey !== barKey || bar.childElementCount === 0)) {
     barKey = nextBarKey;
     fillComposerBar(bar, input);
   } else if (bar) {
     patchContextMeter(bar);
+  }
+  if (input.dataset.composing !== '1') {
+    autosize(input);
   }
 }
 
@@ -367,7 +370,12 @@ function currentModelLabel(): string {
 }
 
 function currentEffortValue(): string {
-  return currentModel()?.currentEffort ?? '';
+  const model = currentModel();
+  if (model?.currentEffort) {
+    return model.currentEffort;
+  }
+  const choices = effortChoices();
+  return choices.includes('high') ? 'high' : (choices[0] ?? 'high');
 }
 
 function effortChoices(): string[] {
@@ -585,6 +593,7 @@ function sendFrom(input: HTMLTextAreaElement): void {
   ui.menu = undefined;
   ui.stickToBottom = true;
   input.value = '';
+  autosize(input);
 }
 
 function autosize(input: HTMLTextAreaElement): void {

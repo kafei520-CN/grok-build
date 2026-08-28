@@ -1,5 +1,5 @@
 import type { FileDiff } from './diff';
-import type { GrokSettings } from './types';
+import type { GrokSettings, ThemeColors } from './types';
 
 export interface Disposable {
   dispose(): void;
@@ -65,7 +65,13 @@ export interface Platform {
   focusChat(): void;
   getActiveSelection(): SelectionInfo | undefined;
   getActiveFile(): FileInfo | undefined;
-  showDiff?(opts: { locale: string; files: FileDiff[]; messageId?: string; onRevert?: () => void }): void;
+  showDiff?(opts: {
+    locale: string;
+    files: FileDiff[];
+    messageId?: string;
+    theme?: ThemeColors;
+    onRevert?: () => void;
+  }): void;
   onTrustChange(cb: () => void): Disposable;
   onConfigChange(cb: () => void): Disposable;
 }

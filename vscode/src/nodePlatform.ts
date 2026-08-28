@@ -288,12 +288,14 @@ export class NodePlatform implements Platform {
     locale: string;
     files: FileDiff[];
     messageId?: string;
+    theme?: import('./types').ThemeColors;
     onRevert?: () => void;
   }): void {
     void this.opts.request('showDiff', {
       locale: opts.locale,
       files: opts.files,
       messageId: opts.messageId,
+      theme: opts.theme,
     });
   }
 

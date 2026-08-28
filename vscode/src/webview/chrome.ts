@@ -4,6 +4,7 @@ import { isBooting, loc, post, render, tr, ui } from './app';
 import { button, iconButton } from './dom';
 import { iconClock, iconEdit, iconMore, iconStar } from './icons';
 import { escapeHtml } from './markdown';
+import { listedSessions, mountSessionsDrawer } from './sessions';
 
 let headerLocale: string | undefined;
 
@@ -114,23 +115,7 @@ export function renderDrawer(): HTMLElement {
   head.append(title, close);
   el.append(head);
   if (ui.state.drawer === 'sessions') {
-    const sessions = listedSessions();
-    for (const row of sessions) {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className =
-        row.id === ui.state.currentSessionId ? 'session-row active' : 'session-row';
-      item.innerHTML = `<span class="session-title">${escapeHtml(row.title)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
-      item.addEventListener('click', () =>
-        post({ type: 'loadSession', sessionId: row.id, cwd: row.cwd }),
-      );
-      el.append(item);
-    }
-    if (!sessions.length) {
-      const empty = document.createElement('p');
-      empty.textContent = tr('sessionsEmpty');
-      el.append(empty);
-    }
+    mountSessionsDrawer(el);
   } else if (ui.state.drawer === 'history') {
     for (const prompt of ui.state.history ?? []) {
       const item = button(prompt.slice(0, 80), () => {
@@ -334,6 +319,9 @@ export function home(): HTMLElement {
     starters.append(btn);
   }
   el.append(starters);
+  if (ui.state.hideSessionPreview) {
+    return el;
+  }
   const preview = listedSessions().slice(0, 4);
   if (preview.length > 0) {
     const recent = document.createElement('div');
@@ -358,6 +346,4 @@ export function home(): HTMLElement {
   return el;
 }
 
-function listedSessions() {
-  return (ui.state.sessions ?? []).filter((row) => Boolean(row.title.trim()));
-}
+

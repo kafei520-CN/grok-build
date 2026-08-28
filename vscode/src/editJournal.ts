@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { buildFileDiff, type FileDiff } from './diff';
+import { buildFileDiff, splitLines, type FileDiff } from './diff';
 import { logError } from './logger';
 import { tr } from './locale';
 import { plat } from './platform';
@@ -303,19 +303,22 @@ export class EditJournal {
     if (snap && !snap.existed) {
       return { absPath: abs, before: '', after: afterDisk };
     }
-    if (snap?.source !== 'tool' && snap?.previous !== undefined) {
-      if (isFullFileBaseline(snap.previous, afterDisk)) {
-        return { absPath: abs, before: snap.previous, after: afterDisk };
-      }
+    if (
+      snap?.source !== 'tool' &&
+      snap?.previous !== undefined &&
+      !textEqual(snap.previous, afterDisk) &&
+      isFullFileBaseline(snap.previous, afterDisk)
+    ) {
+      return { absPath: abs, before: snap.previous, after: afterDisk };
+    }
+    if (edit?.previous !== undefined && edit.next !== undefined) {
+      return { absPath: abs, before: edit.previous, after: edit.next };
     }
     if (
       edit?.previous !== undefined &&
-      edit.next !== undefined &&
-      isFullFileBaseline(edit.previous, edit.next)
+      !textEqual(edit.previous, afterDisk) &&
+      isFullFileBaseline(edit.previous, afterDisk)
     ) {
-      return { absPath: abs, before: edit.previous, after: edit.next };
-    }
-    if (edit?.previous !== undefined && isFullFileBaseline(edit.previous, afterDisk)) {
       return { absPath: abs, before: edit.previous, after: afterDisk };
     }
     return undefined;
@@ -364,6 +367,10 @@ export class EditJournal {
     }
     await plat().writeFile(absPath, Buffer.from(previous, 'utf8'));
   }
+}
+
+function textEqual(left: string, right: string): boolean {
+  return splitLines(left).join('\n') === splitLines(right).join('\n');
 }
 
 function isInside(root: string, filePath: string): boolean {

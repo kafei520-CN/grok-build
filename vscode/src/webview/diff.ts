@@ -1,7 +1,9 @@
 import type { DiffHunk, DiffRow, FileDiff } from '../diff';
 import { t, type StringKey, type UiLocale } from '../i18n';
+import { applyThemeTo } from '../theme';
+import type { ThemeColors } from '../types';
 
-type Payload = { locale: UiLocale; files: FileDiff[]; messageId?: string };
+type Payload = { locale: UiLocale; files: FileDiff[]; messageId?: string; theme?: ThemeColors };
 
 const vscode = (
   window as unknown as {
@@ -32,6 +34,7 @@ function tr(key: StringKey, vars?: Record<string, string | number>): string {
 }
 
 function render(): void {
+  applyThemeTo(document.documentElement.style, payload.theme);
   const files = payload.files ?? [];
   const added = files.reduce((sum, file) => sum + file.added, 0);
   const removed = files.reduce((sum, file) => sum + file.removed, 0);

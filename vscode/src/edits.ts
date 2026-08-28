@@ -84,17 +84,32 @@ export function applyDiffStats(
   edits: FileEdit[],
   files: Array<{ path: string; added: number; removed: number }>,
 ): FileEdit[] {
-  const byPath = new Map(edits.map((edit) => [edit.path.replace(/\\/g, '/'), edit]));
-  return files.map((file) => {
-    const prev = byPath.get(file.path.replace(/\\/g, '/'));
-    return {
-      path: file.path,
-      added: file.added,
-      removed: file.removed,
-      previous: prev?.previous,
-      next: prev?.next,
-    };
-  });
+  const unused = [...files];
+  const out: FileEdit[] = [];
+  for (const edit of edits) {
+    const index = unused.findIndex((file) => sameEditPath(edit.path, file.path));
+    if (index >= 0) {
+      const file = unused.splice(index, 1)[0];
+      out.push({
+        ...edit,
+        path: file.path,
+        added: file.added,
+        removed: file.removed,
+      });
+    } else {
+      out.push(edit);
+    }
+  }
+  for (const file of unused) {
+    out.push({ path: file.path, added: file.added, removed: file.removed });
+  }
+  return out;
+}
+
+function sameEditPath(left: string, right: string): boolean {
+  const a = left.replace(/\\/g, '/').toLowerCase();
+  const b = right.replace(/\\/g, '/').toLowerCase();
+  return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
 }
 
 export function totals(edits: FileEdit[]): { added: number; removed: number } {

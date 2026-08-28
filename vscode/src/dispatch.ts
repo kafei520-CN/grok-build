@@ -149,6 +149,27 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'openSkill':
       controller.openSkill(message.id);
       return;
+    case 'openApis':
+      controller.openApis();
+      return;
+    case 'closeApis':
+      controller.closeApis();
+      return;
+    case 'openTheme':
+      controller.openTheme();
+      return;
+    case 'closeTheme':
+      controller.closeTheme();
+      return;
+    case 'setTheme':
+      controller.setTheme(message.primary, message.secondary, message.background);
+      return;
+    case 'saveApi':
+      await controller.saveApi(message);
+      return;
+    case 'deleteApi':
+      await controller.deleteApi(message.id);
+      return;
     case 'updateSetting':
       await controller.updateSetting(message.key, message.value);
       return;

@@ -75,7 +75,7 @@ function bodyKind(state: ChatState): string {
     return 'restoring';
   }
   if (state.messages.length === 0) {
-    return `home:${(state.sessions ?? []).map((row) => row.id).join(',')}`;
+    return `home:${state.sessions?.length ?? 0}:${state.currentSessionId ?? ''}`;
   }
   return 'chat';
 }
@@ -366,6 +366,10 @@ function turnSig(turn: Turn, split: boolean): string {
     sum.added,
     sum.removed,
     a?.images?.length ?? 0,
+    a?.error?.code ?? '',
+    a?.error?.message ?? '',
+    a?.error?.retrying ? 'r' : '',
+    a?.error?.attempt ?? 0,
     ui.copiedId === a?.id ? 'c' : '',
   ].join(':');
 }
@@ -441,7 +445,9 @@ function assistantColumn(message: ChatMessage): HTMLElement {
     body.dataset.len = String(message.text.length);
     body.innerHTML = renderMarkdown(message.text);
     el.append(body);
-  } else if (message.streaming && !hasWork(message)) {
+  } else if (message.error?.retrying) {
+    el.append(turnErrorCard(message));
+  } else if (message.streaming && !hasWork(message) && !message.error) {
     const pulse = document.createElement('div');
     pulse.className = 'pulse';
     const star = document.createElement('span');
@@ -453,12 +459,38 @@ function assistantColumn(message: ChatMessage): HTMLElement {
   if (message.images?.length) {
     el.append(imageGallery(message.images));
   }
+  if (message.error && !message.error.retrying) {
+    el.append(turnErrorCard(message));
+  }
   if (!message.streaming) {
     el.append(turnMeta(message));
     if (message.edits?.length) {
       el.append(changesBlock(message.id, message.edits));
     }
   }
+  return el;
+}
+
+function turnErrorCard(message: ChatMessage): HTMLElement {
+  const error = message.error!;
+  const el = document.createElement('div');
+  el.className = error.retrying ? 'turn-error live' : 'turn-error';
+  const title = document.createElement('div');
+  title.className = 'turn-error-title';
+  title.textContent = error.retrying
+    ? tr('turnRetrying', { n: error.attempt ?? 1, max: error.maxAttempts ?? '?' })
+    : tr('turnError');
+  el.append(title);
+  if (error.code) {
+    const code = document.createElement('div');
+    code.className = 'turn-error-code';
+    code.textContent = tr('errorCode', { code: error.code });
+    el.append(code);
+  }
+  const body = document.createElement('div');
+  body.className = 'turn-error-msg';
+  body.textContent = error.message;
+  el.append(body);
   return el;
 }
 

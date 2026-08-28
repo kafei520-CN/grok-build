@@ -62,4 +62,5 @@ export const EXT = {
   feedback: 'x.ai/feedback',
   interject: 'x.ai/interject',
   modelsList: 'x.ai/models/list',
+  modelsReload: 'x.ai/internal/reload_models',
 } as const;

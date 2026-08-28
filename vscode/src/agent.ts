@@ -220,7 +220,14 @@ export class GrokAgent {
     if (!this.sessionId) {
       return;
     }
-    this.rpc.notify('session/cancel', { sessionId: this.sessionId });
+    this.rpc.notify('session/cancel', {
+      sessionId: this.sessionId,
+      _meta: { cancelTrigger: 'stop_click', cancelSubagents: true },
+    });
+  }
+
+  clearSession(): void {
+    this.sessionId = undefined;
   }
 
   async setModel(modelId: string, meta?: Record<string, unknown>): Promise<void> {
@@ -232,6 +239,14 @@ export class GrokAgent {
       modelId,
       _meta: meta,
     });
+  }
+
+  async listModels(): Promise<Record<string, unknown>> {
+    return unwrapExt(await this.extMethod(EXT.modelsList, {}));
+  }
+
+  async reloadModels(): Promise<void> {
+    await this.extMethod(EXT.modelsReload, {});
   }
 
   async setMode(modeId: string): Promise<void> {
@@ -471,6 +486,15 @@ export function parseSessionUpdate(params: unknown): {
       title: asString(update['title']),
       kind: asString(update['kind']),
       status: asString(update['status']),
+      type: asString(update['type']),
+      attempt: asNum(update['attempt']),
+      maxRetries: asNum(update['maxRetries']) ?? asNum(update['max_retries']),
+      attempts: asNum(update['attempts']),
+      reason: asString(update['reason']),
+      errorType: asString(update['errorType']) ?? asString(update['error_type']),
+      message: asString(update['message']),
+      error: asString(update['error']),
+      isRateLimited: update['isRateLimited'] === true || update['is_rate_limited'] === true,
       rawInput: update['rawInput'],
       rawOutput: update['rawOutput'],
       locations: update['locations'] as SessionUpdate['locations'],

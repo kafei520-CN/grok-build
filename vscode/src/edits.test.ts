@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  applyDiffStats,
   countLineDiff,
   countUnifiedDiff,
   editsFromToolUpdate,
@@ -54,6 +55,18 @@ describe('edits', () => {
     ]);
     assert.equal(merged.length, 1);
     assert.ok((merged[0]?.added ?? 0) < 100);
+  });
+
+  it('keeps tool edits that the file diff list omitted', () => {
+    const next = applyDiffStats(
+      [
+        { path: 'src/diff.ts', added: 40, removed: 20 },
+        { path: 'package.json', added: 1, removed: 1 },
+      ],
+      [{ path: 'vscode/package.json', added: 1, removed: 1 }],
+    );
+    assert.equal(next.length, 2);
+    assert.equal(next.some((edit) => edit.path.includes('diff.ts') && edit.added === 40), true);
   });
 
   it('detects windows file paths', () => {

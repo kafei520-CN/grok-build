@@ -1,5 +1,6 @@
 import type { ContextMeter } from './contextMeter';
 import { editsFromToolUpdate, mergeEdits } from './edits';
+import { formatRetryUpdate } from './errors';
 import { FALLBACK_COMMANDS } from './slash';
 import type { ChatMessage, ChatState, SessionUpdate, SlashCommandInfo } from './types';
 import { asObject, asString } from './wire';
@@ -47,6 +48,15 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
     session.emitUnlessReplaying();
     return;
   }
+  if (kind === 'retry_state' || kind === 'auto_compact_failed') {
+    const assistant = ensureAssistant(session, replay, update);
+    assistant.error = formatRetryUpdate(update);
+    if (!assistant.error.retrying) {
+      assistant.streaming = false;
+    }
+    session.emitUnlessReplaying();
+    return;
+  }
   if (kind === 'user_message_chunk') {
     if (!replay) {
       return;
@@ -80,9 +90,21 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
     session.emitUnlessReplaying();
     return;
   }
+  if (
+    kind !== 'agent_message_chunk' &&
+    kind !== 'agent_thought_chunk' &&
+    kind !== 'tool_call' &&
+    kind !== 'tool_call_update' &&
+    kind !== 'plan'
+  ) {
+    return;
+  }
   const assistant = ensureAssistant(session, replay, update);
   if (kind === 'agent_message_chunk') {
     assistant.text += textFromContent(update.content);
+    if (assistant.error?.retrying) {
+      assistant.error = undefined;
+    }
   } else if (kind === 'agent_thought_chunk') {
     assistant.thinking = (assistant.thinking ?? '') + textFromContent(update.content);
   } else if (kind === 'tool_call' || kind === 'tool_call_update') {
@@ -127,21 +149,61 @@ export function captureModels(meta: Record<string, unknown> | undefined): ChatSt
         })
         .filter((item): item is NonNullable<typeof item> => Boolean(item))
     : [];
-  if (currentId && available.length > 0) {
-    return { currentId, available };
+  if (available.length === 0) {
+    return undefined;
   }
-  return undefined;
+  return { currentId: currentId ?? available[0].id, available };
 }
 
 export function modelsFromResult(result: {
   models?: unknown;
   _meta?: Record<string, unknown>;
 }): ChatState['models'] | undefined {
-  return captureModels(
-    result.models !== undefined && result.models !== null
-      ? asObject(result.models)
-      : result._meta,
-  );
+  const obj = asObject(result);
+  if (obj['models'] !== undefined && obj['models'] !== null) {
+    return captureModels(asObject(obj['models']));
+  }
+  if (obj['_meta'] !== undefined && obj['_meta'] !== null) {
+    const fromMeta = captureModels(asObject(obj['_meta']));
+    if (fromMeta) {
+      return fromMeta;
+    }
+  }
+  const nested = obj['result'];
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    const fromResult = captureModels(asObject(nested));
+    if (fromResult) {
+      return fromResult;
+    }
+  }
+  return captureModels(obj);
+}
+
+export function mergeModelCatalog(
+  prev: ChatState['models'] | undefined,
+  incoming: unknown,
+): ChatState['models'] | undefined {
+  const obj = asObject(incoming);
+  const nested = obj['result'];
+  const payload =
+    nested && typeof nested === 'object' && !Array.isArray(nested) ? asObject(nested) : obj;
+  const parsed = captureModels(payload);
+  if (!parsed) {
+    return undefined;
+  }
+  const prevById = new Map((prev?.available ?? []).map((model) => [model.id, model]));
+  const available = parsed.available.map((model) => {
+    const old = prevById.get(model.id);
+    if (!old?.currentEffort) {
+      return model;
+    }
+    return {
+      ...model,
+      currentEffort: old.currentEffort,
+      efforts: model.efforts ?? old.efforts,
+    };
+  });
+  return { currentId: prev?.currentId ?? parsed.currentId, available };
 }
 
 export function mergeCommands(

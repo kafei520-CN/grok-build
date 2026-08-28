@@ -242,7 +242,12 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
     showDiff(opts) {
       GrokDiffPanel.show(
         context,
-        { locale: opts.locale === 'zh-CN' ? 'zh-CN' : 'en', files: opts.files, messageId: opts.messageId },
+        {
+          locale: opts.locale === 'zh-CN' ? 'zh-CN' : 'en',
+          files: opts.files,
+          messageId: opts.messageId,
+          theme: opts.theme,
+        },
         {
           onOpenFile: (absPath) => {
             void vscode.window.showTextDocument(vscode.Uri.file(absPath), { preview: true });
