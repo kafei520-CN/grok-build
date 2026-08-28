@@ -5,6 +5,7 @@ import { iconBack, iconClose, iconStar } from './icons';
 import { apiEditStamp, apisNavRow, mountApisBody } from './settingsApi';
 import { mountRulesBody, rulesNavRow } from './settingsRules';
 import { mountSkillsBody, skillsNavRow } from './settingsSkills';
+import { mcpsNavRow, mountMcpsBody } from './settingsMcps';
 import { mountThemeBody, themeNavRow } from './settingsTheme';
 
 let paintedKey: string | undefined;
@@ -22,6 +23,7 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.rules ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     (ui.state.skills ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     (ui.state.apis ?? []).map((row) => row.id).join('|'),
+    (ui.state.mcps ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     apiEditStamp(),
     `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}`,
   ].join(':');
@@ -56,11 +58,13 @@ function mountSettings(): HTMLElement {
           ? tr('settingsApis')
           : page === 'theme'
             ? tr('settingsTheme')
-            : tr('settingsTitle');
+            : page === 'mcps'
+              ? tr('settingsMcps')
+              : tr('settingsTitle');
   brand.append(mark, title);
   const tools = document.createElement('div');
   tools.className = 'settings-head-tools';
-  if (page === 'rules' || page === 'skills' || page === 'apis' || page === 'theme') {
+  if (page === 'rules' || page === 'skills' || page === 'apis' || page === 'theme' || page === 'mcps') {
     tools.append(
       iconButton(tr('settingsRulesBack'), iconBack(), () =>
         post({
@@ -71,7 +75,9 @@ function mountSettings(): HTMLElement {
                 ? 'closeApis'
                 : page === 'theme'
                   ? 'closeTheme'
-                  : 'closeRules',
+                  : page === 'mcps'
+                    ? 'closeMcps'
+                    : 'closeRules',
         }),
       ),
     );
@@ -92,6 +98,10 @@ function mountSettings(): HTMLElement {
   }
   if (page === 'theme') {
     el.append(head, mountThemeBody());
+    return el;
+  }
+  if (page === 'mcps') {
+    el.append(head, mountMcpsBody());
     return el;
   }
   const body = document.createElement('div');
@@ -145,6 +155,7 @@ function mountSettings(): HTMLElement {
       ),
       rulesNavRow(),
       skillsNavRow(),
+      mcpsNavRow(),
       apisNavRow(),
     ]),
     section(tr('settingsCli'), [
@@ -219,6 +230,7 @@ function permissionRow(): HTMLElement {
     tr('settingsPermission'),
     [
       ['ask', tr('settingsPermissionAsk')],
+      ['acceptEdits', tr('settingsPermissionEdits')],
       ['auto', tr('settingsPermissionAuto')],
     ],
     () => current().permissionMode,

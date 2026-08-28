@@ -23,6 +23,27 @@ export interface FileInfo {
   text: string;
 }
 
+export interface AgentTerminalExit {
+  exitCode?: number;
+  signal?: string;
+}
+
+export interface AgentTerminalSpawn {
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  outputByteLimit?: number;
+}
+
+export interface AgentTerminal {
+  id: string;
+  snapshot(): { output: string; truncated: boolean; exitStatus?: AgentTerminalExit };
+  wait(): Promise<AgentTerminalExit>;
+  kill(): 'killed' | 'alreadyExited';
+  release(): void;
+}
+
 export interface Platform {
   cwd(): string;
   workspaceFolders(): string[];
@@ -61,6 +82,7 @@ export interface Platform {
   openText?(path: string): string | undefined;
   applyText?(path: string, text: string): Promise<boolean>;
   createTerminal(name: string, command: string): void;
+  spawnAgentTerminal?(opts: AgentTerminalSpawn): AgentTerminal;
   closeSidebar(): Promise<void>;
   focusChat(): void;
   getActiveSelection(): SelectionInfo | undefined;

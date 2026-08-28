@@ -10,8 +10,10 @@ import {
   fileSearchGlob,
   shouldSearchFiles,
 } from './fileSearch';
+import { sameFsPath } from './grokDirs';
 import type { GrokSettings } from './types';
-import type { Platform } from './platform';
+import type { AgentTerminalSpawn, Platform } from './platform';
+import { createVscodeAgentTerminal } from './vscodeTerminal';
 
 let findFilesCts: vscode.CancellationTokenSource | undefined;
 
@@ -197,10 +199,10 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
       }
     },
     openText(filePath) {
-      return vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === filePath)?.getText();
+      return openDocument(filePath)?.getText();
     },
     async applyText(filePath, text) {
-      const open = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === filePath);
+      const open = openDocument(filePath);
       if (!open || open.isClosed) {
         return false;
       }
@@ -213,6 +215,9 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
       const terminal = vscode.window.createTerminal(name);
       terminal.show();
       terminal.sendText(command);
+    },
+    spawnAgentTerminal(opts: AgentTerminalSpawn) {
+      return createVscodeAgentTerminal(opts);
     },
     async closeSidebar() {
       await vscode.commands.executeCommand('workbench.action.closeSidebar');
@@ -267,4 +272,10 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
       });
     },
   };
+}
+
+function openDocument(filePath: string): vscode.TextDocument | undefined {
+  return vscode.workspace.textDocuments.find(
+    (doc) => !doc.isClosed && sameFsPath(doc.uri.fsPath, filePath, process.platform),
+  );
 }

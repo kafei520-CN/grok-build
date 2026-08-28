@@ -15,6 +15,7 @@ describe('slash routing', () => {
     assert.equal(classifySlash('/clear').kind, 'newSession');
     assert.equal(classifySlash('/undo').kind, 'rewind');
     assert.equal(classifySlash('/cost manage').kind, 'usage');
+    assert.equal(classifySlash('/mcps').kind, 'mcpSettings');
   });
 
   it('passes agent-owned commands through', () => {

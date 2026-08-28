@@ -64,8 +64,12 @@ import type {
   SettingsPage,
   SlashCommandInfo,
   ApiEndpoint,
+  McpItem,
   ThemeColors,
 } from './types';
+import { parseMcpList } from './mcpHost';
+import { pickAllowOption, selectedPermission, sessionPermissionMeta, shouldAutoApprove } from './permissions';
+import { workspaceStartupHints } from './startup';
 import { DEFAULT_THEME, normalizeTheme } from './theme';
 
 interface PendingPermission {
@@ -86,6 +90,7 @@ export class GrokController implements SlashRuntime {
   rules: RuleItem[] = [];
   skills: SkillItem[] = [];
   apis: ApiEndpoint[] = [];
+  mcps: McpItem[] = [];
   theme: ThemeColors = DEFAULT_THEME;
   history?: string[];
   drawer?: DrawerId;
@@ -219,12 +224,17 @@ export class GrokController implements SlashRuntime {
       rules: this.rules,
       skills: this.skills,
       apis: this.apis,
+      mcps: this.mcps,
       theme: this.theme,
     };
   }
 
   async start(): Promise<void> {
     this.wantAgent = true;
+    if (this.agent) {
+      this.emit();
+      return;
+    }
     if (this.starting) {
       return this.starting;
     }
@@ -604,7 +614,7 @@ export class GrokController implements SlashRuntime {
   async compact(note?: string): Promise<void> {
     try {
       await this.agent?.compact(note);
-      this.note('Compacted conversation history.');
+      this.note(tr('compactDone'));
     } catch (error) {
       this.fail('Compact failed', error);
     }
@@ -614,11 +624,11 @@ export class GrokController implements SlashRuntime {
     try {
       const points = await this.agent?.rewindPoints();
       if (!points?.length) {
-        this.note('No rewind points in this session.');
+        this.note(tr('rewindEmpty'));
         return;
       }
       const picked = await plat().pick(
-        'Rewind to turn',
+        tr('rewindPick'),
         points.map((point) => ({
           label: `#${point.index}`,
           description: point.preview?.slice(0, 80),
@@ -630,6 +640,69 @@ export class GrokController implements SlashRuntime {
       }
     } catch (error) {
       this.fail('Rewind failed', error);
+    }
+  }
+
+  async forkCurrent(): Promise<void> {
+    try {
+      const id = await this.agent?.forkSession();
+      if (!id) {
+        plat().warn(tr('forkFailed'));
+        return;
+      }
+      await this.loadSession(id, this.cwd());
+    } catch (error) {
+      this.fail('Fork failed', error);
+    }
+  }
+
+  async renameListedSession(id?: string, title?: string, auto?: boolean): Promise<void> {
+    const sessionId = id ?? this.currentSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const name = auto ? '' : title ?? (await plat().input(tr('sessionsRename')));
+    if (!auto && !name) {
+      return;
+    }
+    try {
+      await this.agent?.renameSession(name ?? '', Boolean(auto), sessionId);
+      if (this.sessions) {
+        this.sessions = this.sessions.map((row) =>
+          row.id === sessionId && name ? { ...row, title: name } : row,
+        );
+      }
+      this.emit();
+      void this.refreshSessionsSilent();
+      if (name) {
+        this.note(tr('sessionsRenamed', { name }));
+      }
+    } catch (error) {
+      this.fail('Rename failed', error);
+    }
+  }
+
+  async deleteListedSession(id?: string): Promise<void> {
+    const sessionId = id ?? this.currentSessionId;
+    if (!sessionId) {
+      return;
+    }
+    const row = this.sessions?.find((item) => item.id === sessionId);
+    const ok = await plat().confirm(
+      tr('sessionsDeleteConfirm', { name: row?.title ?? sessionId }),
+      tr('sessionsDelete'),
+    );
+    if (!ok) {
+      return;
+    }
+    try {
+      await this.agent?.deleteSession(sessionId);
+      if (sessionId === this.currentSessionId) {
+        await this.newSession();
+      }
+      await this.refreshSessionsSilent();
+    } catch (error) {
+      this.fail('Delete failed', error);
     }
   }
 
@@ -675,7 +748,7 @@ export class GrokController implements SlashRuntime {
     this.currentSessionId = sessionId;
     this.emit();
     try {
-      const result = await agent.loadSession(sessionId, cwd);
+      const result = await agent.loadSession(sessionId, cwd, this.sessionMeta());
       if (op !== this.sessionOp) {
         return;
       }
@@ -801,6 +874,7 @@ export class GrokController implements SlashRuntime {
     void this.refreshRules();
     void this.refreshSkills();
     void this.refreshApis();
+    void this.refreshMcps();
   }
 
   closeSettings(): void {
@@ -953,6 +1027,57 @@ export class GrokController implements SlashRuntime {
   closeTheme(): void {
     this.settingsPage = 'main';
     this.emit();
+  }
+
+  openMcps(): void {
+    this.settingsOpen = true;
+    this.settingsPage = 'mcps';
+    this.emit();
+    void this.refreshMcps();
+  }
+
+  closeMcps(): void {
+    this.settingsPage = 'main';
+    this.emit();
+  }
+
+  refreshMcps(): void {
+    if (!this.settingsOpen) {
+      return;
+    }
+    void this.refreshMcpsInner();
+  }
+
+  async toggleMcp(id: string): Promise<void> {
+    const row = this.mcps.find((item) => item.id === id);
+    if (!row) {
+      return;
+    }
+    if (!this.agent?.sessionId) {
+      plat().warn(tr('settingsMcpsNeedSession'));
+      return;
+    }
+    try {
+      await this.agent.toggleMcp(row.id, !row.enabled);
+      await this.refreshMcpsInner();
+    } catch (error) {
+      plat().warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async refreshMcpsInner(): Promise<void> {
+    if (!this.agent) {
+      this.mcps = [];
+      this.emit();
+      return;
+    }
+    try {
+      const raw = await this.agent.listMcps(false);
+      this.mcps = parseMcpList(raw);
+      this.emit();
+    } catch (error) {
+      logWarn(`mcp list: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
   setTheme(primary: string, secondary: string, background?: string): void {
@@ -1178,12 +1303,11 @@ export class GrokController implements SlashRuntime {
 
   async requestToolPermission(params: unknown): Promise<unknown> {
     const parsed = parsePermissionOptions(params);
-    const mode = plat().getConfig('permissionMode', 'ask');
-    if (mode === 'auto') {
-      const allow =
-        parsed.options.find((option) => option.kind === 'allow_once') ?? parsed.options[0];
+    const settings = readGrokSettings();
+    if (shouldAutoApprove(settings, parsed.toolKind)) {
+      const allow = pickAllowOption(parsed.options);
       if (allow) {
-        return { outcome: { outcome: 'selected', optionId: allow.optionId } };
+        return selectedPermission(allow.optionId);
       }
     }
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1191,6 +1315,7 @@ export class GrokController implements SlashRuntime {
       requestId,
       title: parsed.title,
       details: parsed.details,
+      toolKind: parsed.toolKind,
       options: parsed.options,
     };
     this.emit();
@@ -1250,12 +1375,16 @@ export class GrokController implements SlashRuntime {
     }
     this.cliPath = cliPath;
     try {
+      const hints = this.startupHints();
+      if (hints) {
+        logInfo('heavy workspace: skip git status and project layout at session start');
+      }
       const agent = GrokAgent.spawn(
         {
           cliPath,
           cwd: this.cwd(),
-          alwaysApprove: plat().getConfig('alwaysApprove', false),
           extensionVersion: plat().extensionVersion(),
+          startupHints: hints,
         },
         (method, params, id) => this.onIncoming(method, params, id),
       );
@@ -1287,6 +1416,9 @@ export class GrokController implements SlashRuntime {
       });
       this.setStatus('ready');
       void this.refreshApis();
+      setTimeout(() => {
+        void this.refreshSessionsSilent();
+      }, 800);
     } catch (error) {
       this.fail('Could not start the Grok agent', error);
     }
@@ -1382,20 +1514,33 @@ export class GrokController implements SlashRuntime {
     this.emitUnlessReplaying();
   }
 
-  private async createSession(agent: GrokAgent): Promise<void> {
+  private startupHints(): { skipGitStatus: boolean; skipProjectLayout: boolean } | undefined {
+    const folders = plat().workspaceFolders();
+    return workspaceStartupHints(folders.length ? folders : [this.cwd()]);
+  }
+
+  private sessionMeta(): Record<string, unknown> {
+    const extra: Record<string, unknown> = { ...sessionPermissionMeta(readGrokSettings()) };
+    const hints = this.startupHints();
+    if (hints) {
+      extra.startupHints = hints;
+    }
     const wantedId = this.selectedModelId();
     const wantedEffort = this.selectedEffort();
-    const extra: Record<string, unknown> = {};
     if (wantedId) {
       extra.modelId = wantedId;
     }
     if (wantedEffort) {
       extra.reasoningEffort = wantedEffort;
     }
-    const result = await agent.newSession(
-      this.cwd(),
-      Object.keys(extra).length ? extra : undefined,
-    );
+    return extra;
+  }
+
+  private async createSession(agent: GrokAgent): Promise<void> {
+    const extra = this.sessionMeta();
+    const wantedId = this.selectedModelId();
+    const wantedEffort = this.selectedEffort();
+    const result = await agent.newSession(this.cwd(), extra);
     this.currentSessionId = agent.sessionId ?? result.sessionId;
     this.models = modelsFromResult(result) ?? this.models;
     if (wantedId && this.models?.currentId !== wantedId) {
@@ -1407,6 +1552,9 @@ export class GrokController implements SlashRuntime {
     }
     this.applyPendingModelSelection();
     void this.meter.refresh();
+    if (this.settingsOpen && this.settingsPage === 'mcps') {
+      void this.refreshMcpsInner();
+    }
   }
 
   private selectedModelId(): string | undefined {

@@ -43,6 +43,15 @@ export async function writeWorkspaceFile(
   if (!filePath || content === undefined) {
     throw new Error('fs/write_text_file missing path or content');
   }
+  const open = plat().openText?.(filePath);
+  if (open !== undefined) {
+    const applied = await plat().applyText?.(filePath, content);
+    if (!applied) {
+      throw new Error(`could not apply edit to open file ${filePath}`);
+    }
+    logInfo(`applied ${filePath}`);
+    return {};
+  }
   await plat().writeFile(filePath, Buffer.from(content, 'utf8'));
   logInfo(`wrote ${filePath}`);
   return {};

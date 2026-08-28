@@ -1,14 +1,19 @@
 import { parseSessionUpdate } from './agent';
+import { handleTerminalMethod, isTerminalMethod } from './acpTerminal';
 import { readWorkspaceFile, writeWorkspaceFile } from './clientHandlers';
 import { logInfo } from './logger';
+import { RpcError } from './rpc';
 import type { PermissionOption, SessionUpdate } from './types';
 import { asObject, asString } from './wire';
+
+export const METHOD_NOT_FOUND = -32601;
 
 export interface IncomingHost {
   applyIncomingUpdate(update: SessionUpdate, isReplay: boolean, sessionId?: string): void;
   requestToolPermission(params: unknown): Promise<unknown>;
   journal: { remember(filePath: string): Promise<void> };
   applyModelsUpdate?(params: unknown): void;
+  refreshMcps?(): void;
 }
 
 export async function handleIncoming(
@@ -27,6 +32,10 @@ export async function handleIncoming(
     controller.applyModelsUpdate?.(params);
     return {};
   }
+  if (name === 'x.ai/mcp/servers_updated' || name === 'x.ai/mcp/tools_changed' || name === 'x.ai/mcp/server_status') {
+    controller.refreshMcps?.();
+    return {};
+  }
   if (name === 'session/request_permission') {
     return controller.requestToolPermission(params);
   }
@@ -40,15 +49,21 @@ export async function handleIncoming(
     }
     return writeWorkspaceFile(params);
   }
-  if (id !== '') {
-    logInfo(`unhandled ACP client method ${method}`);
+  if (isTerminalMethod(name)) {
+    return handleTerminalMethod(name, params);
   }
-  return {};
+  if (id === '') {
+    logInfo(`unhandled ACP notification ${method}`);
+    return {};
+  }
+  logInfo(`unhandled ACP client method ${method}`);
+  throw new RpcError(`Method not found: ${method}`, METHOD_NOT_FOUND);
 }
 
 export function parsePermissionOptions(params: unknown): {
   title: string;
   details?: string;
+  toolKind?: string;
   options: PermissionOption[];
 } {
   const obj = asObject(params);
@@ -67,6 +82,7 @@ export function parsePermissionOptions(params: unknown): {
     title:
       asString(toolCall['title']) ?? asString(toolCall['kind']) ?? 'Grok wants to run a tool',
     details: describeToolInput(toolCall['rawInput']),
+    toolKind: asString(toolCall['kind']),
     options,
   };
 }

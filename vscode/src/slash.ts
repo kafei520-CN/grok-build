@@ -30,6 +30,7 @@ export type HostAction =
   | { kind: 'feedback'; text?: string }
   | { kind: 'btw'; text?: string }
   | { kind: 'extensions'; tab: string }
+  | { kind: 'mcpSettings' }
   | { kind: 'editPrompt' }
   | { kind: 'toggle'; flag: 'timestamps' | 'compactMode' | 'multiline' }
   | { kind: 'tutorial' }
@@ -196,6 +197,7 @@ export function classifySlash(text: string): HostAction {
     case 'btw':
       return { kind: 'btw', text: args || undefined };
     case 'mcps':
+      return { kind: 'mcpSettings' };
     case 'skills':
     case 'plugins':
     case 'hooks':

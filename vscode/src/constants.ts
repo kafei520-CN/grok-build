@@ -53,6 +53,7 @@ export const EXT = {
   commandsList: 'x.ai/commands/list',
   promptHistory: 'x.ai/prompt_history',
   mcpList: 'x.ai/mcp/list',
+  mcpToggle: 'x.ai/mcp/toggle',
   skillsList: 'x.ai/skills/list',
   pluginsList: 'x.ai/plugins/list',
   hooksList: 'x.ai/hooks/list',

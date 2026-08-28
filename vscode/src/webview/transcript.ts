@@ -1,10 +1,11 @@
 import { totals } from '../edits';
 import { formatClock, formatDuration, toolKindLabel } from '../i18n';
-import type { ChatMessage, ChatState, FileEdit, PermissionOption } from '../types';
+import { permissionButtonClass, permissionLabelKey } from '../permissions';
+import type { ChatMessage, ChatState, FileEdit, PermissionOption, PermissionPrompt } from '../types';
 import { loc, post, render, tr, ui } from './app';
 import { bootStar, errorCard, home, loginCard, panel, setupCard } from './chrome';
 import { button } from './dom';
-import { iconCheck, iconCopy, iconStar, toolIcon } from './icons';
+import { iconCheck, iconCopy, iconFork, iconStar, toolIcon } from './icons';
 import { fileName, renderMarkdown } from './markdown';
 
 type Turn = { user?: ChatMessage; assistant?: ChatMessage };
@@ -682,7 +683,13 @@ function turnMeta(message: ChatMessage): HTMLElement {
     }, 1400);
     render();
   });
-  el.append(copy);
+  const fork = document.createElement('button');
+  fork.type = 'button';
+  fork.className = 'meta-btn';
+  fork.title = tr('menuFork');
+  fork.innerHTML = iconFork();
+  fork.addEventListener('click', () => post({ type: 'runSlash', command: 'fork' }));
+  el.append(copy, fork);
   const stamp =
     ui.state.timestamps === false
       ? ''
@@ -767,32 +774,65 @@ function permissionBar(): HTMLElement {
   bar.className = 'permission';
   const perm = ui.state.permission!;
   bar.dataset.id = perm.requestId;
-  const h = document.createElement('div');
-  h.className = 'permission-title';
-  h.textContent = perm.title;
-  bar.append(h);
+  const fold = document.createElement('details');
+  fold.className = 'permission-fold';
+  fold.open = ui.permissionOpen.get(perm.requestId) ?? false;
+  fold.addEventListener('toggle', (event) => {
+    if (event.isTrusted) {
+      ui.permissionOpen.set(perm.requestId, fold.open);
+    }
+  });
+  const head = document.createElement('summary');
+  const kicker = document.createElement('span');
+  kicker.className = 'permission-kind';
+  kicker.textContent = toolKindLabel(loc(), perm.toolKind);
+  const name = document.createElement('span');
+  name.className = 'permission-file';
+  name.textContent = permissionTarget(perm);
+  head.append(kicker, name);
+  fold.append(head);
   if (perm.details) {
     const pre = document.createElement('pre');
     pre.textContent = perm.details;
-    bar.append(pre);
+    fold.append(pre);
+  } else if (perm.title && perm.title !== name.textContent) {
+    const copy = document.createElement('div');
+    copy.className = 'permission-copy';
+    copy.textContent = perm.title;
+    fold.append(copy);
   }
   const row = document.createElement('div');
-  row.className = 'row';
+  row.className = 'permission-actions';
   for (const option of perm.options) {
-    row.append(permissionButton(option));
+    row.append(permissionButton(option, perm.toolKind));
   }
   if (perm.options.length === 0) {
     row.append(button(tr('cancel'), () => post({ type: 'cancelPermission' })));
   }
-  bar.append(row);
+  bar.append(fold, row);
   return bar;
 }
 
-function permissionButton(option: PermissionOption): HTMLButtonElement {
-  const allow = option.kind.startsWith('allow');
-  return button(
-    option.name,
-    () => post({ type: 'choosePermission', optionId: option.optionId }),
-    allow,
-  );
+function permissionTarget(perm: PermissionPrompt): string {
+  const tick = perm.title.match(/`([^`]+)`/);
+  if (tick) {
+    return fileName(tick[1]);
+  }
+  if (perm.details && !perm.details.trim().startsWith('{')) {
+    const first = perm.details.trim().split(/[\s\n]/)[0];
+    if (first.includes('/') || first.includes('\\')) {
+      return fileName(first);
+    }
+  }
+  return perm.title;
+}
+
+function permissionButton(option: PermissionOption, toolKind?: string): HTMLButtonElement {
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.className = permissionButtonClass(option.kind);
+  el.textContent = tr(permissionLabelKey(option, toolKind));
+  el.title = option.name;
+  el.addEventListener('click', () => post({ type: 'choosePermission', optionId: option.optionId }));
+  return el;
 }

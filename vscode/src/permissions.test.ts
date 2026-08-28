@@ -1,0 +1,61 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import {
+  isEditToolKind,
+  permissionLabelKey,
+  pickAllowOption,
+  sessionPermissionMeta,
+  shouldAutoApprove,
+} from './permissions';
+
+describe('permissions', () => {
+  it('puts yolo/auto on session meta without a process restart', () => {
+    assert.deepEqual(sessionPermissionMeta({ alwaysApprove: true, permissionMode: 'ask' }), {
+      yoloMode: true,
+      autoMode: false,
+    });
+    assert.deepEqual(sessionPermissionMeta({ alwaysApprove: false, permissionMode: 'auto' }), {
+      yoloMode: false,
+      autoMode: true,
+    });
+    assert.deepEqual(sessionPermissionMeta({ alwaysApprove: false, permissionMode: 'acceptEdits' }), {
+      yoloMode: false,
+      autoMode: false,
+    });
+  });
+
+  it('auto-approves edits in acceptEdits and everything in auto/yolo', () => {
+    const ask = { alwaysApprove: false, permissionMode: 'ask' as const };
+    const edits = { alwaysApprove: false, permissionMode: 'acceptEdits' as const };
+    const auto = { alwaysApprove: false, permissionMode: 'auto' as const };
+    const yolo = { alwaysApprove: true, permissionMode: 'ask' as const };
+    assert.equal(shouldAutoApprove(ask, 'edit'), false);
+    assert.equal(shouldAutoApprove(edits, 'edit'), true);
+    assert.equal(shouldAutoApprove(edits, 'execute'), false);
+    assert.equal(shouldAutoApprove(auto, 'execute'), true);
+    assert.equal(shouldAutoApprove(yolo, 'execute'), true);
+    assert.equal(isEditToolKind('write'), true);
+    assert.equal(isEditToolKind('terminal'), false);
+  });
+
+  it('prefers allow_once over later options', () => {
+    const picked = pickAllowOption([
+      { optionId: 'no', name: 'Reject', kind: 'reject_once' },
+      { optionId: 'yes', name: 'Allow', kind: 'allow_once' },
+      { optionId: 'always', name: 'Always', kind: 'allow_always' },
+    ]);
+    assert.equal(picked?.optionId, 'yes');
+  });
+
+  it('maps ACP option kinds to short i18n keys', () => {
+    assert.equal(
+      permissionLabelKey({ kind: 'allow_always', name: 'Yes, allow all edits during this session' }, 'write'),
+      'permAllowEditsSession',
+    );
+    assert.equal(permissionLabelKey({ kind: 'AllowOnce', name: 'Yes' }, 'execute'), 'permAllowOnce');
+    assert.equal(
+      permissionLabelKey({ kind: 'reject_once', name: 'No, and tell Grok what to do differently' }, 'write'),
+      'permRejectTell',
+    );
+  });
+});

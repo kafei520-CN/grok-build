@@ -8,6 +8,7 @@ import {
   FILE_SEARCH_SKIP,
   shouldSearchFiles,
 } from './fileSearch';
+import { spawnProcessTerminal } from './acpTerminal';
 import type { FileInfo, Platform, SelectionInfo } from './platform';
 import { DEFAULT_SETTINGS, type GrokSettings } from './types';
 
@@ -266,6 +267,10 @@ export class NodePlatform implements Platform {
 
   createTerminal(name: string, command: string): void {
     void this.opts.request('createTerminal', { name, command });
+  }
+
+  spawnAgentTerminal(opts: import('./platform').AgentTerminalSpawn) {
+    return spawnProcessTerminal(opts);
   }
 
   async closeSidebar(): Promise<void> {

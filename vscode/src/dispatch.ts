@@ -5,7 +5,7 @@ import type { WebviewToHost } from './types';
 export async function dispatchUi(controller: GrokController, message: WebviewToHost): Promise<void> {
   switch (message.type) {
     case 'ready':
-      controller.emit();
+      void controller.start();
       return;
     case 'login':
       await controller.login();
@@ -82,6 +82,12 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       return;
     case 'loadSession':
       await controller.loadSession(message.sessionId, message.cwd);
+      return;
+    case 'renameSession':
+      await controller.renameListedSession(message.sessionId);
+      return;
+    case 'deleteSession':
+      await controller.deleteListedSession(message.sessionId);
       return;
     case 'rewindTo':
       await controller.rewindTo(message.index);
@@ -163,6 +169,15 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       return;
     case 'setTheme':
       controller.setTheme(message.primary, message.secondary, message.background);
+      return;
+    case 'openMcps':
+      controller.openMcps();
+      return;
+    case 'closeMcps':
+      controller.closeMcps();
+      return;
+    case 'toggleMcp':
+      await controller.toggleMcp(message.id);
       return;
     case 'saveApi':
       await controller.saveApi(message);

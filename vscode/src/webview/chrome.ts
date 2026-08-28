@@ -82,6 +82,8 @@ function moreMenu(): HTMLElement {
   el.className = 'more-menu';
   const items: Array<[StringKey, () => void]> = [
     ['menuCompact', () => post({ type: 'runSlash', command: 'compact' })],
+    ['menuRewind', () => post({ type: 'runSlash', command: 'rewind' })],
+    ['menuFork', () => post({ type: 'runSlash', command: 'fork' })],
     ['menuExport', () => post({ type: 'exportChat' })],
     ['menuSettings', () => post({ type: 'openSettings' })],
     ['menuRestart', () => post({ type: 'restart' })],

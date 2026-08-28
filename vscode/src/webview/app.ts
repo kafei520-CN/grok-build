@@ -34,6 +34,7 @@ export const ui = {
   copiedTimer: undefined as ReturnType<typeof setTimeout> | undefined,
   workOpen: new Map<string, boolean>(),
   sessionGroupOpen: new Map<string, boolean>(),
+  permissionOpen: new Map<string, boolean>(),
   lightboxSrc: undefined as string | undefined,
   stickToBottom: true,
   transcriptScroll: 0,

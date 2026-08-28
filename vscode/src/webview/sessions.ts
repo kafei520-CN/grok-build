@@ -2,7 +2,7 @@ import { formatRelativeTime } from '../i18n';
 import { groupSessionsByWorkspace, type SessionListMode } from '../sessionGroups';
 import type { SessionRow } from '../types';
 import { loc, persistUi, post, render, tr, ui } from './app';
-import { iconFolder } from './icons';
+import { iconEdit, iconFolder, iconTrash } from './icons';
 import { escapeHtml } from './markdown';
 
 export function listedSessions(): SessionRow[] {
@@ -109,13 +109,37 @@ function workspaceOverview(sessions: SessionRow[]): HTMLElement {
   return el;
 }
 
-function sessionButton(row: SessionRow): HTMLButtonElement {
-  const item = document.createElement('button');
-  item.type = 'button';
+function sessionButton(row: SessionRow): HTMLElement {
+  const item = document.createElement('div');
   item.className = row.id === ui.state.currentSessionId ? 'session-row active' : 'session-row';
-  item.innerHTML = `<span class="session-title">${escapeHtml(row.title)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
-  item.addEventListener('click', () =>
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'session-main';
+  open.innerHTML = `<span class="session-title">${escapeHtml(row.title)}</span><span class="session-time">${escapeHtml(formatRelativeTime(loc(), row.updatedAt))}</span>`;
+  open.addEventListener('click', () =>
     post({ type: 'loadSession', sessionId: row.id, cwd: row.cwd }),
   );
+  const tools = document.createElement('div');
+  tools.className = 'session-tools';
+  const rename = document.createElement('button');
+  rename.type = 'button';
+  rename.className = 'icon-btn';
+  rename.title = tr('sessionsRename');
+  rename.innerHTML = iconEdit();
+  rename.addEventListener('click', (event) => {
+    event.stopPropagation();
+    post({ type: 'renameSession', sessionId: row.id });
+  });
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'icon-btn';
+  remove.title = tr('sessionsDelete');
+  remove.innerHTML = iconTrash();
+  remove.addEventListener('click', (event) => {
+    event.stopPropagation();
+    post({ type: 'deleteSession', sessionId: row.id });
+  });
+  tools.append(rename, remove);
+  item.append(open, tools);
   return item;
 }

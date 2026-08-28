@@ -47,7 +47,6 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
       }),
     );
     this.postState(this.controller.snapshot());
-    void this.controller.start();
   }
 
   private async onMessage(message: WebviewToHost): Promise<void> {

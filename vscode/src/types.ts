@@ -48,7 +48,7 @@ export interface ContextUsage {
   categories?: ContextCategory[];
 }
 
-export type SettingsPage = 'main' | 'rules' | 'skills' | 'apis' | 'theme';
+export type SettingsPage = 'main' | 'rules' | 'skills' | 'apis' | 'theme' | 'mcps';
 
 export interface ThemeColors {
   primary: string;
@@ -83,6 +83,16 @@ export interface SkillItem {
   skillFile: string;
   scope: 'global' | 'project';
   enabled: boolean;
+}
+
+export interface McpItem {
+  id: string;
+  name: string;
+  source: 'managed' | 'local';
+  enabled: boolean;
+  status?: string;
+  toolCount: number;
+  sourceLabel?: string;
 }
 
 export interface SessionRow {
@@ -160,6 +170,7 @@ export interface PermissionPrompt {
   requestId: string;
   title: string;
   details?: string;
+  toolKind?: string;
   options: PermissionOption[];
 }
 
@@ -175,7 +186,7 @@ export interface GrokSettings {
   cliPath: string;
   preferWorkspaceBinary: boolean;
   minCliVersion: string;
-  permissionMode: 'ask' | 'auto';
+  permissionMode: 'ask' | 'auto' | 'acceptEdits';
   includeSelectionOnSend: boolean;
   alwaysApprove: boolean;
   locale: 'auto' | 'en' | 'zh-CN';
@@ -192,12 +203,7 @@ export const DEFAULT_SETTINGS: GrokSettings = {
 };
 
 export function settingNeedsRestart(key: keyof GrokSettings): boolean {
-  return (
-    key === 'cliPath' ||
-    key === 'preferWorkspaceBinary' ||
-    key === 'alwaysApprove' ||
-    key === 'minCliVersion'
-  );
+  return key === 'cliPath' || key === 'preferWorkspaceBinary' || key === 'minCliVersion';
 }
 
 export interface ChatState {
@@ -237,6 +243,7 @@ export interface ChatState {
   rules?: RuleItem[];
   skills?: SkillItem[];
   apis?: ApiEndpoint[];
+  mcps?: McpItem[];
   theme?: ThemeColors;
 }
 
@@ -346,6 +353,8 @@ export type WebviewToHost =
   | { type: 'openDrawer'; drawer: 'sessions' | 'extensions' | 'history'; tab?: string }
   | { type: 'closeDrawer' }
   | { type: 'loadSession'; sessionId: string; cwd?: string }
+  | { type: 'renameSession'; sessionId: string }
+  | { type: 'deleteSession'; sessionId: string }
   | { type: 'rewindTo'; index: number }
   | { type: 'searchFiles'; query: string }
   | { type: 'pickFile'; path: string }
@@ -373,6 +382,9 @@ export type WebviewToHost =
   | { type: 'openTheme' }
   | { type: 'closeTheme' }
   | { type: 'setTheme'; primary: string; secondary: string; background?: string }
+  | { type: 'openMcps' }
+  | { type: 'closeMcps' }
+  | { type: 'toggleMcp'; id: string }
   | {
       type: 'saveApi';
       id?: string;

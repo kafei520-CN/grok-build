@@ -38,6 +38,9 @@ export interface SlashRuntime {
   send(text: string): Promise<void>;
   compact(note?: string): Promise<void>;
   rewind(): Promise<void>;
+  forkCurrent(): Promise<void>;
+  renameListedSession(id?: string, title?: string, auto?: boolean): Promise<void>;
+  deleteListedSession(id?: string): Promise<void>;
   copyLast(n?: number): void;
   exportChat(): Promise<void>;
   setMode(id: string): Promise<void>;
@@ -46,6 +49,7 @@ export interface SlashRuntime {
   resolveModelId(name: string): string | undefined;
   sendAgentSlash(text: string): Promise<void>;
   openSettings(): void;
+  openMcps(): void;
   toggleUiFlag(flag: 'timestamps' | 'compactMode' | 'multiline'): void;
 }
 
@@ -94,27 +98,15 @@ export async function runSlashAction(host: SlashRuntime, action: HostAction): Pr
     case 'rewind':
       await host.rewind();
       return;
-    case 'fork': {
-      const id = await host.agent?.forkSession();
-      host.note(id ? `Forked to ${id}` : 'Forked session.');
+    case 'fork':
+      await host.forkCurrent();
       return;
-    }
-    case 'rename': {
-      const title = action.title ?? (await plat().input('Rename session'));
-      if (title || action.auto) {
-        await host.agent?.renameSession(title ?? '', Boolean(action.auto));
-        host.note(action.auto ? 'Title set back to auto.' : `Renamed to ${title}.`);
-      }
+    case 'rename':
+      await host.renameListedSession(undefined, action.title, action.auto);
       return;
-    }
-    case 'delete': {
-      const ok = await plat().confirm('Delete this session?', 'Delete');
-      if (ok) {
-        await host.agent?.deleteSession();
-        await host.newSession();
-      }
+    case 'delete':
+      await host.deleteListedSession();
       return;
-    }
     case 'sessionInfo':
       await showJsonNote(host, 'Session', await host.agent?.sessionInfo());
       return;
@@ -197,6 +189,9 @@ export async function runSlashAction(host: SlashRuntime, action: HostAction): Pr
           await host.send(action.text);
         }
       }
+      return;
+    case 'mcpSettings':
+      host.openMcps();
       return;
     case 'extensions':
       await openExtensions(host, action.tab);

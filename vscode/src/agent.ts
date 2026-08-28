@@ -5,7 +5,7 @@ import {
   PROTOCOL_VERSION,
 } from './constants';
 import { logError, logInfo, logWarn } from './logger';
-import { JsonRpcConnection } from './rpc';
+import { JsonRpcConnection, RpcError } from './rpc';
 import { parseSessionRow, sessionHasHistory } from './sessionRow';
 import { asNum, asObject, asString, timesFromMeta } from './wire';
 import type {
@@ -24,8 +24,8 @@ import type { AuthMethodInfo } from './authMethods';
 export interface AgentOptions {
   cliPath: string;
   cwd: string;
-  alwaysApprove: boolean;
   extensionVersion: string;
+  startupHints?: { skipGitStatus: boolean; skipProjectLayout: boolean };
 }
 
 export type IncomingHandler = (
@@ -40,6 +40,7 @@ export class GrokAgent {
   initializeResult?: InitializeResult;
   sessionId?: string;
   private extensionVersion = '0.0.0';
+  private startupHints?: AgentOptions['startupHints'];
 
   private constructor(
     child: ChildProcessWithoutNullStreams,
@@ -50,11 +51,7 @@ export class GrokAgent {
   }
 
   static spawn(options: AgentOptions, onIncoming: IncomingHandler): GrokAgent {
-    const args = ['agent'];
-    if (options.alwaysApprove) {
-      args.push('--always-approve');
-    }
-    args.push('stdio');
+    const args = ['agent', 'stdio'];
     logInfo(`spawning ${options.cliPath} ${args.join(' ')} (cwd=${options.cwd})`);
     const child = spawn(options.cliPath, args, {
       cwd: options.cwd,
@@ -68,6 +65,7 @@ export class GrokAgent {
     const rpc = new JsonRpcConnection(child.stdin);
     const agent = new GrokAgent(child, rpc);
     agent.extensionVersion = options.extensionVersion;
+    agent.startupHints = options.startupHints;
 
     rpc.on('log', (message: string) => logWarn(message));
     child.stdout.on('data', (chunk: Buffer) => {
@@ -93,8 +91,9 @@ export class GrokAgent {
         .then((result) => rpc.respond(id, result ?? {}))
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error);
+          const code = error instanceof RpcError ? error.code ?? -32000 : -32000;
           logError(`client method ${method} failed`, error);
-          rpc.respondError(id, message);
+          rpc.respondError(id, message, code);
         });
     });
     rpc.on('notification', (method: string, params: unknown) => {
@@ -117,12 +116,13 @@ export class GrokAgent {
       },
       clientCapabilities: {
         fs: { readTextFile: true, writeTextFile: true },
-        terminal: false,
+        terminal: true,
       },
       _meta: {
         clientType: 'extension',
         clientIdentifier: CLIENT_IDENTIFIER,
         clientVersion: this.extensionVersion,
+        ...(this.startupHints ? { startupHints: this.startupHints } : {}),
       },
     })) as InitializeResult;
     this.initializeResult = result;
@@ -249,6 +249,26 @@ export class GrokAgent {
     await this.extMethod(EXT.modelsReload, {});
   }
 
+  async listMcps(cache = false): Promise<unknown> {
+    return this.extMethod(
+      EXT.mcpList,
+      this.sessionId ? { sessionId: this.sessionId, cache } : { cache },
+    );
+  }
+
+  async toggleMcp(serverName: string, enabled: boolean): Promise<void> {
+    if (!this.sessionId) {
+      throw new Error('No active session');
+    }
+    await this.extMethod(EXT.mcpToggle, {
+      sessionId: this.sessionId,
+      session_id: this.sessionId,
+      serverName,
+      server_name: serverName,
+      enabled,
+    });
+  }
+
   async setMode(modeId: string): Promise<void> {
     if (!this.sessionId) {
       return;
@@ -259,11 +279,16 @@ export class GrokAgent {
     });
   }
 
-  async loadSession(sessionId: string, cwd: string): Promise<SessionNewResult> {
+  async loadSession(
+    sessionId: string,
+    cwd: string,
+    extraMeta?: Record<string, unknown>,
+  ): Promise<SessionNewResult> {
     const result = (await this.rpc.request('session/load', {
       sessionId,
       cwd,
       mcpServers: [],
+      _meta: extraMeta,
     })) as SessionNewResult;
     this.sessionId = result.sessionId ?? sessionId;
     return result;
@@ -301,12 +326,13 @@ export class GrokAgent {
     return unwrapExt(raw);
   }
 
-  async renameSession(title: string, resetToAuto = false): Promise<void> {
-    if (!this.sessionId) {
+  async renameSession(title: string, resetToAuto = false, sessionId?: string): Promise<void> {
+    const id = sessionId ?? this.sessionId;
+    if (!id) {
       return;
     }
     await this.extMethod(EXT.sessionRename, {
-      sessionId: this.sessionId,
+      sessionId: id,
       title,
       resetToAuto,
     });

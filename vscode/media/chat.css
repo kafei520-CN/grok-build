@@ -282,16 +282,12 @@ textarea:focus-visible {
 }
 
 .session-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
   border-radius: 8px;
-  padding: 6px 8px;
-  cursor: pointer;
+  padding: 2px 4px 2px 0;
 }
 
 .session-row:hover {
@@ -301,6 +297,31 @@ textarea:focus-visible {
 .session-row.active {
   background: color-mix(in srgb, var(--ice) 10%, var(--hover));
   box-shadow: inset 2px 0 0 var(--ice);
+}
+
+.session-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.session-tools {
+  display: flex;
+  flex-shrink: 0;
+  opacity: 0.35;
+}
+
+.session-row:hover .session-tools,
+.session-row.active .session-tools {
+  opacity: 1;
 }
 
 .session-title {
@@ -841,15 +862,92 @@ textarea:focus-visible {
 
 .permission {
   margin: 0 12px 8px;
-  padding: 12px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--ice) 22%, var(--line));
   border-radius: 14px;
-  background: var(--elev);
+  background: color-mix(in srgb, var(--elev) 78%, var(--bg));
+  box-shadow: 0 8px 22px color-mix(in srgb, #000 14%, transparent);
+  overflow: hidden;
 }
 
-.permission-title {
+.permission-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  min-width: 0;
+  background: color-mix(in srgb, var(--ice) 8%, transparent);
+}
+
+.permission-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.permission-fold > summary::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--ice);
+  font-size: 11px;
+  opacity: 0.8;
+  flex-shrink: 0;
+  transition: transform 140ms ease;
+}
+
+.permission-fold:not([open]) > summary::after {
+  transform: rotate(-90deg);
+}
+
+.permission-kind {
+  flex-shrink: 0;
   font-weight: 600;
-  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--ice);
+}
+
+.permission-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.permission-copy,
+.permission pre {
+  margin: 0;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.permission-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--line);
+}
+
+.permission-actions .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.permission-actions .btn.allow {
+  color: var(--ice);
+  border-color: color-mix(in srgb, var(--ice) 40%, var(--line));
+  background: color-mix(in srgb, var(--ice) 10%, transparent);
+}
+
+.permission-actions .btn.reject {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 32%, var(--line));
 }
 
 .error-banner {

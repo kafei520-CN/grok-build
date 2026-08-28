@@ -99,7 +99,9 @@ function boot(): void {
                 ? 'closeApis'
                 : ui.state.settingsPage === 'theme'
                   ? 'closeTheme'
-                  : 'closeSettings',
+                  : ui.state.settingsPage === 'mcps'
+                    ? 'closeMcps'
+                    : 'closeSettings',
       });
     }
   });

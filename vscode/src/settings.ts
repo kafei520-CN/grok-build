@@ -14,7 +14,8 @@ export function readGrokSettings(): GrokSettings {
       DEFAULT_SETTINGS.preferWorkspaceBinary,
     ),
     minCliVersion: p.getConfig('minCliVersion', DEFAULT_SETTINGS.minCliVersion),
-    permissionMode: permission === 'auto' ? 'auto' : 'ask',
+    permissionMode:
+      permission === 'auto' || permission === 'acceptEdits' ? permission : 'ask',
     includeSelectionOnSend: p.getConfig(
       'includeSelectionOnSend',
       DEFAULT_SETTINGS.includeSelectionOnSend,
@@ -44,7 +45,7 @@ export function normalizeSetting(
     case 'alwaysApprove':
       return typeof value === 'boolean' ? value : undefined;
     case 'permissionMode':
-      return value === 'auto' || value === 'ask' ? value : undefined;
+      return value === 'auto' || value === 'ask' || value === 'acceptEdits' ? value : undefined;
     case 'locale':
       return value === 'auto' || value === 'en' || value === 'zh-CN' ? value : undefined;
     default:
