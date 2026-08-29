@@ -1033,6 +1033,38 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     await this.journal.revert(messageId);
   }
 
+  async editUserPrompt(messageId: string, text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return;
+    }
+    const userIdx = this.messages.findIndex((item) => item.id === messageId);
+    if (userIdx < 0 || this.messages[userIdx]?.role !== 'user') {
+      return;
+    }
+    const later = this.messages.slice(userIdx + 1);
+    if (later.some((item) => item.role === 'user')) {
+      return;
+    }
+    const assistant = later.find((item) => item.role === 'assistant');
+    const userCount = this.messages.filter((item) => item.role === 'user').length;
+    const rewindTo = Math.max(0, userCount - 1);
+    if (this.status === 'streaming') {
+      this.cancelTurn();
+    }
+    if (assistant?.edits?.length) {
+      await this.journal.revert(assistant.id, { silent: true });
+    }
+    try {
+      await this.agent?.rewindTo(rewindTo);
+    } catch (error) {
+      logWarn(`rewind before edit: ${error instanceof Error ? error.message : error}`);
+    }
+    this.messages = this.messages.slice(0, userIdx);
+    this.emit();
+    await this.send(trimmed);
+  }
+
   async reviewEdits(messageId?: string, onlyPath?: string): Promise<void> {
     const assistant = this.journal.assistant(messageId);
     const files = await this.journal.diffs(messageId, onlyPath);

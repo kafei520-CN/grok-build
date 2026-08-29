@@ -554,6 +554,7 @@ export type WebviewToHost =
   | { type: 'pickFile'; path: string }
   | { type: 'copyLast' }
   | { type: 'copyText'; text: string }
+  | { type: 'editUserPrompt'; messageId: string; text: string }
   | { type: 'exportChat' }
   | { type: 'attach' }
   | { type: 'openSettings' }

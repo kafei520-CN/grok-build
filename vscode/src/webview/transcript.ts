@@ -174,6 +174,7 @@ function patchTranscript(): void {
       continue;
     }
     if (turn.assistant?.streaming) {
+      syncUserBubble(node, turn.user);
       patchStreamingTurn(node, turn);
       continue;
     }
@@ -482,6 +483,9 @@ function turnSig(turn: Turn, split: boolean): string {
     a?.error?.attempt ?? 0,
     ui.copiedId === a?.id ? 'c' : '',
     stepsKey(a?.steps),
+    turn.user?.text.length ?? 0,
+    ui.editingUserId === turn.user?.id ? 'e' : '',
+    ui.copiedId === turn.user?.id ? 'uc' : '',
   ].join(':');
 }
 
@@ -526,22 +530,126 @@ function turnSplit(): HTMLElement {
   return el;
 }
 
+function syncUserBubble(node: HTMLElement, user: ChatMessage | undefined): void {
+  if (!user) {
+    return;
+  }
+  const userNode = node.querySelector('.msg.user') as HTMLElement | null;
+  if (!userNode) {
+    return;
+  }
+  const editing = ui.editingUserId === user.id;
+  const hasEditor = Boolean(userNode.querySelector('textarea.user-edit'));
+  if (editing !== hasEditor) {
+    userNode.replaceWith(userBubble(user));
+  }
+}
+
 function userBubble(message: ChatMessage): HTMLElement {
   const el = document.createElement('article');
   el.className = 'msg user';
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
-  if (message.text) {
+  const editing = ui.editingUserId === message.id;
+  if (editing) {
+    const input = document.createElement('textarea');
+    input.className = 'user-edit';
+    input.value = ui.editDraft;
+    input.rows = Math.min(12, Math.max(3, ui.editDraft.split('\n').length + 1));
+    input.addEventListener('input', () => {
+      ui.editDraft = input.value;
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        ui.editingUserId = undefined;
+        ui.editDraft = '';
+        render();
+        return;
+      }
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        submitUserEdit(message);
+      }
+    });
+    bubble.append(input);
+    queueMicrotask(() => {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+  } else if (message.text) {
     const body = document.createElement('div');
     body.className = 'md';
     body.innerHTML = renderMarkdown(message.text);
     bubble.append(body);
   }
-  if (message.images?.length) {
+  if (!editing && message.images?.length) {
     bubble.append(imageGallery(message.images));
   }
-  el.append(bubble);
+  el.append(bubble, userActions(message, editing));
   return el;
+}
+
+function userActions(message: ChatMessage, editing: boolean): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'user-actions';
+  if (editing) {
+    row.append(
+      iconButton(tr('send'), iconCheck(), () => submitUserEdit(message)),
+      iconButton(tr('cancel'), iconClose(), () => {
+        ui.editingUserId = undefined;
+        ui.editDraft = '';
+        render();
+      }),
+    );
+    return row;
+  }
+  if (canEditUser(message)) {
+    row.append(
+      iconButton(tr('editMessage'), iconEdit(), () => {
+        ui.editingUserId = message.id;
+        ui.editDraft = message.text;
+        render();
+      }),
+    );
+  }
+  const copy = iconButton(ui.copiedId === message.id ? tr('copied') : tr('copy'), iconCopy(), () => {
+    if (!message.text) {
+      return;
+    }
+    post({ type: 'copyText', text: message.text });
+    ui.copiedId = message.id;
+    if (ui.copiedTimer !== undefined) {
+      window.clearTimeout(ui.copiedTimer);
+    }
+    ui.copiedTimer = window.setTimeout(() => {
+      ui.copiedId = undefined;
+      ui.copiedTimer = undefined;
+      render();
+    }, 1400);
+    render();
+  });
+  if (ui.copiedId === message.id) {
+    copy.classList.add('copied');
+    copy.innerHTML = iconCheck();
+  }
+  copy.disabled = !message.text;
+  row.append(copy);
+  return row;
+}
+
+function canEditUser(message: ChatMessage): boolean {
+  const lastUser = [...ui.state.messages].reverse().find((item) => item.role === 'user');
+  return lastUser?.id === message.id;
+}
+
+function submitUserEdit(message: ChatMessage): void {
+  const text = ui.editDraft.trim();
+  if (!text) {
+    return;
+  }
+  ui.editingUserId = undefined;
+  post({ type: 'editUserPrompt', messageId: message.id, text });
 }
 
 function assistantColumn(message: ChatMessage): HTMLElement {

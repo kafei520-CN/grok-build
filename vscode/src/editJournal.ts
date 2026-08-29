@@ -193,7 +193,10 @@ export class EditJournal {
     }
   }
 
-  async revert(messageId?: string): Promise<'empty' | 'cancelled' | { restored: number; failed: number }> {
+  async revert(
+    messageId?: string,
+    opts?: { silent?: boolean },
+  ): Promise<'empty' | 'cancelled' | { restored: number; failed: number }> {
     const assistant = this.assistant(messageId);
     if (assistant && (this.snapshots.get(assistant.id) ?? []).length === 0) {
       await this.hydrateFromGit();
@@ -201,12 +204,16 @@ export class EditJournal {
     const snaps = assistant ? (this.snapshots.get(assistant.id) ?? []) : [];
     const plans = planRevert(snaps);
     if (plans.length === 0) {
-      plat().info(tr('revertNone'));
+      if (!opts?.silent) {
+        plat().info(tr('revertNone'));
+      }
       return 'empty';
     }
-    const ok = await plat().confirm(tr('revertConfirm', { n: plans.length }), tr('revertAction'));
-    if (!ok) {
-      return 'cancelled';
+    if (!opts?.silent) {
+      const ok = await plat().confirm(tr('revertConfirm', { n: plans.length }), tr('revertAction'));
+      if (!ok) {
+        return 'cancelled';
+      }
     }
     const outcomes: Array<{ absPath: string; ok: boolean }> = [];
     for (const plan of plans) {
@@ -246,10 +253,12 @@ export class EditJournal {
       }
       this.host.emit();
     }
-    if (failed > 0) {
-      plat().warn(tr('revertFailed', { n: failed }));
-    } else {
-      plat().info(tr('revertDone', { n: restored }));
+    if (!opts?.silent) {
+      if (failed > 0) {
+        plat().warn(tr('revertFailed', { n: failed }));
+      } else {
+        plat().info(tr('revertDone', { n: restored }));
+      }
     }
     return { restored, failed };
   }
