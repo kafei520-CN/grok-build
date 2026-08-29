@@ -1766,7 +1766,9 @@ textarea:focus-visible {
 }
 
 .step-row[data-status='abandoned'] {
-  opacity: 0.55;
+  opacity: 0.46;
+  border-color: color-mix(in srgb, var(--fg) 8%, transparent);
+  background: color-mix(in srgb, var(--elev) 70%, transparent);
 }
 
 .step-row[data-status='abandoned'] .step-text,

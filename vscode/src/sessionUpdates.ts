@@ -51,8 +51,11 @@ export function parsePlanEntries(raw: unknown): PlanStep[] | undefined {
 function planStepStatus(raw: string | undefined, meta: Record<string, unknown>): PlanStepStatus {
   const status = (raw ?? '').toLowerCase().replace(/-/g, '_');
   if (status === 'completed' || status === 'complete' || status === 'done') {
-    if (meta['cancelled'] === true || meta['failed'] === true) {
+    if (meta['failed'] === true) {
       return 'failed';
+    }
+    if (meta['cancelled'] === true || meta['canceled'] === true) {
+      return 'abandoned';
     }
     return 'completed';
   }
@@ -64,10 +67,16 @@ function planStepStatus(raw: string | undefined, meta: Record<string, unknown>):
   ) {
     return 'in_progress';
   }
-  if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
+  if (status === 'failed' || status === 'error') {
     return 'failed';
   }
-  if (status === 'abandoned' || status === 'skipped' || status === 'stopped') {
+  if (
+    status === 'abandoned' ||
+    status === 'skipped' ||
+    status === 'stopped' ||
+    status === 'cancelled' ||
+    status === 'canceled'
+  ) {
     return 'abandoned';
   }
   return 'pending';

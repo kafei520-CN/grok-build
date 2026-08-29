@@ -31,7 +31,7 @@ dependencies {
 }
 
 val vscodeRoot = rootProject.projectDir.resolve("../vscode")
-val generatedGrok = layout.buildDirectory.dir("generated/grok")
+val generatedGrok = layout.buildDirectory.dir("generated-grok")
 
 val copySharedAssets by tasks.registering(Copy::class) {
     description = "Copy shared WebView + Node sidecar from vscode/dist"
@@ -41,7 +41,7 @@ val copySharedAssets by tasks.registering(Copy::class) {
     from(vscodeRoot.resolve("media/chat.css"))
     from(vscodeRoot.resolve("media/diff.css"))
     from(vscodeRoot.resolve("media/icon.svg"))
-    into(generatedGrok)
+    into(generatedGrok.map { it.dir("grok") })
     doFirst {
         val host = vscodeRoot.resolve("dist/host.js")
         val webview = vscodeRoot.resolve("dist/webview.js")
@@ -56,7 +56,7 @@ val copySharedAssets by tasks.registering(Copy::class) {
 sourceSets {
     main {
         resources {
-            srcDir(layout.buildDirectory.dir("generated"))
+            srcDir(generatedGrok)
         }
     }
 }

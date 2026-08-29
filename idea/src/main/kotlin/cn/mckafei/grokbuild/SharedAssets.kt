@@ -1,15 +1,20 @@
 package cn.mckafei.grokbuild
 
 import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.openapi.application.PathManager
 import java.io.File
 
-/** 共享 WebView / sidecar 资源：优先 classpath，开发时回退到 vscode/dist */
+/** Shared WebView / sidecar assets: classpath first, vscode/dist when running from source. */
 object SharedAssets {
+    const val PLUGIN_ID = "cn.mckafei.grok-build"
+    const val TOOL_WINDOW_ID = "Grok Build"
+    const val NOTIFICATION_GROUP = "Grok Build"
+    const val STATUS_WIDGET_ID = "GrokBuildWidget"
+
     fun pluginVersion(): String =
-        PluginManagerCore.getPlugin(PluginId.getId("cn.mckafei.grok-build"))?.version ?: "0.1.20"
+        PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))?.version ?: "0.1.88"
 
     fun webviewJs(): File = resolve("webview.js", "dist")
 
@@ -28,10 +33,7 @@ object SharedAssets {
     }
 
     private fun resolve(name: String, vscodeSubdir: String): File {
-        val extracted = extract("/grok/$name", name)
-        if (extracted != null) {
-            return extracted
-        }
+        extract("/grok/$name", name)?.let { return it }
         val roots = listOf(
             File(System.getProperty("user.dir")),
             File(System.getProperty("user.dir"), ".."),

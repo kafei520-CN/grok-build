@@ -198,6 +198,7 @@ describe('plan steps', () => {
       { content: 'Done', status: 'completed' },
       { content: 'Broke', status: 'failed' },
       { content: 'Dropped', status: 'completed', meta: { cancelled: true } },
+      { content: 'Left', status: 'cancelled' },
     ]);
     assert.deepEqual(
       steps?.map((step) => `${step.status}:${step.content}`),
@@ -206,7 +207,8 @@ describe('plan steps', () => {
         'in_progress:Edit files',
         'completed:Done',
         'failed:Broke',
-        'failed:Dropped',
+        'abandoned:Dropped',
+        'abandoned:Left',
       ],
     );
   });
@@ -245,7 +247,7 @@ describe('plan steps', () => {
         merge: false,
         todos: [
           { content: 'Fold the card', status: 'in_progress' },
-          { content: 'Show the red X', status: 'pending' },
+          { content: 'Mute leftover', status: 'pending' },
         ],
       },
     });
@@ -262,13 +264,13 @@ describe('plan steps', () => {
         TodosUpdated: {
           todos: [
             { content: 'Fold the card', status: 'completed' },
-            { content: 'Show the red X', status: 'cancelled' },
+            { content: 'Mute leftover', status: 'cancelled' },
           ],
         },
       },
     });
     assert.equal(session.messages[0]?.steps?.[0]?.status, 'completed');
-    assert.equal(session.messages[0]?.steps?.[1]?.status, 'failed');
+    assert.equal(session.messages[0]?.steps?.[1]?.status, 'abandoned');
   });
 
   it('reads live todo_write rawInput as plan entries', () => {

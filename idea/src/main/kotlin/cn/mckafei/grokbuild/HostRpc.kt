@@ -1,6 +1,7 @@
 package cn.mckafei.grokbuild
 
 import com.google.gson.JsonArray
+import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.intellij.ide.BrowserUtil
 import com.intellij.notification.NotificationGroupManager
@@ -13,24 +14,33 @@ import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.wm.ToolWindowManager
-import java.awt.Toolkit
+import com.intellij.ui.components.JBList
+import com.intellij.ui.components.JBScrollPane
+import java.awt.Desktop
+import java.awt.Dimension
 import java.awt.datatransfer.StringSelection
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.io.File
+import javax.swing.JComponent
+import javax.swing.ListSelectionModel
 
-/** sidecar 的 host.* 请求 → IDEA 原生对话框 / VFS / 浏览器 */
-class HostDispatcher(
+/** sidecar host.* requests → IntelliJ dialogs / VFS / terminal / browser. */
+class HostRpc(
     private val project: Project,
     private val session: GrokSession,
 ) {
     fun handle(event: JsonObject) {
         val id = event.get("id")?.asInt ?: return
         val method = event.get("method")?.asString ?: return
-        val params = event.getAsJsonObject("params") ?: JsonObject()
+        val params = event.get("params")?.takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
         val sidecar = session.sidecar ?: return
         try {
             when (method) {
@@ -53,7 +63,10 @@ class HostDispatcher(
                 "openFiles" -> sidecar.reply(id, askOpenFiles(params))
                 "openFolder" -> sidecar.reply(id, askOpenFolders(params))
                 "openExternal" -> {
-                    BrowserUtil.browse(str(params, "url"))
+                    val url = str(params, "url")
+                    if (url.isNotBlank()) {
+                        BrowserUtil.browse(url)
+                    }
                     sidecar.reply(id, true)
                 }
                 "openFile" -> {
@@ -61,18 +74,15 @@ class HostDispatcher(
                     sidecar.reply(id, true)
                 }
                 "clipboardWrite" -> {
-                    Toolkit.getDefaultToolkit().systemClipboard.setContents(
-                        StringSelection(str(params, "text")),
-                        null,
-                    )
+                    CopyPasteManager.getInstance().setContents(StringSelection(str(params, "text")))
                     sidecar.reply(id, true)
                 }
                 "createTerminal" -> {
-                    openTerminal(str(params, "name"), str(params, "command"))
+                    GrokTerminal.open(project, str(params, "name", "Grok"), str(params, "command"))
                     sidecar.reply(id, true)
                 }
                 "closeSidebar" -> {
-                    ToolWindowManager.getInstance(project).getToolWindow(GrokSession.TOOL_WINDOW_ID)?.hide(null)
+                    ToolWindowManager.getInstance(project).getToolWindow(SharedAssets.TOOL_WINDOW_ID)?.hide(null)
                     sidecar.reply(id, true)
                 }
                 "focusChat" -> {
@@ -87,8 +97,8 @@ class HostDispatcher(
                     sidecar.reply(id, true)
                 }
                 "showDiff" -> {
-                    GrokDiffDialog(project, params, session).show()
                     sidecar.reply(id, true)
+                    session.showDiff(params)
                 }
                 else -> sidecar.replyError(id, "unknown host method $method")
             }
@@ -98,8 +108,11 @@ class HostDispatcher(
     }
 
     private fun balloon(message: String, type: NotificationType) {
+        if (message.isBlank()) {
+            return
+        }
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("Grok Build")
+            .getNotificationGroup(SharedAssets.NOTIFICATION_GROUP)
             .createNotification(message, type)
             .notify(project)
     }
@@ -127,37 +140,68 @@ class HostDispatcher(
         ) == Messages.YES
     }
 
-    private fun askPick(params: JsonObject): Any? {
+    private fun askPick(params: JsonObject): JsonElement? {
         val items: JsonArray = params.getAsJsonArray("items") ?: return null
-        if (items.size() == 0) return null
-        val labels = items.map { it.asJsonObject.get("label")?.asString ?: "" }.toTypedArray()
-        val idx = Messages.showChooseDialog(
-            project,
-            str(params, "title", "Grok Build"),
-            "Grok Build",
-            null,
-            labels,
-            labels[0],
-        )
-        if (idx < 0 || idx >= items.size()) return null
-        val value = items[idx].asJsonObject.get("value") ?: return null
-        return when {
-            value.isJsonPrimitive && value.asJsonPrimitive.isNumber -> value.asNumber
-            value.isJsonPrimitive && value.asJsonPrimitive.isBoolean -> value.asBoolean
-            value.isJsonPrimitive -> value.asString
-            else -> value.toString()
+        if (items.size() == 0) {
+            return null
         }
+        data class Row(val label: String, val description: String, val value: JsonElement) {
+            override fun toString(): String =
+                if (description.isBlank()) label else "$label  —  $description"
+        }
+        val rows = items.map { el ->
+            val obj = el.asJsonObject
+            Row(
+                obj.get("label")?.asString ?: "",
+                obj.get("description")?.asString ?: "",
+                obj.get("value") ?: com.google.gson.JsonNull.INSTANCE,
+            )
+        }
+        val chosen = arrayOfNulls<Row>(1)
+        val dialog = object : DialogWrapper(project, true) {
+            private val list = JBList(rows)
+            init {
+                title = str(params, "title", "Grok Build")
+                list.selectionMode = ListSelectionModel.SINGLE_SELECTION
+                list.selectedIndex = 0
+                list.addMouseListener(object : MouseAdapter() {
+                    override fun mouseClicked(e: MouseEvent) {
+                        if (e.clickCount == 2) {
+                            doOKAction()
+                        }
+                    }
+                })
+                init()
+            }
+
+            override fun createCenterPanel(): JComponent {
+                list.visibleRowCount = rows.size.coerceIn(4, 14)
+                val scroll = JBScrollPane(list)
+                scroll.preferredSize = Dimension(520, 300)
+                return scroll
+            }
+
+            override fun doOKAction() {
+                chosen[0] = list.selectedValue
+                super.doOKAction()
+            }
+
+            override fun getPreferredFocusedComponent(): JComponent = list
+        }
+        return if (dialog.showAndGet()) chosen[0]?.value else null
     }
 
     private fun askSave(defaultPath: String): String? {
-        val descriptor = FileSaverDescriptor("Export session", "", "md")
+        val fallback = File(defaultPath.ifBlank { "grok-session.md" })
+        val ext = fallback.extension.ifBlank { "md" }
+        val descriptor = FileSaverDescriptor("Export session", "", ext)
         val dialog = FileChooserFactory.getInstance().createSaveFileDialog(descriptor, project)
-        val fallback = File(defaultPath)
-        val parent = LocalFileSystem.getInstance().findFileByIoFile(fallback.parentFile ?: File(project.basePath ?: "."))
+        val parentIo = fallback.parentFile ?: File(project.basePath ?: System.getProperty("user.home"))
+        val parent = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(parentIo)
         return dialog.save(parent, fallback.name)?.file?.path
     }
 
-    private fun askOpenFiles(params: JsonObject = JsonObject()): List<String> {
+    private fun askOpenFiles(params: JsonObject): List<String>? {
         val descriptor = FileChooserDescriptor(true, false, false, false, false, true)
         descriptor.title = str(params, "title", "Add to Grok")
         val filters = params.getAsJsonObject("filters")
@@ -171,16 +215,27 @@ class HostDispatcher(
                 }
             }
         }
-        return FileChooser.chooseFiles(descriptor, project, null).map { it.path }
+        val files = FileChooser.chooseFiles(descriptor, project, null)
+        if (files.isEmpty()) {
+            return null
+        }
+        return files.map { it.path }
     }
 
-    private fun askOpenFolders(params: JsonObject = JsonObject()): List<String> {
+    private fun askOpenFolders(params: JsonObject): List<String>? {
         val descriptor = FileChooserDescriptor(false, true, false, false, false, true)
         descriptor.title = str(params, "title", "Add to Grok")
-        return FileChooser.chooseFiles(descriptor, project, null).map { it.path }
+        val files = FileChooser.chooseFiles(descriptor, project, null)
+        if (files.isEmpty()) {
+            return null
+        }
+        return files.map { it.path }
     }
 
     private fun openPath(path: String) {
+        if (path.isBlank()) {
+            return
+        }
         val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(path)) ?: return
         OpenFileDescriptor(project, vf).navigate(true)
     }
@@ -193,53 +248,59 @@ class HostDispatcher(
 
     private fun applyText(path: String, text: String): Boolean {
         val io = File(path)
+        var ok = false
         WriteCommandAction.runWriteCommandAction(project) {
             val vfs = LocalFileSystem.getInstance()
+            io.parentFile?.mkdirs()
             var vf = vfs.refreshAndFindFileByIoFile(io)
             if (vf == null) {
-                io.parentFile?.mkdirs()
-                vfs.refreshAndFindFileByIoFile(io.parentFile)?.createChildData(this, io.name)
-                vf = vfs.refreshAndFindFileByIoFile(io)
+                val parentIo = io.parentFile ?: return@runWriteCommandAction
+                val parent = vfs.refreshAndFindFileByIoFile(parentIo)
+                    ?: VfsUtil.createDirectories(parentIo.absolutePath)
+                vf = parent.findChild(io.name) ?: parent.createChildData(this, io.name)
             }
-            val target = vf
-            if (target == null) {
-                io.writeText(text, Charsets.UTF_8)
-                vfs.refreshAndFindFileByIoFile(io)
-                return@runWriteCommandAction
-            }
+            val target = vf ?: return@runWriteCommandAction
             val doc = FileDocumentManager.getInstance().getDocument(target)
             if (doc != null) {
                 doc.setText(text)
                 FileDocumentManager.getInstance().saveDocument(doc)
             } else {
-                target.setBinaryContent(text.toByteArray(Charsets.UTF_8))
+                VfsUtil.saveText(target, text)
             }
+            ok = true
         }
-        return true
+        return ok
     }
 
     private fun deletePath(path: String): Boolean {
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(path)) ?: return false
-        WriteCommandAction.runWriteCommandAction(project) {
-            vf.delete(this)
+        val io = File(path)
+        if (!io.exists()) {
+            return false
         }
-        return true
+        try {
+            if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.MOVE_TO_TRASH)) {
+                Desktop.getDesktop().moveToTrash(io)
+                refreshPath(path)
+                return true
+            }
+        } catch (_: Exception) {
+        }
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(io)
+        if (vf != null) {
+            WriteCommandAction.runWriteCommandAction(project) {
+                vf.delete(this)
+            }
+            return true
+        }
+        val deleted = io.delete()
+        refreshPath(path)
+        return deleted
     }
 
     private fun refreshPath(path: String) {
-        LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(path))
-    }
-
-    private fun openTerminal(name: String, command: String) {
-        val cwd = project.basePath ?: System.getProperty("user.home")
-        val cmd = if (SystemInfo.isWindows) {
-            listOf("cmd.exe", "/c", "start", name, "cmd.exe", "/k", command)
-        } else if (SystemInfo.isMac) {
-            listOf("osascript", "-e", "tell application \"Terminal\" to do script \"cd '$cwd' && $command\"")
-        } else {
-            listOf("x-terminal-emulator", "-e", command)
+        ApplicationManager.getApplication().invokeLater {
+            LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(path))?.refresh(true, false)
         }
-        ProcessBuilder(cmd).directory(File(cwd)).start()
     }
 
     private fun str(params: JsonObject, key: String, fallback: String = ""): String {

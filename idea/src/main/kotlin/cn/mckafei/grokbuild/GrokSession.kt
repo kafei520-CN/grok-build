@@ -1,20 +1,18 @@
 package cn.mckafei.grokbuild
 
 import com.google.gson.JsonObject
+import com.intellij.execution.filters.TextConsoleBuilderFactory
+import com.intellij.execution.ui.ConsoleView
+import com.intellij.execution.ui.ConsoleViewContentType
+import com.intellij.ide.ui.LafManagerListener
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindowManager
-import java.awt.BorderLayout
-import java.awt.Dimension
-import javax.swing.Action
-import javax.swing.JComponent
-import javax.swing.JPanel
-import javax.swing.JScrollPane
-import javax.swing.JTextArea
+import com.intellij.ui.content.ContentFactory
+import java.util.ArrayDeque
 
 @Service(Service.Level.PROJECT)
 class GrokSession(val project: Project) : Disposable {
@@ -22,11 +20,37 @@ class GrokSession(val project: Project) : Disposable {
         private set
     var sidecar: Sidecar? = null
         private set
+
     private val logs = StringBuilder()
-    private var dispatcher: HostDispatcher? = null
+    private var dispatcher: HostRpc? = null
+    private var context: GrokContext? = null
+    private var diffDialog: GrokDiffDialog? = null
+    private var logConsole: ConsoleView? = null
+    private var ready = false
+    private val pendingCommands = ArrayDeque<String>()
+    private var lastSelection: JsonObject? = null
+    private var lastFile: JsonObject? = null
+
+    init {
+        val appBus = ApplicationManager.getApplication().messageBus.connect(this)
+        appBus.subscribe(
+            LafManagerListener.TOPIC,
+            LafManagerListener { panel?.applyTheme() },
+        )
+        context = GrokContext(project) { selection, file ->
+            lastSelection = selection
+            lastFile = file
+            sidecar?.sendContext(selection, file)
+        }
+        Disposer.register(this, context!!)
+    }
 
     fun attach(panel: GrokChatPanel) {
         this.panel = panel
+        ensureSidecar()
+    }
+
+    fun ensureSidecar() {
         if (sidecar != null) {
             return
         }
@@ -34,59 +58,97 @@ class GrokSession(val project: Project) : Disposable {
             ApplicationManager.getApplication().invokeLater { onEvent(event) }
         }
         sidecar = sc
-        dispatcher = HostDispatcher(project, this)
+        dispatcher = HostRpc(project, this)
         Disposer.register(this, sc)
-        sc.start()
+        try {
+            sc.start()
+        } catch (error: Exception) {
+            Disposer.dispose(sc)
+            sidecar = null
+            dispatcher = null
+            throw error
+        }
+        context?.pushNow()
     }
 
     fun sendUi(messageJson: String) {
-        sidecar?.sendRaw("""{"type":"ui","message":$messageJson}""")
+        sidecar?.sendUi(messageJson)
     }
 
     fun sendCommand(name: String) {
-        sidecar?.send(mapOf("type" to "command", "name" to name))
+        val sc = sidecar
+        if (ready && sc != null) {
+            sc.sendCommand(name)
+            return
+        }
+        pendingCommands.add(name)
+        focusChat()
+        try {
+            ensureSidecar()
+        } catch (_: Exception) {
+        }
     }
 
-    fun setContext(selection: Map<String, Any>?, file: Map<String, Any>?) {
-        sidecar?.send(
-            mapOf(
-                "type" to "context",
-                "selection" to selection,
-                "file" to file,
-            ),
-        )
+    fun pushEditorContext() {
+        context?.pushNow()
     }
 
     fun focusChat() {
-        ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID)?.activate(null, true)
+        val tw = ToolWindowManager.getInstance(project).getToolWindow(SharedAssets.TOOL_WINDOW_ID) ?: return
+        tw.show()
+        tw.activate(null, true)
+    }
+
+    fun showDiff(params: JsonObject) {
+        diffDialog?.close(0)
+        val dialog = GrokDiffDialog(project, params, this)
+        diffDialog = dialog
+        dialog.show()
     }
 
     fun showLogDialog() {
-        object : DialogWrapper(project, true) {
-            init {
-                title = "Grok Build log"
-                init()
+        val tw = ToolWindowManager.getInstance(project).getToolWindow(SharedAssets.TOOL_WINDOW_ID) ?: return
+        val console = logConsole ?: run {
+            val created = TextConsoleBuilderFactory.getInstance().createBuilder(project).console
+            logConsole = created
+            Disposer.register(this, created)
+            val snapshot = synchronized(logs) { logs.toString() }
+            if (snapshot.isNotBlank()) {
+                created.print(snapshot, ConsoleViewContentType.NORMAL_OUTPUT)
             }
+            val content = ContentFactory.getInstance().createContent(created.component, "Log", true)
+            tw.contentManager.addContent(content)
+            created
+        }
+        val content = tw.contentManager.contents.find { it.component === console.component }
+        if (content != null) {
+            tw.contentManager.setSelectedContent(content)
+        }
+        tw.show()
+        tw.activate(null, true)
+    }
 
-            override fun createCenterPanel(): JComponent {
-                val area = JTextArea(synchronized(logs) { logs.toString() })
-                area.isEditable = false
-                area.lineWrap = true
-                val panel = JPanel(BorderLayout())
-                panel.preferredSize = Dimension(720, 420)
-                panel.add(JScrollPane(area), BorderLayout.CENTER)
-                return panel
-            }
-
-            override fun createActions(): Array<Action> = arrayOf(okAction)
-        }.show()
+    fun restartAgent() {
+        val sc = sidecar
+        if (ready && sc != null) {
+            sc.sendCommand("restart")
+            return
+        }
+        sendCommand("restart")
     }
 
     private fun onEvent(event: JsonObject) {
         when (event.get("type")?.asString) {
             "host" -> dispatcher?.handle(event)
             "state", "tail" -> panel?.postToWebview(event.toString())
-            "ready" -> panel?.onHostReady()
+            "ready" -> {
+                ready = true
+                sidecar?.sendContext(lastSelection, lastFile)
+                while (pendingCommands.isNotEmpty()) {
+                    sidecar?.sendCommand(pendingCommands.removeFirst())
+                }
+                panel?.onHostReady()
+            }
             "log" -> appendLog(event)
             "error" -> {
                 appendLog(event)
@@ -101,24 +163,34 @@ class GrokSession(val project: Project) : Disposable {
             append(' ')
             append(event.get("message")?.asString ?: event.toString())
             event.get("detail")?.asString?.let { append('\n').append(it) }
+            append('\n')
         }
         synchronized(logs) {
-            logs.appendLine(line)
+            logs.append(line)
             if (logs.length > 200_000) {
                 logs.delete(0, logs.length - 150_000)
             }
         }
+        val type = when (event.get("level")?.asString) {
+            "error" -> ConsoleViewContentType.ERROR_OUTPUT
+            "warn" -> ConsoleViewContentType.LOG_WARNING_OUTPUT
+            else -> ConsoleViewContentType.NORMAL_OUTPUT
+        }
+        logConsole?.print(line, type)
     }
 
     override fun dispose() {
         panel = null
         sidecar = null
         dispatcher = null
+        context = null
+        diffDialog = null
+        logConsole = null
+        ready = false
+        pendingCommands.clear()
     }
 
     companion object {
-        const val TOOL_WINDOW_ID = "Grok Build"
-
         fun get(project: Project): GrokSession = project.getService(GrokSession::class.java)
     }
 }

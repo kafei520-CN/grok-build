@@ -12,10 +12,9 @@ import org.cef.handler.CefLoadHandlerAdapter
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Base64
-import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.JComponent
 
-/** JCEF 页 + acquireVsCodeApi 桥，聊天和 Diff 共用 */
+/** JCEF page + acquireVsCodeApi bridge, shared by chat and Grok Diff. */
 class GrokBrowser(
     private val page: File,
     private val onMessage: (String) -> Unit,
@@ -29,7 +28,6 @@ class GrokBrowser(
     private val query = JBCefJSQuery.create(browser as JBCefBrowserBase)
     private val pending = mutableListOf<String>()
     private var loaded = false
-    private val pushSeq = AtomicInteger()
     private val lock = Any()
 
     init {
@@ -42,7 +40,7 @@ class GrokBrowser(
         }
         browser.jbCefClient.addLoadHandler(
             object : CefLoadHandlerAdapter() {
-                override fun onLoadEnd(browser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
+                override fun onLoadEnd(cefBrowser: CefBrowser?, frame: CefFrame?, httpStatusCode: Int) {
                     if (frame?.isMain == true) {
                         injectBridge()
                     }
@@ -60,6 +58,17 @@ class GrokBrowser(
         if (app.isDispatchThread) run.run() else app.invokeLater(run)
     }
 
+    fun applyTheme() {
+        val js = GrokTheme.applyJs()
+        val app = ApplicationManager.getApplication()
+        val run = Runnable {
+            if (loaded) {
+                browser.cefBrowser.executeJavaScript(js, browser.cefBrowser.url, 0)
+            }
+        }
+        if (app.isDispatchThread) run.run() else app.invokeLater(run)
+    }
+
     private fun injectBridge() {
         val js = """
             window.grokPost = function(msg) { ${query.inject("msg")} };
@@ -67,6 +76,7 @@ class GrokBrowser(
               window.grokQueue.forEach(function(item) { window.grokPost(item); });
               window.grokQueue = [];
             }
+            ${GrokTheme.applyJs()}
         """.trimIndent()
         browser.cefBrowser.executeJavaScript(js, browser.cefBrowser.url, 0)
         val queued: List<String>
@@ -89,27 +99,20 @@ class GrokBrowser(
     }
 
     private fun writeToPage(json: String) {
-        if (json.length > 180_000) {
-            val file = File(page.parentFile, "push-${pushSeq.incrementAndGet()}.json")
-            file.writeText(json, Charsets.UTF_8)
-            val uri = file.toURI().toString()
+        val b64 = Base64.getEncoder().encodeToString(json.toByteArray(StandardCharsets.UTF_8))
+        val chunk = 80_000
+        var i = 0
+        while (i < b64.length) {
+            val end = minOf(i + chunk, b64.length)
+            val last = end == b64.length
+            val part = b64.substring(i, end)
             browser.cefBrowser.executeJavaScript(
-                "fetch('$uri').then(function(r){return r.json();}).then(function(data){window.dispatchEvent(new MessageEvent('message',{data:data}));});",
+                "window.__grokPushPart('$part', $last);",
                 browser.cefBrowser.url,
                 0,
             )
-            return
+            i = end
         }
-        val b64 = Base64.getEncoder().encodeToString(json.toByteArray(StandardCharsets.UTF_8))
-        val js = """
-            (function(){
-              var bin = atob('$b64');
-              var bytes = Uint8Array.from(bin, function(c){ return c.charCodeAt(0); });
-              var data = JSON.parse(new TextDecoder().decode(bytes));
-              window.dispatchEvent(new MessageEvent('message', { data: data }));
-            })();
-        """.trimIndent()
-        browser.cefBrowser.executeJavaScript(js, browser.cefBrowser.url, 0)
     }
 
     override fun dispose() {

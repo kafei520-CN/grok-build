@@ -8,23 +8,41 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.vfs.VfsUtilCore
 
+private fun run(e: AnActionEvent, command: String? = null, before: ((GrokSession) -> Unit)? = null) {
+    val project = e.project ?: return
+    val session = GrokSession.get(project)
+    before?.invoke(session)
+    if (command != "showLog") {
+        session.focusChat()
+    }
+    if (command != null) {
+        session.sendCommand(command)
+    }
+}
+
 class OpenChatAction : AnAction(), DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
-
-    override fun actionPerformed(e: AnActionEvent) {
-        e.project?.let { GrokSession.get(it).focusChat() }
-    }
+    override fun actionPerformed(e: AnActionEvent) = run(e)
 }
 
 class NewSessionAction : AnAction(), DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "newSession")
+}
 
-    override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val session = GrokSession.get(project)
-        session.focusChat()
-        session.sendCommand("newSession")
-    }
+class LoginAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "login")
+}
+
+class LogoutAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "logout")
+}
+
+class SetApiKeyAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "setApiKey")
 }
 
 class AddSelectionAction : AnAction(), DumbAware {
@@ -39,19 +57,11 @@ class AddSelectionAction : AnAction(), DumbAware {
         val project = e.project ?: return
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
-        if (!editor.selectionModel.hasSelection()) return
+        if (!editor.selectionModel.hasSelection()) {
+            return
+        }
         val session = GrokSession.get(project)
-        val start = editor.offsetToLogicalPosition(editor.selectionModel.selectionStart).line + 1
-        val end = editor.offsetToLogicalPosition(editor.selectionModel.selectionEnd).line + 1
-        session.setContext(
-            mapOf(
-                "path" to file.path,
-                "text" to (editor.selectionModel.selectedText ?: ""),
-                "startLine" to start,
-                "endLine" to end,
-            ),
-            activeFile(e),
-        )
+        session.pushEditorContext()
         session.focusChat()
         session.sendCommand("addSelection")
     }
@@ -67,16 +77,70 @@ class AddActiveFileAction : AnAction(), DumbAware {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val session = GrokSession.get(project)
-        session.setContext(null, activeFile(e) ?: return)
+        val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
+        if (file != null) {
+            val text = e.getData(CommonDataKeys.EDITOR)?.document?.text
+                ?: FileDocumentManager.getInstance().getDocument(file)?.text
+                ?: runCatching { VfsUtilCore.loadText(file) }.getOrDefault("")
+            session.sidecar?.sendContext(null, GrokContext.toFile(file, text))
+        } else {
+            session.pushEditorContext()
+        }
         session.focusChat()
         session.sendCommand("addActiveFile")
     }
 }
 
-private fun activeFile(e: AnActionEvent): Map<String, Any>? {
-    val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return null
-    val text = e.getData(CommonDataKeys.EDITOR)?.document?.text
-        ?: FileDocumentManager.getInstance().getDocument(file)?.text
-        ?: VfsUtilCore.loadText(file)
-    return mapOf("path" to file.path, "text" to text)
+class RestartAgentAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "restart")
+}
+
+class ShowLogAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        GrokSession.get(project).showLogDialog()
+    }
+}
+
+class CancelAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "cancel")
+}
+
+class CompactAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "compact")
+}
+
+class RewindAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "rewind")
+}
+
+class ResumeAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "resume")
+}
+
+class CycleModeAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "cycleMode")
+}
+
+class ForkAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "fork")
+}
+
+class ExportAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "export")
+}
+
+class UsageAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+    override fun actionPerformed(e: AnActionEvent) = run(e, "usage")
 }

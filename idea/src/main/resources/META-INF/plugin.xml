@@ -1,12 +1,25 @@
 <idea-plugin>
   <id>cn.mckafei.grok-build</id>
   <name>Grok Build</name>
-  <vendor>mckafei_CN</vendor>
+  <vendor url="https://github.com/kafei520-CN/Grok-For-VS-Code">kafei520cn</vendor>
   <description><![CDATA[
-    Grok Build chat for IntelliJ. Same WebView UI and agent core as the VS Code extension,
-    with a thin JCEF + Node sidecar adapter. Requires Node.js and the Grok CLI.
+    <h2>Grok Build for IntelliJ</h2>
+    <p>IntelliJ 版 Grok Build：与 VS Code 插件共用同一套 WebView UI 和 Agent 核心（ACP <code>grok agent stdio</code>）。</p>
+    <p>Same chat UI and agent core as the VS Code extension, hosted with JCEF plus a Node sidecar.
+    Requires Node.js and the Grok CLI (<code>grok</code>).</p>
+    <ul>
+      <li>Chat, login, API key, models, effort, Ask / Plan / Default modes</li>
+      <li>Grok Diff review and revert</li>
+      <li>Sessions, compact, rewind, fork, export, usage</li>
+      <li>Rules, skills, MCP, agents, worktrees, memory, marketplace</li>
+      <li>Add editor selection or the active file as context</li>
+    </ul>
   ]]></description>
+  <change-notes><![CDATA[
+    <p>0.1.87 — Full host rewrite: every VS Code command, live editor context, IntelliJ theme, status bar, settings, Grok Diff, terminal.</p>
+  ]]></change-notes>
   <depends>com.intellij.modules.platform</depends>
+  <depends optional="true">org.jetbrains.plugins.terminal</depends>
   <idea-version since-build="243" until-build="253.*"/>
 
   <extensions defaultExtensionNs="com.intellij">
@@ -15,30 +28,119 @@
                 icon="/icons/grok.svg"
                 factoryClass="cn.mckafei.grokbuild.GrokToolWindowFactory"/>
     <notificationGroup id="Grok Build" displayType="BALLOON" isLogByDefault="true"/>
+    <statusBarWidgetFactory id="GrokBuildWidget"
+                            implementation="cn.mckafei.grokbuild.GrokStatusBarFactory"/>
+    <applicationConfigurable parentId="tools"
+                             id="cn.mckafei.grokbuild.settings"
+                             instance="cn.mckafei.grokbuild.GrokConfigurable"
+                             displayName="Grok Build"/>
   </extensions>
 
   <actions>
-    <action id="Grok.OpenChat"
-            class="cn.mckafei.grokbuild.OpenChatAction"
-            text="Open Grok Build"
-            description="Focus the Grok Build tool window">
-      <keyboard-shortcut keymap="$default" first-keystroke="control SEMICOLON"/>
+    <group id="Grok.Menu" text="Grok Build" popup="true">
       <add-to-group group-id="ToolsMenu" anchor="last"/>
-    </action>
-    <action id="Grok.NewSession"
-            class="cn.mckafei.grokbuild.NewSessionAction"
-            text="Grok: New Session"
-            description="Start a new Grok Build session">
-      <add-to-group group-id="ToolsMenu" anchor="last"/>
-    </action>
-    <action id="Grok.AddSelection"
+      <action id="Grok.OpenChat"
+              class="cn.mckafei.grokbuild.OpenChatAction"
+              text="Open Grok Build"
+              description="Focus the Grok Build tool window">
+        <keyboard-shortcut keymap="$default" first-keystroke="control SEMICOLON"/>
+        <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta SEMICOLON"/>
+      </action>
+      <separator/>
+      <action id="Grok.NewSession"
+              class="cn.mckafei.grokbuild.NewSessionAction"
+              text="New Session"
+              description="Start a new Grok Build session"
+              icon="AllIcons.General.Add"/>
+      <action id="Grok.Resume"
+              class="cn.mckafei.grokbuild.ResumeAction"
+              text="Resume Session"
+              description="Open the session list"
+              icon="AllIcons.Vcs.History"/>
+      <action id="Grok.Fork"
+              class="cn.mckafei.grokbuild.ForkAction"
+              text="Fork Session"
+              description="Fork the current session"/>
+      <action id="Grok.Export"
+              class="cn.mckafei.grokbuild.ExportAction"
+              text="Export Session"
+              description="Export the current chat as Markdown"/>
+      <separator/>
+      <action id="Grok.Login"
+              class="cn.mckafei.grokbuild.LoginAction"
+              text="Login"
+              description="Sign in to grok.com"/>
+      <action id="Grok.Logout"
+              class="cn.mckafei.grokbuild.LogoutAction"
+              text="Logout"
+              description="Sign out of Grok"/>
+      <action id="Grok.SetApiKey"
+              class="cn.mckafei.grokbuild.SetApiKeyAction"
+              text="Set API Key"
+              description="Sign in with an xAI API key"/>
+      <separator/>
+      <action id="Grok.AddSelection"
+              class="cn.mckafei.grokbuild.AddSelectionAction"
+              text="Add Selection"
+              description="Attach the current editor selection">
+        <keyboard-shortcut keymap="$default" first-keystroke="control alt G"/>
+        <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt G"/>
+      </action>
+      <action id="Grok.AddActiveFile"
+              class="cn.mckafei.grokbuild.AddActiveFileAction"
+              text="Add Active File"
+              description="Attach the current editor file"/>
+      <separator/>
+      <action id="Grok.Cancel"
+              class="cn.mckafei.grokbuild.CancelAction"
+              text="Cancel"
+              description="Cancel the current turn"
+              icon="AllIcons.Actions.Suspend"/>
+      <action id="Grok.Compact"
+              class="cn.mckafei.grokbuild.CompactAction"
+              text="Compact Context"
+              description="Compact the conversation"/>
+      <action id="Grok.Rewind"
+              class="cn.mckafei.grokbuild.RewindAction"
+              text="Rewind"
+              description="Rewind the conversation"/>
+      <action id="Grok.CycleMode"
+              class="cn.mckafei.grokbuild.CycleModeAction"
+              text="Cycle Mode"
+              description="Cycle Ask / Plan / Default">
+        <keyboard-shortcut keymap="$default" first-keystroke="control shift SEMICOLON"/>
+        <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta shift SEMICOLON"/>
+      </action>
+      <action id="Grok.Usage"
+              class="cn.mckafei.grokbuild.UsageAction"
+              text="Usage"
+              description="Show session usage"/>
+      <separator/>
+      <action id="Grok.Restart"
+              class="cn.mckafei.grokbuild.RestartAgentAction"
+              text="Restart Agent"
+              description="Restart the Grok agent"
+              icon="AllIcons.Actions.Refresh"/>
+      <action id="Grok.ShowLog"
+              class="cn.mckafei.grokbuild.ShowLogAction"
+              text="Show Log"
+              description="Open the Grok Build log"/>
+    </group>
+
+    <group id="Grok.ToolWindowTitle">
+      <reference ref="Grok.NewSession"/>
+      <reference ref="Grok.Restart"/>
+      <reference ref="Grok.Resume"/>
+      <reference ref="Grok.Cancel"/>
+    </group>
+
+    <action id="Grok.AddSelection.Editor"
             class="cn.mckafei.grokbuild.AddSelectionAction"
             text="Grok: Add Selection"
             description="Attach the current editor selection">
-      <keyboard-shortcut keymap="$default" first-keystroke="control alt G"/>
       <add-to-group group-id="EditorPopupMenu" anchor="last"/>
     </action>
-    <action id="Grok.AddActiveFile"
+    <action id="Grok.AddActiveFile.Editor"
             class="cn.mckafei.grokbuild.AddActiveFileAction"
             text="Grok: Add Active File"
             description="Attach the current editor file">

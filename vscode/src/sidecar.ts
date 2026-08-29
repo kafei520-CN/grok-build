@@ -33,7 +33,7 @@ function request(method: string, params?: unknown): Promise<unknown> {
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`host timeout: ${method}`));
-    }, method === 'input' || method === 'confirm' || method === 'pick' ? 600_000 : 30_000);
+    }, hostTimeoutMs(method));
     pending.set(id, {
       resolve: (value) => {
         clearTimeout(timer);
@@ -105,6 +105,21 @@ async function handleCommand(msg: Incoming): Promise<void> {
   }
 }
 
+function hostTimeoutMs(method: string): number {
+  switch (method) {
+    case 'input':
+    case 'confirm':
+    case 'pick':
+    case 'saveFile':
+    case 'openFiles':
+    case 'openFolder':
+    case 'showDiff':
+      return 600_000;
+    default:
+      return 30_000;
+  }
+}
+
 async function runNamed(name: string): Promise<void> {
   if (!controller) {
     return;
@@ -125,11 +140,38 @@ async function runNamed(name: string): Promise<void> {
     case 'logout':
       await controller.logout();
       return;
+    case 'setApiKey':
+      await controller.setApiKey();
+      return;
     case 'restart':
       await controller.restart();
       return;
     case 'cancel':
       controller.cancelTurn();
+      return;
+    case 'compact':
+      await controller.compact();
+      return;
+    case 'rewind':
+      await controller.rewind();
+      return;
+    case 'resume':
+      await controller.resumePicker();
+      return;
+    case 'cycleMode':
+      await controller.cycleMode();
+      return;
+    case 'fork':
+      await controller.send('/fork');
+      return;
+    case 'export':
+      await controller.exportChat();
+      return;
+    case 'usage':
+      await controller.send('/usage');
+      return;
+    case 'showLog':
+      controller.showLog();
       return;
     default:
       return;

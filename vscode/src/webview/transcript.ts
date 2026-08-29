@@ -803,7 +803,7 @@ function stepsBlock(message: ChatMessage): HTMLElement {
 }
 
 function stepsStopped(message: ChatMessage): boolean {
-  return Boolean(message.steps?.some((step) => step.status === 'abandoned'));
+  return !message.streaming && Boolean(message.steps?.some((step) => step.status === 'abandoned'));
 }
 
 function stepsCardClass(message: ChatMessage, open: boolean): string {

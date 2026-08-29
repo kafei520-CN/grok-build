@@ -23,6 +23,7 @@ class GrokDiffDialog(
 
     init {
         title = "Grok Diff"
+        isModal = false
         init()
     }
 
