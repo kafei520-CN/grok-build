@@ -215,10 +215,6 @@ export class NodePlatform implements Platform {
   }
 
   async readFile(filePath: string): Promise<Uint8Array> {
-    const fromIde = await this.opts.request('openText', { path: filePath });
-    if (typeof fromIde === 'string') {
-      return Buffer.from(fromIde, 'utf8');
-    }
     return await fs.promises.readFile(filePath);
   }
 

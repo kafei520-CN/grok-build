@@ -3,20 +3,96 @@ import { logError, logInfo } from './logger';
 import { plat } from './platform';
 import { asObject, asString } from './wire';
 
+const IMAGE_EXTS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'ico',
+  'avif',
+  'tif',
+  'tiff',
+  'pdf',
+]);
+
 export async function readWorkspaceFile(
   params: unknown,
-): Promise<{ content: string }> {
+): Promise<{ content: string; _meta?: { encoding: 'base64' } }> {
   const obj = asObject(params);
   const filePath = asString(obj['path']);
   if (!filePath) {
     throw new Error('fs/read_text_file missing path');
   }
-  const open = plat().openText?.(filePath);
-  if (open !== undefined) {
-    return sliceContent(open, obj);
+  const limit = typeof obj['limit'] === 'number' ? obj['limit'] : undefined;
+  if (limit === 0) {
+    const exists = await plat().fileExists(filePath);
+    if (!exists) {
+      throw new Error(`file not found: ${filePath}`);
+    }
+    return { content: '' };
   }
-  const bytes = await plat().readFile(filePath);
-  return sliceContent(Buffer.from(bytes).toString('utf8'), obj);
+  if (!isImagePath(filePath)) {
+    const open = plat().openText?.(filePath);
+    if (open !== undefined) {
+      return sliceContent(open, obj);
+    }
+  }
+  const bytes = Buffer.from(await plat().readFile(filePath));
+  if (shouldSendBase64(filePath, bytes)) {
+    return {
+      content: bytes.toString('base64'),
+      _meta: { encoding: 'base64' },
+    };
+  }
+  return sliceContent(bytes.toString('utf8'), obj);
+}
+
+export function shouldSendBase64(filePath: string, bytes: Uint8Array): boolean {
+  if (isImagePath(filePath) || looksLikeImage(bytes)) {
+    return true;
+  }
+  return !isUtf8Text(bytes);
+}
+
+function isImagePath(filePath: string): boolean {
+  const ext = path.extname(filePath).replace(/^\./, '').toLowerCase();
+  return IMAGE_EXTS.has(ext);
+}
+
+function looksLikeImage(bytes: Uint8Array): boolean {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return true;
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return true;
+  }
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    return true;
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isUtf8Text(bytes: Uint8Array): boolean {
+  if (bytes.includes(0)) {
+    return false;
+  }
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function sliceContent(

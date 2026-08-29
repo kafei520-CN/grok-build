@@ -78,14 +78,16 @@ impl AsyncFileSystem for AcpSessionFs {
             .send(read_req)
             .await
             .map_err(|e| FsError::Other(e.to_string()))?;
-        Ok(response.content.into_bytes())
+        Ok(crate::file_system::adapter::bytes_from_read_text_file(response))
     }
 
     async fn try_read_file(&self, path: &Path) -> Result<Option<Vec<u8>>, FsError> {
         let resolved = self.resolve_path(path);
         let read_req = acp::ReadTextFileRequest::new(self.session_id.clone(), resolved);
         match self.gateway.send(read_req).await {
-            Ok(response) => Ok(Some(response.content.into_bytes())),
+            Ok(response) => Ok(Some(crate::file_system::adapter::bytes_from_read_text_file(
+                response,
+            ))),
             Err(e) if e.code == acp::ErrorCode::ResourceNotFound => Ok(None),
             Err(e) => Err(FsError::Other(e.to_string())),
         }

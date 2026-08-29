@@ -11,6 +11,7 @@
 use std::path::Path;
 
 use agent_client_protocol as acp;
+use base64::Engine as _;
 use xai_acp_lib::AcpAgentGatewaySender as GatewaySender;
 use xai_grok_tools::computer::types::{AsyncFileSystem, ComputerError};
 
@@ -44,7 +45,13 @@ impl AsyncFileSystem for AcpFsAdapter {
             .await
             .map_err(acp_error_to_computer_error)?;
 
-        Ok(response.content.into_bytes())
+        let bytes = bytes_from_read_text_file(response);
+        if path_looks_like_media(path) && !bytes_look_like_media(&bytes) {
+            if let Ok(disk) = tokio::fs::read(path).await {
+                return Ok(disk);
+            }
+        }
+        Ok(bytes)
     }
 
     async fn write_file(&self, path: &Path, data: &[u8]) -> Result<(), ComputerError> {
@@ -76,6 +83,52 @@ fn acp_error_to_computer_error(err: acp::Error) -> ComputerError {
     }
 }
 
+/// Reconstruct file bytes from `fs/read_text_file`.
+///
+/// JSON cannot carry raw binary, so clients send images as base64 with
+/// `_meta.encoding = "base64"`. Text files stay as UTF-8 `content`.
+pub(crate) fn bytes_from_read_text_file(response: acp::ReadTextFileResponse) -> Vec<u8> {
+    let encoding = response
+        .meta
+        .as_ref()
+        .and_then(|meta| meta.get("encoding"))
+        .and_then(|value| value.as_str());
+    if encoding == Some("base64") {
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(response.content.trim())
+        {
+            return bytes;
+        }
+    }
+    response.content.into_bytes()
+}
+
+fn path_looks_like_media(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "bmp"
+            | "ico"
+            | "avif"
+            | "tif"
+            | "tiff"
+            | "pdf"
+    )
+}
+
+fn bytes_look_like_media(bytes: &[u8]) -> bool {
+    infer::get(bytes).is_some_and(|kind| {
+        kind.mime_type().starts_with("image/") || kind.mime_type() == "application/pdf"
+    })
+}
+
 fn acp_error_to_io_kind(err: &acp::Error) -> Option<std::io::ErrorKind> {
     let msg_lower = err.message.to_ascii_lowercase();
 
@@ -85,5 +138,45 @@ fn acp_error_to_io_kind(err: &acp::Error) -> Option<std::io::ErrorKind> {
         Some(std::io::ErrorKind::PermissionDenied)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bytes_from_read_text_file;
+    use agent_client_protocol as acp;
+    use serde_json::{Map, Value};
+
+    fn png_header() -> Vec<u8> {
+        vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+    }
+
+    #[test]
+    fn text_content_stays_utf8_bytes() {
+        let response = acp::ReadTextFileResponse::new("hello");
+        assert_eq!(bytes_from_read_text_file(response), b"hello");
+    }
+
+    #[test]
+    fn base64_meta_restores_png_bytes() {
+        let raw = png_header();
+        let mut meta = Map::new();
+        meta.insert("encoding".into(), Value::String("base64".into()));
+        let mut response = acp::ReadTextFileResponse::new(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &raw,
+        ));
+        response.meta = Some(meta);
+        assert_eq!(bytes_from_read_text_file(response), raw);
+    }
+
+    #[test]
+    fn utf8_round_trip_does_not_preserve_png_magic() {
+        let raw = png_header();
+        let as_text = String::from_utf8_lossy(&raw).into_owned();
+        let response = acp::ReadTextFileResponse::new(as_text);
+        let recovered = bytes_from_read_text_file(response);
+        assert_ne!(recovered, raw);
+        assert_ne!(recovered.first().copied(), Some(0x89));
     }
 }
