@@ -14,6 +14,8 @@ import { asObject, asString } from './wire';
 
 export interface SessionView {
   replaying: boolean;
+  /** True only when this ACP update is historical replay, not a live leftover dump. */
+  replayUpdate?: boolean;
   messages: ChatMessage[];
   nextTurn(): number;
   modeId: string;
@@ -40,10 +42,11 @@ export function parsePlanEntries(raw: unknown): PlanStep[] | undefined {
     if (!content) {
       continue;
     }
-    steps.push({
-      content,
-      status: planStepStatus(asString(obj['status']), asObject(obj['_meta'] ?? obj['meta'])),
-    });
+    const status = planStepStatus(asString(obj['status']), asObject(obj['_meta'] ?? obj['meta']));
+    if (status === 'abandoned') {
+      continue;
+    }
+    steps.push({ content, status });
   }
   return steps;
 }
@@ -87,22 +90,36 @@ export function freezeTurnSteps(message: ChatMessage): void {
     return;
   }
   message.steps = message.steps.map((step) => {
-    if (step.status === 'completed' || step.status === 'failed' || step.status === 'abandoned') {
-      return step;
+    if (step.status === 'completed' || step.status === 'failed') {
+      return { ...step };
     }
     return { ...step, status: 'abandoned' };
   });
 }
 
+function canBindSteps(session: SessionView, assistant?: ChatMessage): boolean {
+  if (session.replayUpdate) {
+    return true;
+  }
+  if (assistant?.streaming) {
+    return true;
+  }
+  if (!assistant) {
+    const last = session.messages.at(-1);
+    return !last || last.role === 'user';
+  }
+  return false;
+}
+
 function applySteps(
   assistant: ChatMessage,
   steps: PlanStep[] | undefined,
-  replay: boolean,
+  session: SessionView,
 ): void {
   if (!steps?.length) {
     return;
   }
-  if (!replay && !assistant.streaming && assistant.steps?.length) {
+  if (!canBindSteps(session, assistant)) {
     return;
   }
   assistant.steps = steps;
@@ -178,12 +195,33 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
     session.emitUnlessReplaying();
     return;
   }
+  if (kind === 'plan') {
+    const last = session.messages.at(-1);
+    if (!canBindSteps(session, last?.role === 'assistant' ? last : undefined)) {
+      return;
+    }
+    const assistant = ensureAssistant(session, replay, update);
+    const steps = parsePlanEntries(todoListFromUpdate(update) ?? update.entries);
+    if (steps !== undefined) {
+      applySteps(assistant, steps, session);
+    } else {
+      const planText = textFromContent(update.content);
+      if (planText) {
+        assistant.plan = (assistant.plan ?? '') + planText;
+      }
+    }
+    const images = imagesFromContent(update.content);
+    if (images.length > 0) {
+      assistant.images = [...(assistant.images ?? []), ...images];
+    }
+    session.emitUnlessReplaying();
+    return;
+  }
   if (
     kind !== 'agent_message_chunk' &&
     kind !== 'agent_thought_chunk' &&
     kind !== 'tool_call' &&
-    kind !== 'tool_call_update' &&
-    kind !== 'plan'
+    kind !== 'tool_call_update'
   ) {
     return;
   }
@@ -197,17 +235,7 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
     assistant.thinking = (assistant.thinking ?? '') + textFromContent(update.content);
   } else if (kind === 'tool_call' || kind === 'tool_call_update') {
     applyTool(session, assistant, update);
-    applySteps(assistant, parsePlanEntries(todoListFromUpdate(update)), replay);
-  } else if (kind === 'plan') {
-    const steps = parsePlanEntries(todoListFromUpdate(update) ?? update.entries);
-    if (steps !== undefined) {
-      applySteps(assistant, steps, replay);
-    } else {
-      const planText = textFromContent(update.content);
-      if (planText) {
-        assistant.plan = (assistant.plan ?? '') + planText;
-      }
-    }
+    applySteps(assistant, parsePlanEntries(todoListFromUpdate(update)), session);
   }
   const images = imagesFromContent(update.content);
   if (images.length > 0) {

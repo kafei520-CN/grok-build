@@ -202,14 +202,7 @@ describe('plan steps', () => {
     ]);
     assert.deepEqual(
       steps?.map((step) => `${step.status}:${step.content}`),
-      [
-        'pending:Wait',
-        'in_progress:Edit files',
-        'completed:Done',
-        'failed:Broke',
-        'abandoned:Dropped',
-        'abandoned:Left',
-      ],
+      ['pending:Wait', 'in_progress:Edit files', 'completed:Done', 'failed:Broke'],
     );
   });
 
@@ -270,7 +263,29 @@ describe('plan steps', () => {
       },
     });
     assert.equal(session.messages[0]?.steps?.[0]?.status, 'completed');
-    assert.equal(session.messages[0]?.steps?.[1]?.status, 'abandoned');
+    assert.equal(session.messages[0]?.steps?.length, 1);
+  });
+
+  it('does not paint leftover todos onto a finished turn after restore', () => {
+    const session = view({
+      replaying: false,
+      replayUpdate: false,
+      messages: [
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          text: 'done',
+          tools: [],
+          streaming: false,
+        },
+      ],
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'plan',
+      entries: [{ content: '停止后卡不消失，未完成变浅色', status: 'cancelled' }],
+    });
+    assert.equal(session.messages.length, 1);
+    assert.equal(session.messages[0]?.steps?.length ?? 0, 0);
   });
 
   it('reads live todo_write rawInput as plan entries', () => {
@@ -308,6 +323,10 @@ describe('plan steps', () => {
     assert.deepEqual(
       assistant.steps?.map((step) => `${step.status}:${step.content}`),
       ['completed:Done', 'abandoned:Running', 'abandoned:Waiting'],
+    );
+    assert.equal(
+      assistant.steps?.some((step) => step.content.includes('停止后')),
+      false,
     );
     applySessionUpdate(session, {
       sessionUpdate: 'plan',

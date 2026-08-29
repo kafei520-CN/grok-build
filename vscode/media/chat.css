@@ -1702,7 +1702,21 @@ textarea:focus-visible {
 }
 
 .steps-card.stopped .ask-kicker,
-.steps-card.stopped .ask-preview {
+.steps-card.stopped .ask-preview,
+.steps-card.stopped .step-text,
+.steps-card.stopped .step-icon {
+  color: var(--muted);
+}
+
+.steps-card.stopped .step-row {
+  opacity: 0.5;
+  border-color: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: color-mix(in srgb, var(--elev) 70%, transparent);
+}
+
+.steps-card.stopped .step-icon.ok,
+.steps-card.stopped .step-icon.fail,
+.steps-card.stopped .step-icon.run {
   color: var(--muted);
 }
 

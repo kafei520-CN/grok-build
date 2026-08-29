@@ -1294,6 +1294,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     const view = {
       replaying: this.replaying || isReplay,
+      replayUpdate: isReplay,
       messages: this.messages,
       nextTurn: () => ++this.turn,
       modeId: this.modeId,

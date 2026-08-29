@@ -184,7 +184,7 @@ function patchTranscript(): void {
     const sig = turnSig(turn, split);
     if (node.dataset.sig !== sig) {
       node.replaceWith(turnEl(turn, split));
-    } else if (turn.assistant?.steps?.length && !node.querySelector('.steps-card')) {
+    } else if (turn.assistant && visibleSteps(turn.assistant).length && !node.querySelector('.steps-card')) {
       node.replaceWith(turnEl(turn, split));
     } else if (turn.assistant && ui.workOpen.get(turn.assistant.id) === false) {
       const work = thinkingWork(node);
@@ -210,7 +210,7 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
     node.replaceWith(turnEl(turn, false));
     return;
   }
-  if (assistant.steps?.length && !col.querySelector('.steps-card')) {
+  if (visibleSteps(assistant).length && !col.querySelector('.steps-card')) {
     node.replaceWith(turnEl(turn, false));
     return;
   }
@@ -482,7 +482,7 @@ function turnSig(turn: Turn, split: boolean): string {
     a?.error?.retrying ? 'r' : '',
     a?.error?.attempt ?? 0,
     ui.copiedId === a?.id ? 'c' : '',
-    stepsKey(a?.steps),
+    stepsKey(a ? visibleSteps(a) : undefined),
     turn.user?.text.length ?? 0,
     ui.editingUserId === turn.user?.id ? 'e' : '',
     ui.copiedId === turn.user?.id ? 'uc' : '',
@@ -681,7 +681,7 @@ function assistantColumn(message: ChatMessage): HTMLElement {
   if (message.error && !message.error.retrying) {
     el.append(turnErrorCard(message));
   }
-  if (message.steps?.length) {
+  if (visibleSteps(message).length) {
     el.append(stepsBlock(message));
   }
   if (!message.streaming) {
@@ -764,6 +764,10 @@ function thinkingWork(root: ParentNode): HTMLDetailsElement | null {
   return root.querySelector('details.work');
 }
 
+function visibleSteps(message: ChatMessage): PlanStep[] {
+  return message.steps ?? [];
+}
+
 function stepsKey(steps: PlanStep[] | undefined): string {
   return (steps ?? []).map((step) => `${step.status}:${step.content}`).join('\n');
 }
@@ -783,7 +787,7 @@ function stepsBlock(message: ChatMessage): HTMLElement {
   kicker.textContent = tr('stepsTitle');
   const preview = document.createElement('span');
   preview.className = 'ask-preview';
-  preview.textContent = stepsPreview(message.steps ?? []);
+  preview.textContent = stepsPreview(visibleSteps(message));
   brand.append(kicker, preview);
   const tools = document.createElement('div');
   tools.className = 'ask-head-tools';
@@ -797,13 +801,23 @@ function stepsBlock(message: ChatMessage): HTMLElement {
   head.addEventListener('click', () => toggleStepsOpen(el, message.id));
   const list = document.createElement('div');
   list.className = 'ask-actions steps-list';
-  fillStepRows(list, message.steps ?? [], Boolean(message.streaming));
+  fillStepRows(list, visibleSteps(message), Boolean(message.streaming));
   el.append(head, list);
   return el;
 }
 
 function stepsStopped(message: ChatMessage): boolean {
-  return !message.streaming && Boolean(message.steps?.some((step) => step.status === 'abandoned'));
+  return (
+    !message.streaming &&
+    Boolean(
+      message.steps?.some(
+        (step) =>
+          step.status === 'abandoned' ||
+          step.status === 'pending' ||
+          step.status === 'in_progress',
+      ),
+    )
+  );
 }
 
 function stepsCardClass(message: ChatMessage, open: boolean): string {
@@ -828,7 +842,8 @@ function toggleStepsOpen(el: HTMLElement, messageId: string): void {
 
 function patchStepsCard(col: HTMLElement, message: ChatMessage): void {
   const existing = col.querySelector('.steps-card') as HTMLElement | null;
-  if (!message.steps?.length) {
+  const steps = visibleSteps(message);
+  if (!steps.length) {
     existing?.remove();
     return;
   }
@@ -847,12 +862,12 @@ function patchStepsCard(col: HTMLElement, message: ChatMessage): void {
   existing.dataset.open = open ? '1' : '0';
   const preview = existing.querySelector('.ask-preview');
   if (preview) {
-    preview.textContent = stepsPreview(message.steps);
+    preview.textContent = stepsPreview(steps);
   }
   existing.querySelector('.ask-head-tools .icon-btn')?.classList.toggle('open', open);
   const list = existing.querySelector('.steps-list') as HTMLElement | null;
   if (list) {
-    fillStepRows(list, message.steps, Boolean(message.streaming));
+    fillStepRows(list, steps, Boolean(message.streaming));
   }
 }
 
