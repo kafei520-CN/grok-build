@@ -429,10 +429,53 @@ textarea:focus-visible {
 
 .msg.user {
   align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   max-width: min(88%, 420px);
 }
 
+.user-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+}
+
+.user-actions .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.user-actions .icon-btn.copied {
+  color: var(--ice);
+}
+
+.user-edit {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 64px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  resize: vertical;
+  appearance: none;
+  background: transparent;
+  color: var(--fg);
+  caret-color: var(--fg);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.user-edit:focus,
+.user-edit:focus-visible {
+  outline: none;
+}
+
 .msg.user .bubble {
+  width: 100%;
   background: color-mix(in srgb, var(--ice) 14%, var(--elev));
   border: 1px solid color-mix(in srgb, var(--ice) 34%, var(--line));
   border-radius: 16px 16px 5px 16px;

@@ -1,6 +1,6 @@
 {
   "displayName": "Grok For VS Code By Kafei",
-  "description": "面向 VS Code 的 Grok Build 编程助手。用浏览器登录后，即可在侧边栏对话、改文件并运行工具。",
+  "description": "Grok Build 的 VS Code 编程助手。浏览器登录后，在侧边栏对话、改文件、运行工具，用法与 grok CLI 一致。",
   "command.openChat": "打开聊天",
   "command.newSession": "新会话",
   "command.login": "登录",
