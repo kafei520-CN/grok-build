@@ -1,0 +1,3 @@
+<idea-plugin>
+  <!-- Loaded only when the Terminal plugin is installed. GrokTerminal uses it via reflection. -->
+</idea-plugin>
