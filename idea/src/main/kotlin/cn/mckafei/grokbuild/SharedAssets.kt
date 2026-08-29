@@ -14,7 +14,7 @@ object SharedAssets {
     const val STATUS_WIDGET_ID = "GrokBuildWidget"
 
     fun pluginVersion(): String =
-        PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))?.version ?: "0.1.88"
+        PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))?.version ?: "0.1.89"
 
     fun webviewJs(): File = resolve("webview.js", "dist")
 

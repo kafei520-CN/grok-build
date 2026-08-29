@@ -12,13 +12,14 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.1.88: unique marketplace name, Latin description, optional Terminal config-file, muted cancelled steps.
+  <change-notes><![CDATA[Grok Build By Kafei 0.1.89: compatibility range 2025.2–2025.3 (since-build 252).
+<p>0.1.89 — Marketplace Plugin Verifier: claim only the IntelliJ builds this binary is compiled against.</p>
 <p>0.1.88 — Cancelled and leftover steps stay on the card and render muted instead of as errors.</p>
 <p>0.1.87 — Full host rewrite: every VS Code command, live editor context, IntelliJ theme, status bar, settings, Grok Diff, terminal.</p>
 ]]></change-notes>
   <depends>com.intellij.modules.platform</depends>
   <depends optional="true" config-file="grok-terminal.xml">org.jetbrains.plugins.terminal</depends>
-  <idea-version since-build="243" until-build="253.*"/>
+  <idea-version since-build="252" until-build="253.*"/>
 
   <extensions defaultExtensionNs="com.intellij">
     <toolWindow id="Grok Build"
