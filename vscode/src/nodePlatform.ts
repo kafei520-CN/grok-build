@@ -257,6 +257,11 @@ export class NodePlatform implements Platform {
     return undefined;
   }
 
+  async readOpenText(filePath: string): Promise<string | undefined> {
+    const value = await this.opts.request('openText', { path: filePath });
+    return typeof value === 'string' ? value : undefined;
+  }
+
   async applyText(filePath: string, text: string): Promise<boolean> {
     return Boolean(await this.opts.request('applyText', { path: filePath, text }));
   }

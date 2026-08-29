@@ -12,14 +12,21 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.1.89: compatibility range 2025.2–2025.3 (since-build 252).
+  <change-notes><![CDATA[Grok Build By Kafei 0.1.97: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.1.97 — Plugin Verifier: drop internal PluginManagerCore, deprecated ReadAction.compute, and override-only ActionGroup.getChildren.</p>
+<p>0.1.96 — Pre-warm the Grok Diff browser so the first Review is a tab switch, not a JCEF cold start.</p>
+<p>0.1.95 — Review clicks hop off the JCEF thread onto the EDT so Grok Diff can open.</p>
+<p>0.1.94 — Grok Diff opens as a center editor tab; open-buffer reads/writes go through IntelliJ documents.</p>
+<p>0.1.93 — Stop re-serializing the active file on every keystroke; coalesce JCEF stream paints.</p>
+<p>0.1.92 — IntelliJ 2026.2: optional Web Browser (JCEF) dependency so the chat tool window can load.</p>
 <p>0.1.89 — Marketplace Plugin Verifier: claim only the IntelliJ builds this binary is compiled against.</p>
 <p>0.1.88 — Cancelled and leftover steps stay on the card and render muted instead of as errors.</p>
 <p>0.1.87 — Full host rewrite: every VS Code command, live editor context, IntelliJ theme, status bar, settings, Grok Diff, terminal.</p>
 ]]></change-notes>
   <depends>com.intellij.modules.platform</depends>
+  <depends optional="true" config-file="grok-jcef.xml">com.intellij.modules.jcef</depends>
   <depends optional="true" config-file="grok-terminal.xml">org.jetbrains.plugins.terminal</depends>
-  <idea-version since-build="252" until-build="253.*"/>
+  <idea-version since-build="252" until-build="263.*"/>
 
   <extensions defaultExtensionNs="com.intellij">
     <toolWindow id="Grok Build"
@@ -33,6 +40,10 @@
                              id="cn.mckafei.grokbuild.settings"
                              instance="cn.mckafei.grokbuild.GrokConfigurable"
                              displayName="Grok Build"/>
+    <fileType name="Grok Diff"
+              implementationClass="cn.mckafei.grokbuild.GrokDiffFileType"
+              fieldName="INSTANCE"/>
+    <fileEditorProvider implementation="cn.mckafei.grokbuild.GrokDiffEditorProvider"/>
   </extensions>
 
   <actions>

@@ -3,7 +3,6 @@ package cn.mckafei.grokbuild
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.jcef.JBCefApp
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import javax.swing.JButton
@@ -48,8 +47,8 @@ class GrokChatPanel(
         browser = null
         val panel = component as JPanel
         panel.removeAll()
-        if (!JBCefApp.isSupported()) {
-            panel.add(JBLabel("JCEF is required for Grok Build.", SwingConstants.CENTER), BorderLayout.CENTER)
+        if (!GrokJcef.isSupported()) {
+            panel.add(missingJcef(), BorderLayout.CENTER)
             panel.revalidate()
             panel.repaint()
             return
@@ -67,11 +66,18 @@ class GrokChatPanel(
             Disposer.register(this, view)
             panel.add(view.component, BorderLayout.CENTER)
             session.attach(this)
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             panel.add(errorPanel(error.message ?: error.toString()), BorderLayout.CENTER)
         }
         panel.revalidate()
         panel.repaint()
+    }
+
+    private fun missingJcef(): JComponent {
+        val wrap = JPanel(BorderLayout())
+        wrap.add(JBLabel(GrokJcef.MISSING_HTML, SwingConstants.CENTER), BorderLayout.CENTER)
+        wrap.add(retryBar(), BorderLayout.SOUTH)
+        return wrap
     }
 
     private fun missingNode(): JComponent {

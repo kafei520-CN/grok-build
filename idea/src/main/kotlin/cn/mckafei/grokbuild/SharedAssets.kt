@@ -1,20 +1,18 @@
 package cn.mckafei.grokbuild
 
-import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.application.PathManager
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.util.io.FileUtil
 import java.io.File
 
 /** Shared WebView / sidecar assets: classpath first, vscode/dist when running from source. */
 object SharedAssets {
     const val PLUGIN_ID = "cn.mckafei.grok-build"
+    const val PLUGIN_VERSION = "0.1.97"
     const val TOOL_WINDOW_ID = "Grok Build"
     const val NOTIFICATION_GROUP = "Grok Build"
     const val STATUS_WIDGET_ID = "GrokBuildWidget"
 
-    fun pluginVersion(): String =
-        PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))?.version ?: "0.1.92"
+    fun pluginVersion(): String = PLUGIN_VERSION
 
     fun webviewJs(): File = resolve("webview.js", "dist")
 

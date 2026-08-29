@@ -80,6 +80,7 @@ export interface Platform {
   deleteFile(path: string, useTrash?: boolean): Promise<void>;
   fileExists(path: string): Promise<boolean>;
   openText?(path: string): string | undefined;
+  readOpenText?(path: string): Promise<string | undefined>;
   applyText?(path: string, text: string): Promise<boolean>;
   createTerminal(name: string, command: string): void;
   spawnAgentTerminal?(opts: AgentTerminalSpawn): AgentTerminal;

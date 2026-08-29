@@ -334,7 +334,7 @@ export class EditJournal {
   }
 
   private async readCurrentText(abs: string): Promise<string | undefined> {
-    const open = plat().openText?.(abs);
+    const open = plat().openText?.(abs) ?? (await plat().readOpenText?.(abs));
     if (open !== undefined) {
       return open;
     }

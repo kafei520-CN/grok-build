@@ -85,6 +85,24 @@ describe('workspace writes', () => {
     );
   });
 
+  it('uses readOpenText when the file is open in the host editor', async () => {
+    const applied: string[] = [];
+    bindPlatform(
+      fakePlat({
+        readOpenText: async () => 'from-editor',
+        applyText: async (_path, text) => {
+          applied.push(text);
+          return true;
+        },
+        writeFile: async () => {
+          throw new Error('should not write disk');
+        },
+      }),
+    );
+    await writeWorkspaceFile({ path: '/tmp/open.ts', content: 'patched' });
+    assert.deepEqual(applied, ['patched']);
+  });
+
   it('writes the disk when the file is not open', async () => {
     const disk: string[] = [];
     bindPlatform(

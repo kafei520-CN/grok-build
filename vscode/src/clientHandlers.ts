@@ -34,7 +34,7 @@ export async function readWorkspaceFile(
     return { content: '' };
   }
   if (!isImagePath(filePath)) {
-    const open = plat().openText?.(filePath);
+    const open = await openBuffer(filePath);
     if (open !== undefined) {
       return sliceContent(open, obj);
     }
@@ -54,6 +54,14 @@ export function shouldSendBase64(filePath: string, bytes: Uint8Array): boolean {
     return true;
   }
   return !isUtf8Text(bytes);
+}
+
+async function openBuffer(filePath: string): Promise<string | undefined> {
+  const sync = plat().openText?.(filePath);
+  if (sync !== undefined) {
+    return sync;
+  }
+  return plat().readOpenText?.(filePath);
 }
 
 function isImagePath(filePath: string): boolean {
@@ -119,7 +127,7 @@ export async function writeWorkspaceFile(
   if (!filePath || content === undefined) {
     throw new Error('fs/write_text_file missing path or content');
   }
-  const open = plat().openText?.(filePath);
+  const open = await openBuffer(filePath);
   if (open !== undefined) {
     const applied = await plat().applyText?.(filePath, content);
     if (!applied) {

@@ -7,6 +7,7 @@ import com.intellij.ide.BrowserUtil
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
@@ -14,6 +15,7 @@ import com.intellij.openapi.fileChooser.FileChooserFactory
 import com.intellij.openapi.fileChooser.FileSaverDescriptor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.fileEditor.impl.NonProjectFileWritingAccessProvider
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
@@ -241,34 +243,50 @@ class HostRpc(
     }
 
     private fun readOpenText(path: String): String? {
-        val vf = LocalFileSystem.getInstance().findFileByIoFile(File(path)) ?: return null
-        val doc = FileDocumentManager.getInstance().getDocument(vf) ?: return null
-        return doc.text
+        if (path.isBlank()) {
+            return null
+        }
+        val io = File(path)
+        val vfs = LocalFileSystem.getInstance()
+        val vf = vfs.findFileByIoFile(io) ?: vfs.refreshAndFindFileByIoFile(io) ?: return null
+        return ApplicationManager.getApplication().runReadAction<String?> {
+            FileDocumentManager.getInstance().getDocument(vf)?.text
+        }
     }
 
     private fun applyText(path: String, text: String): Boolean {
         val io = File(path)
         var ok = false
-        WriteCommandAction.runWriteCommandAction(project) {
-            val vfs = LocalFileSystem.getInstance()
-            io.parentFile?.mkdirs()
-            var vf = vfs.refreshAndFindFileByIoFile(io)
-            if (vf == null) {
-                val parentIo = io.parentFile ?: return@runWriteCommandAction
-                val parent = vfs.refreshAndFindFileByIoFile(parentIo)
-                    ?: VfsUtil.createDirectories(parentIo.absolutePath)
-                vf = parent.findChild(io.name) ?: parent.createChildData(this, io.name)
-            }
-            val target = vf ?: return@runWriteCommandAction
-            val doc = FileDocumentManager.getInstance().getDocument(target)
-            if (doc != null) {
-                doc.setText(text)
-                FileDocumentManager.getInstance().saveDocument(doc)
-            } else {
-                VfsUtil.saveText(target, text)
-            }
-            ok = true
+        val write = Runnable {
+            WriteCommandAction.runWriteCommandAction(
+                project,
+                "Grok Build write",
+                null,
+                Runnable {
+                    val vfs = LocalFileSystem.getInstance()
+                    io.parentFile?.mkdirs()
+                    var vf = vfs.refreshAndFindFileByIoFile(io)
+                    if (vf == null) {
+                        val parentIo = io.parentFile ?: return@Runnable
+                        val parent = vfs.refreshAndFindFileByIoFile(parentIo)
+                            ?: VfsUtil.createDirectories(parentIo.absolutePath)
+                        vf = parent.findChild(io.name) ?: parent.createChildData(this@HostRpc, io.name)
+                    }
+                    val target = vf ?: return@Runnable
+                    NonProjectFileWritingAccessProvider.allowWriting(listOf(target))
+                    val doc = FileDocumentManager.getInstance().getDocument(target)
+                    if (doc != null) {
+                        doc.setText(text)
+                        FileDocumentManager.getInstance().saveDocument(doc)
+                    } else {
+                        VfsUtil.saveText(target, text)
+                    }
+                    ok = true
+                },
+            )
         }
+        val app = ApplicationManager.getApplication()
+        if (app.isDispatchThread) write.run() else app.invokeAndWait(write)
         return ok
     }
 

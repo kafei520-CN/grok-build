@@ -5,21 +5,31 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 object GrokHtml {
-    fun writeChatPage(): File {
-        val dir = SharedAssets.workDir("chat")
-        copy(SharedAssets.webviewJs(), File(dir, "webview.js"))
-        copy(SharedAssets.chatCss(), File(dir, "chat.css"))
-        val page = File(dir, "index.html")
-        page.writeText(html("Grok Build", "chat.css", "webview.js"), Charsets.UTF_8)
-        return page
-    }
+    fun writeChatPage(): File = writePage("chat", "Grok Build", "chat.css", "webview.js", SharedAssets.webviewJs(), SharedAssets.chatCss())
 
-    fun writeDiffPage(): File {
-        val dir = SharedAssets.workDir("diff")
-        copy(SharedAssets.diffJs(), File(dir, "diff.js"))
-        copy(SharedAssets.diffCss(), File(dir, "diff.css"))
+    fun writeDiffPage(): File = writePage("diff", "Grok Diff", "diff.css", "diff.js", SharedAssets.diffJs(), SharedAssets.diffCss())
+
+    private fun writePage(
+        kind: String,
+        title: String,
+        cssName: String,
+        jsName: String,
+        jsSrc: File,
+        cssSrc: File,
+    ): File {
+        val dir = SharedAssets.workDir(kind)
         val page = File(dir, "index.html")
-        page.writeText(html("Grok Diff", "diff.css", "diff.js"), Charsets.UTF_8)
+        val js = File(dir, jsName)
+        val css = File(dir, cssName)
+        if (page.isFile && js.isFile && css.isFile &&
+            js.lastModified() >= jsSrc.lastModified() &&
+            css.lastModified() >= cssSrc.lastModified()
+        ) {
+            return page
+        }
+        copy(jsSrc, js)
+        copy(cssSrc, css)
+        page.writeText(html(title, cssName, jsName), Charsets.UTF_8)
         return page
     }
 

@@ -2,6 +2,7 @@ package cn.mckafei.grokbuild
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
@@ -34,7 +35,10 @@ class GrokBrowser(
         Disposer.register(this, browser)
         query.addHandler { payload ->
             if (!payload.isNullOrBlank()) {
-                onMessage(payload)
+                ApplicationManager.getApplication().invokeLater(
+                    { onMessage(payload) },
+                    ModalityState.any(),
+                )
             }
             JBCefJSQuery.Response("ok")
         }
@@ -54,8 +58,11 @@ class GrokBrowser(
 
     fun postJson(json: String) {
         val app = ApplicationManager.getApplication()
-        val run = Runnable { deliver(json) }
-        if (app.isDispatchThread) run.run() else app.invokeLater(run)
+        if (app.isDispatchThread) {
+            deliver(json)
+            return
+        }
+        app.invokeLater { deliver(json) }
     }
 
     fun applyTheme() {

@@ -7,11 +7,14 @@ import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.ide.ui.LafManagerListener
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.ContentFactory
+import com.intellij.util.Alarm
 import java.util.ArrayDeque
 
 @Service(Service.Level.PROJECT)
@@ -21,10 +24,12 @@ class GrokSession(val project: Project) : Disposable {
     var sidecar: Sidecar? = null
         private set
 
+    private val log = Logger.getInstance(GrokSession::class.java)
     private val logs = StringBuilder()
     private var dispatcher: HostRpc? = null
     private var context: GrokContext? = null
-    private var diffDialog: GrokDiffDialog? = null
+    val diff = GrokDiffSupport(project, this)
+    private val diffWarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
     private var logConsole: ConsoleView? = null
     private var ready = false
     private val pendingCommands = ArrayDeque<String>()
@@ -35,7 +40,10 @@ class GrokSession(val project: Project) : Disposable {
         val appBus = ApplicationManager.getApplication().messageBus.connect(this)
         appBus.subscribe(
             LafManagerListener.TOPIC,
-            LafManagerListener { panel?.applyTheme() },
+            LafManagerListener {
+                panel?.applyTheme()
+                diff.applyTheme()
+            },
         )
         context = GrokContext(project) { selection, file ->
             lastSelection = selection
@@ -43,11 +51,13 @@ class GrokSession(val project: Project) : Disposable {
             sidecar?.sendContext(selection, file)
         }
         Disposer.register(this, context!!)
+        Disposer.register(this, diff)
     }
 
     fun attach(panel: GrokChatPanel) {
         this.panel = panel
         ensureSidecar()
+        scheduleDiffWarm()
     }
 
     fun ensureSidecar() {
@@ -55,7 +65,11 @@ class GrokSession(val project: Project) : Disposable {
             return
         }
         val sc = Sidecar(project) { event ->
-            ApplicationManager.getApplication().invokeLater { onEvent(event) }
+            when (event.get("type")?.asString) {
+                "log" -> appendLog(event)
+                "state", "tail" -> enqueueWebview(event)
+                else -> ApplicationManager.getApplication().invokeLater { onEvent(event) }
+            }
         }
         sidecar = sc
         dispatcher = HostRpc(project, this)
@@ -72,6 +86,11 @@ class GrokSession(val project: Project) : Disposable {
     }
 
     fun sendUi(messageJson: String) {
+        try {
+            context?.pushNow()
+        } catch (error: Throwable) {
+            log.warn("editor context snapshot failed", error)
+        }
         sidecar?.sendUi(messageJson)
     }
 
@@ -100,10 +119,24 @@ class GrokSession(val project: Project) : Disposable {
     }
 
     fun showDiff(params: JsonObject) {
-        diffDialog?.close(0)
-        val dialog = GrokDiffDialog(project, params, this)
-        diffDialog = dialog
-        dialog.show()
+        val app = ApplicationManager.getApplication()
+        if (!app.isDispatchThread) {
+            app.invokeLater({ showDiff(params) }, ModalityState.any())
+            return
+        }
+        diffWarm.cancelAllRequests()
+        diff.show(params)
+    }
+
+    private fun scheduleDiffWarm() {
+        diffWarm.cancelAllRequests()
+        diffWarm.addRequest({
+            try {
+                diff.warm()
+            } catch (error: Throwable) {
+                log.warn("diff warm failed", error)
+            }
+        }, 700)
     }
 
     fun showLogDialog() {
@@ -137,10 +170,50 @@ class GrokSession(val project: Project) : Disposable {
         sendCommand("restart")
     }
 
+    private val webviewLock = Any()
+    private var pendingState: String? = null
+    private var pendingTail: String? = null
+    private var webviewFlushPosted = false
+
+    private fun enqueueWebview(event: JsonObject) {
+        val json = event.toString()
+        synchronized(webviewLock) {
+            if (event.get("type")?.asString == "state") {
+                pendingState = json
+                pendingTail = null
+            } else {
+                pendingTail = json
+            }
+            if (webviewFlushPosted) {
+                return
+            }
+            webviewFlushPosted = true
+        }
+        ApplicationManager.getApplication().invokeLater { flushWebview() }
+    }
+
+    private fun flushWebview() {
+        val state: String?
+        val tail: String?
+        synchronized(webviewLock) {
+            state = pendingState
+            tail = pendingTail
+            pendingState = null
+            pendingTail = null
+            webviewFlushPosted = false
+        }
+        if (state != null) {
+            panel?.postToWebview(state)
+        }
+        if (tail != null) {
+            panel?.postToWebview(tail)
+        }
+    }
+
     private fun onEvent(event: JsonObject) {
         when (event.get("type")?.asString) {
             "host" -> dispatcher?.handle(event)
-            "state", "tail" -> panel?.postToWebview(event.toString())
+            "state", "tail" -> enqueueWebview(event)
             "ready" -> {
                 ready = true
                 sidecar?.sendContext(lastSelection, lastFile)
@@ -176,7 +249,10 @@ class GrokSession(val project: Project) : Disposable {
             "warn" -> ConsoleViewContentType.LOG_WARNING_OUTPUT
             else -> ConsoleViewContentType.NORMAL_OUTPUT
         }
-        logConsole?.print(line, type)
+        val console = logConsole ?: return
+        val app = ApplicationManager.getApplication()
+        val run = Runnable { console.print(line, type) }
+        if (app.isDispatchThread) run.run() else app.invokeLater(run)
     }
 
     override fun dispose() {
@@ -184,7 +260,7 @@ class GrokSession(val project: Project) : Disposable {
         sidecar = null
         dispatcher = null
         context = null
-        diffDialog = null
+        diffWarm.cancelAllRequests()
         logConsole = null
         ready = false
         pendingCommands.clear()
