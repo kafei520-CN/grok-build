@@ -65,7 +65,7 @@ function ruleRow(rule: NonNullable<typeof ui.state.rules>[number]): HTMLElement 
   name.textContent = rule.name;
   const hint = document.createElement('div');
   hint.className = 'settings-hint';
-  hint.textContent = tr(rule.scope === 'project' ? 'settingsRulesProject' : 'settingsRulesGlobal');
+  hint.textContent = ruleOriginLabel(rule);
   copy.append(name, hint);
   copy.addEventListener('click', () => post({ type: 'openRule', id: rule.id }));
   const tools = document.createElement('div');
@@ -94,4 +94,14 @@ function ruleRow(rule: NonNullable<typeof ui.state.rules>[number]): HTMLElement 
   tools.append(toggle, del);
   row.append(copy, tools);
   return row;
+}
+
+function ruleOriginLabel(rule: NonNullable<typeof ui.state.rules>[number]): string {
+  if (rule.origin === 'claude') {
+    return tr(rule.scope === 'project' ? 'settingsRulesClaudeProject' : 'settingsRulesClaude');
+  }
+  if (rule.origin === 'cursor') {
+    return tr(rule.scope === 'project' ? 'settingsRulesCursorProject' : 'settingsRulesCursor');
+  }
+  return tr(rule.scope === 'project' ? 'settingsRulesProject' : 'settingsRulesGlobal');
 }

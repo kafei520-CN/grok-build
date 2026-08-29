@@ -176,6 +176,12 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'closeApis':
       controller.closeApis();
       return;
+    case 'openApiForm':
+      controller.openApiForm(message.id);
+      return;
+    case 'closeApiForm':
+      controller.closeApiForm();
+      return;
     case 'openTheme':
       controller.openTheme();
       return;
@@ -298,6 +304,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       return;
     case 'deleteApi':
       await controller.deleteApi(message.id);
+      return;
+    case 'toggleApi':
+      await controller.toggleApi(message.id);
       return;
     case 'updateSetting':
       await controller.updateSetting(message.key, message.value);

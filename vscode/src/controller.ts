@@ -26,6 +26,7 @@ import { readGrokSettings } from './settings';
 import {
   applySessionUpdate,
   finalizeReplayTimes,
+  freezeTurnSteps,
   mergeCommands,
   mergeModelCatalog,
   modelsFromResult,
@@ -98,6 +99,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   multiline = false;
   settingsOpen = false;
   settingsPage: SettingsPage = 'main';
+  apiEditId?: string;
   rules: RuleItem[] = [];
   skills: SkillItem[] = [];
   apis: ApiEndpoint[] = [];
@@ -150,6 +152,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
   modelsReloadSeq = 0;
+  lastApiMutation?: { id: string; at: number };
   private pendingModelId?: string;
   private pendingEffort?: string;
   private runGen = 0;
@@ -238,11 +241,12 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       login: this.loginView,
       models: this.models,
       modeId: this.modeId,
-      messages: this.messages.map((message) =>
-        message.edits?.length
-          ? { ...message, edits: publicEdits(message.edits) }
-          : message,
-      ),
+      messages: this.messages.map((message) => ({
+        ...message,
+        tools: message.tools.map((tool) => ({ ...tool })),
+        steps: message.steps?.map((step) => ({ ...step })),
+        edits: message.edits?.length ? publicEdits(message.edits) : message.edits,
+      })),
       permission: this.permission,
       ask: this.ask,
       attachments: this.attachments,
@@ -268,6 +272,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       settings,
       settingsOpen: this.settingsOpen,
       settingsPage: this.settingsPage,
+      apiEditId: this.apiEditId,
       rules: this.rules,
       skills: this.skills,
       apis: this.apis,
@@ -518,6 +523,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       tools: [],
       streaming: true,
       createdAt: now,
+      ...this.turnModelFields(),
     };
     this.messages = [...this.messages, userMessage, assistant];
     this.attachments = [];
@@ -604,7 +610,24 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (!this.wantAgent) {
       return;
     }
+    void this.afterAgentLost(error);
+  }
+
+  private async afterAgentLost(error: Error): Promise<void> {
+    const quarantined = await drawers.quarantineRecentApi(this);
+    if (quarantined) {
+      this.reconnectFails = 0;
+    }
     this.scheduleReconnect(error);
+  }
+
+  respawnAgent(): void {
+    abortClientRpcs(this, 'cancel');
+    this.reconnectFails = 0;
+    this.dropAgent();
+    if (this.wantAgent && !this.starting) {
+      void this.beginStart();
+    }
   }
 
   private clearReconnectTimer(): void {
@@ -752,11 +775,30 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   async compact(note?: string): Promise<void> {
+    if (this.status === 'streaming') {
+      plat().warn(tr('compactBusy'));
+      return;
+    }
+    const now = new Date().toISOString();
+    const card: ChatMessage = {
+      id: `assistant-${++this.turn}`,
+      role: 'assistant',
+      text: tr('compacting'),
+      tools: [],
+      streaming: true,
+      createdAt: now,
+      ...this.turnModelFields(),
+    };
+    this.messages = [...this.messages, card];
+    this.setStatus('streaming');
     try {
       await this.agent?.compact(note);
-      this.note(tr('compactDone'));
+      card.text = tr('compactDone');
+      card.streaming = false;
+      card.endedAt = new Date().toISOString();
+      this.setStatus('ready');
     } catch (error) {
-      this.fail('Compact failed', error);
+      this.fail(tr('compactFailed'), error);
     }
   }
 
@@ -1058,6 +1100,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   openSkill(id: string): void { drawers.openSkill(this, id); }
   openApis(): void { drawers.openApis(this); }
   closeApis(): void { drawers.closeApis(this); }
+  openApiForm(id?: string): void { drawers.openApiForm(this, id); }
+  closeApiForm(): void { drawers.closeApiForm(this); }
   openTheme(): void { drawers.openTheme(this); }
   closeTheme(): void { drawers.closeTheme(this); }
   openMcps(): void { drawers.openMcps(this); }
@@ -1107,6 +1151,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     apiKey?: string;
   }): Promise<void> { await drawers.saveApi(this, input); }
   async deleteApi(id: string): Promise<void> { await drawers.deleteApi(this, id); }
+  async toggleApi(id: string): Promise<void> { await drawers.toggleApi(this, id); }
   async updateSetting(key: keyof GrokSettings, value: string | boolean): Promise<void> {
     await drawers.updateSetting(this, key, value);
   }
@@ -1135,6 +1180,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       tools: [],
       streaming: true,
       createdAt: now,
+      ...this.turnModelFields(),
     };
     this.messages = [...this.messages, userMessage, assistant];
     const run = ++this.runGen;
@@ -1231,10 +1277,18 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
         void this.syncEditStats(assistant);
       },
     };
+    const last = this.messages.at(-1);
+    const before = last?.role === 'assistant' ? stepsStamp(last.steps) : '';
     applySessionUpdate(view, update);
     this.modeId = view.modeId;
     this.models = view.models;
     this.commands = view.commands;
+    const next = this.messages.at(-1);
+    const after = next?.role === 'assistant' ? stepsStamp(next.steps) : '';
+    if (after && after !== before) {
+      this.flushEmitTimer();
+      this.emit();
+    }
   }
 
   allowsFileWrites(): boolean {
@@ -1431,7 +1485,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     const tail: import('./types').StreamTail = {
       type: 'tail',
-      message: last,
+      message: {
+        ...last,
+        tools: last.tools.map((tool) => ({ ...tool })),
+        steps: last.steps?.map((step) => ({ ...step })),
+      },
       status: this.status,
       context: this.meter.usage,
       queue: this.queue,
@@ -1530,6 +1588,16 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
   }
 
+  private turnModelFields(): Pick<ChatMessage, 'modelId' | 'modelName' | 'effort'> {
+    const id = this.selectedModelId();
+    const model = this.models?.available.find((item) => item.id === id);
+    return {
+      modelId: id,
+      modelName: model?.name ?? id,
+      effort: this.selectedEffort(),
+    };
+  }
+
   private selectedModelId(): string | undefined {
     return this.pendingModelId ?? this.models?.currentId;
   }
@@ -1571,6 +1639,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (assistant) {
       assistant.streaming = false;
       assistant.endedAt = assistant.endedAt ?? new Date().toISOString();
+      freezeTurnSteps(assistant);
       void this.syncEditStats(assistant);
     }
     void this.meter.refresh();
@@ -1593,6 +1662,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (assistant) {
       assistant.error = parsed;
       assistant.streaming = false;
+      freezeTurnSteps(assistant);
     }
     if (this.status === 'streaming' || this.status === 'ready') {
       this.status = 'ready';
@@ -1603,6 +1673,10 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     logError(message, error);
     this.emit();
   }
+}
+
+function stepsStamp(steps: ChatMessage['steps']): string {
+  return (steps ?? []).map((step) => `${step.status}:${step.content}`).join('\n');
 }
 
 async function isGitCwd(cwd: string): Promise<boolean> {

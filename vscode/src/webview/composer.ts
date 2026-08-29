@@ -1,6 +1,6 @@
 import { contextTone, formatTokens } from '../context';
 import { looksLikeFilePath } from '../edits';
-import { effortLabel } from '../i18n';
+import { effortLabel, modelDisplayName } from '../i18n';
 import { lerpInt, liveEditSummary, type LiveEditSummary } from '../liveEdits';
 import { FALLBACK_COMMANDS, filterCommands } from '../slash';
 import type { Attachment, ChatState, ModelOption } from '../types';
@@ -373,14 +373,9 @@ function currentModel(): ModelOption | undefined {
   return ui.state.models?.available.find((m) => m.id === ui.state.models?.currentId);
 }
 
-function displayModelName(id?: string, name?: string): string {
-  const raw = name ?? id ?? 'Grok';
-  return raw.replace(/^Grok\s+/i, 'Grok ');
-}
-
 function currentModelLabel(): string {
   const model = currentModel();
-  return displayModelName(model?.id ?? ui.state.models?.currentId, model?.name);
+  return modelDisplayName(model?.id ?? ui.state.models?.currentId, model?.name) || 'Grok';
 }
 
 function currentEffortValue(): string {
@@ -416,7 +411,7 @@ function modelPicker(): HTMLElement {
     disabled: turnBusy() || !canType() || models.length === 0,
     items: models.map((model) => ({
       id: model.id,
-      label: displayModelName(model.id, model.name),
+      label: modelDisplayName(model.id, model.name) || model.id,
       selected: model.id === ui.state.models?.currentId,
     })),
     onPick: (id) => post({ type: 'setModel', modelId: id }),

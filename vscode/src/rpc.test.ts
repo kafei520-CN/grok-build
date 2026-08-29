@@ -72,4 +72,14 @@ describe('JsonRpcConnection', () => {
     await assert.rejects(pending);
     conn.feed(Buffer.from('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n'));
   });
+
+  it('rejects a request that exceeds its timeout without blocking later calls', async () => {
+    const stdin = new PassThrough();
+    const conn = new JsonRpcConnection(stdin);
+    const pending = conn.request('_x.ai/internal/reload_models', {}, 20);
+    await assert.rejects(pending, /timed out after 20ms/);
+    const next = conn.request('initialize', {});
+    conn.feed(Buffer.from('{"jsonrpc":"2.0","id":2,"result":{"ok":true}}\n'));
+    assert.deepEqual(await next, { ok: true });
+  });
 });

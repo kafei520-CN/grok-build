@@ -12,8 +12,8 @@ import {
 } from './fileSearch';
 import { sameFsPath } from './grokDirs';
 import type { GrokSettings } from './types';
-import type { AgentTerminalSpawn, Platform } from './platform';
-import { createVscodeAgentTerminal } from './vscodeTerminal';
+import { spawnProcessTerminal } from './acpTerminal';
+import type { Platform } from './platform';
 
 let findFilesCts: vscode.CancellationTokenSource | undefined;
 
@@ -216,8 +216,8 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
       terminal.show();
       terminal.sendText(command);
     },
-    spawnAgentTerminal(opts: AgentTerminalSpawn) {
-      return createVscodeAgentTerminal(opts);
+    spawnAgentTerminal(opts) {
+      return spawnProcessTerminal(opts);
     },
     async closeSidebar() {
       await vscode.commands.executeCommand('workbench.action.closeSidebar');

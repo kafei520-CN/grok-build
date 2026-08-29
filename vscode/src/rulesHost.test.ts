@@ -10,6 +10,11 @@ describe('rules files', () => {
       enabled: false,
     });
     assert.equal(parseRuleFileName('notes.txt'), undefined);
+    assert.deepEqual(parseRuleFileName('Claude.md'), { name: 'Claude', enabled: true });
+    assert.deepEqual(parseRuleFileName('CLAUDE.md.disabled'), {
+      name: 'CLAUDE',
+      enabled: false,
+    });
   });
 
   it('strips extension and unsafe characters from import stems', () => {

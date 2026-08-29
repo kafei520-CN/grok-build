@@ -1,4 +1,12 @@
-import { listApiEndpoints, removeApiEndpoint, saveApiEndpoint } from './apiEndpoints';
+import {
+  listApiEndpoints,
+  removeApiEndpoint,
+  saveApiEndpoint,
+  setApiEndpointEnabled,
+  toggleApiEndpoint,
+  validateBaseUrl,
+} from './apiEndpoints';
+import { API_MUTATION_GUARD_MS } from './constants';
 import {
   deleteAgent as removeAgentFile,
   importAgentFiles,
@@ -63,6 +71,7 @@ import type {
 export interface SettingsHost {
   settingsOpen: boolean;
   settingsPage: SettingsPage;
+  apiEditId?: string;
   drawer?: DrawerId;
   drawerBody?: string;
   rules: RuleItem[];
@@ -97,6 +106,7 @@ export interface SettingsHost {
   taskSeq: number;
   taskTimer?: ReturnType<typeof setTimeout>;
   modelsReloadSeq: number;
+  lastApiMutation?: { id: string; at: number };
   emit(): void;
   fail(message: string, error?: unknown): void;
   loadSession(sessionId: string, sessionCwd?: string): Promise<void>;
@@ -104,6 +114,7 @@ export interface SettingsHost {
   sendAgentSlash(text: string): Promise<void>;
   cancelTurn(): void;
   refreshSessionsSilent(): Promise<void>;
+  respawnAgent(): void;
 }
 
 export function closeDrawer(host: SettingsHost): void {
@@ -235,6 +246,7 @@ export function openSettings(host: SettingsHost): void {
 export function closeSettings(host: SettingsHost): void {
   host.settingsOpen = false;
   host.settingsPage = 'main';
+  host.apiEditId = undefined;
   host.emit();
 }
 
@@ -363,12 +375,26 @@ export async function refreshSkills(host: SettingsHost): Promise<void> {
 }
 
 export function openApis(host: SettingsHost): void {
+  host.apiEditId = undefined;
   openSettingsPage(host, 'apis', () => void refreshApis(host));
 }
 
 export function closeApis(host: SettingsHost): void {
+  host.apiEditId = undefined;
   host.settingsPage = 'main';
   host.emit();
+}
+
+export function openApiForm(host: SettingsHost, id?: string): void {
+  host.settingsOpen = true;
+  host.apiEditId = id?.trim() || undefined;
+  host.settingsPage = 'api-form';
+  host.emit();
+}
+
+export function closeApiForm(host: SettingsHost): void {
+  host.apiEditId = undefined;
+  openSettingsPage(host, 'apis', () => void refreshApis(host));
 }
 
 export function openTheme(host: SettingsHost): void {
@@ -913,10 +939,27 @@ export async function saveApi(
     apiKey?: string;
   },
 ): Promise<void> {
-  const saved = await saveApiEndpoint(input);
-  await refreshApis(host);
-  void reloadModelCatalog(host, saved.id);
-  plat().info(tr('settingsApisSaved'));
+  try {
+    validateBaseUrl(input.baseUrl);
+  } catch {
+    plat().warn(tr('settingsApisUrlInvalid'));
+    return;
+  }
+  try {
+    const saved = await saveApiEndpoint({
+      ...input,
+      id: input.id?.trim() || undefined,
+    });
+    markApiMutation(host, saved);
+    host.apiEditId = undefined;
+    host.settingsPage = 'apis';
+    await refreshApis(host);
+    void reloadModelCatalog(host, saved.enabled ? saved.id : undefined);
+    plat().info(tr('settingsApisSaved'));
+  } catch (error) {
+    logWarn(`api save: ${error instanceof Error ? error.message : error}`);
+    plat().warn(tr('settingsApisUrlInvalid'));
+  }
 }
 
 export async function deleteApi(host: SettingsHost, id: string): Promise<void> {
@@ -929,8 +972,45 @@ export async function deleteApi(host: SettingsHost, id: string): Promise<void> {
     return;
   }
   await removeApiEndpoint(id);
+  clearApiMutation(host, id);
   await refreshApis(host);
   void reloadModelCatalog(host);
+}
+
+export async function toggleApi(host: SettingsHost, id: string): Promise<void> {
+  try {
+    const saved = await toggleApiEndpoint(id);
+    if (saved.enabled) {
+      markApiMutation(host, saved);
+    } else {
+      clearApiMutation(host, id);
+    }
+    await refreshApis(host);
+    void reloadModelCatalog(host, saved.enabled ? saved.id : undefined);
+  } catch (error) {
+    logWarn(`api toggle: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+export async function quarantineRecentApi(host: SettingsHost): Promise<boolean> {
+  const stamp = host.lastApiMutation;
+  if (!stamp || Date.now() - stamp.at > API_MUTATION_GUARD_MS) {
+    return false;
+  }
+  host.lastApiMutation = undefined;
+  const row = host.apis.find((item) => item.id === stamp.id);
+  if (!row?.enabled) {
+    return false;
+  }
+  try {
+    await setApiEndpointEnabled(stamp.id, false);
+    await refreshApis(host);
+    plat().warn(tr('settingsApisQuarantined', { name: row.name }));
+    return true;
+  } catch (error) {
+    logWarn(`api quarantine: ${error instanceof Error ? error.message : error}`);
+    return false;
+  }
 }
 
 export async function refreshApis(host: SettingsHost): Promise<void> {
@@ -951,7 +1031,10 @@ export async function reloadModelCatalog(host: SettingsHost, expectId?: string):
   try {
     await agent.reloadModels();
   } catch (error) {
-    logWarn(`reload models: ${error instanceof Error ? error.message : error}`);
+    const message = error instanceof Error ? error.message : String(error);
+    logWarn(`reload models: ${message}`);
+    await recoverFailedReload(host, expectId);
+    return;
   }
   for (let i = 0; i < 8; i += 1) {
     if (seq !== host.modelsReloadSeq) {
@@ -971,6 +1054,37 @@ export async function reloadModelCatalog(host: SettingsHost, expectId?: string):
       return;
     }
     await sleep(300);
+  }
+}
+
+async function recoverFailedReload(host: SettingsHost, expectId?: string): Promise<void> {
+  const id = expectId ?? host.lastApiMutation?.id;
+  const row = id ? host.apis.find((item) => item.id === id) : undefined;
+  if (row?.enabled && id) {
+    try {
+      await setApiEndpointEnabled(id, false);
+      host.lastApiMutation = undefined;
+      await refreshApis(host);
+    } catch (error) {
+      logWarn(`api disable after reload: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+  plat().warn(tr('settingsApisReloadFailed'));
+  if (host.agent) {
+    host.respawnAgent();
+  }
+}
+
+function markApiMutation(host: SettingsHost, saved: ApiEndpoint): void {
+  if (!saved.enabled) {
+    return;
+  }
+  host.lastApiMutation = { id: saved.id, at: Date.now() };
+}
+
+function clearApiMutation(host: SettingsHost, id: string): void {
+  if (host.lastApiMutation?.id === id) {
+    host.lastApiMutation = undefined;
   }
 }
 

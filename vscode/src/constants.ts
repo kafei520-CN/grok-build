@@ -78,3 +78,9 @@ export const EXT = {
   modelsList: 'x.ai/models/list',
   modelsReload: 'x.ai/internal/reload_models',
 } as const;
+
+/** Local config reload must not block the ACP session if the CLI stalls. */
+export const RELOAD_MODELS_TIMEOUT_MS = 8_000;
+
+/** Agent death shortly after an endpoint write is treated as that endpoint's fault. */
+export const API_MUTATION_GUARD_MS = 20_000;

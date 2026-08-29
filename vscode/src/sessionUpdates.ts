@@ -2,7 +2,14 @@ import type { ContextMeter } from './contextMeter';
 import { editsFromToolUpdate, mergeEdits } from './edits';
 import { formatRetryUpdate } from './errors';
 import { FALLBACK_COMMANDS } from './slash';
-import type { ChatMessage, ChatState, SessionUpdate, SlashCommandInfo } from './types';
+import type {
+  ChatMessage,
+  ChatState,
+  PlanStep,
+  PlanStepStatus,
+  SessionUpdate,
+  SlashCommandInfo,
+} from './types';
 import { asObject, asString } from './wire';
 
 export interface SessionView {
@@ -18,6 +25,78 @@ export interface SessionView {
   displayPath: (filePath: string) => string;
   emitUnlessReplaying: () => void;
   refreshEditStats?: (assistant: ChatMessage) => void;
+}
+
+export function parsePlanEntries(raw: unknown): PlanStep[] | undefined {
+  const list = Array.isArray(raw) ? raw : asObject(raw)['entries'];
+  if (!Array.isArray(list)) {
+    return undefined;
+  }
+  const steps: PlanStep[] = [];
+  for (const item of list) {
+    const obj = asObject(item);
+    const content =
+      asString(obj['content']) ?? asString(obj['title']) ?? asString(obj['text']);
+    if (!content) {
+      continue;
+    }
+    steps.push({
+      content,
+      status: planStepStatus(asString(obj['status']), asObject(obj['_meta'] ?? obj['meta'])),
+    });
+  }
+  return steps;
+}
+
+function planStepStatus(raw: string | undefined, meta: Record<string, unknown>): PlanStepStatus {
+  const status = (raw ?? '').toLowerCase().replace(/-/g, '_');
+  if (status === 'completed' || status === 'complete' || status === 'done') {
+    if (meta['cancelled'] === true || meta['failed'] === true) {
+      return 'failed';
+    }
+    return 'completed';
+  }
+  if (
+    status === 'in_progress' ||
+    status === 'inprogress' ||
+    status === 'running' ||
+    status === 'active'
+  ) {
+    return 'in_progress';
+  }
+  if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
+    return 'failed';
+  }
+  if (status === 'abandoned' || status === 'skipped' || status === 'stopped') {
+    return 'abandoned';
+  }
+  return 'pending';
+}
+
+export function freezeTurnSteps(message: ChatMessage): void {
+  if (!message.steps?.length) {
+    return;
+  }
+  message.steps = message.steps.map((step) => {
+    if (step.status === 'completed' || step.status === 'failed' || step.status === 'abandoned') {
+      return step;
+    }
+    return { ...step, status: 'abandoned' };
+  });
+}
+
+function applySteps(
+  assistant: ChatMessage,
+  steps: PlanStep[] | undefined,
+  replay: boolean,
+): void {
+  if (!steps?.length) {
+    return;
+  }
+  if (!replay && !assistant.streaming && assistant.steps?.length) {
+    return;
+  }
+  assistant.steps = steps;
 }
 
 export function applySessionUpdate(session: SessionView, update: SessionUpdate): void {
@@ -109,10 +188,16 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
     assistant.thinking = (assistant.thinking ?? '') + textFromContent(update.content);
   } else if (kind === 'tool_call' || kind === 'tool_call_update') {
     applyTool(session, assistant, update);
+    applySteps(assistant, parsePlanEntries(todoListFromUpdate(update)), replay);
   } else if (kind === 'plan') {
-    const planText = textFromContent(update.content);
-    if (planText) {
-      assistant.plan = (assistant.plan ?? '') + planText;
+    const steps = parsePlanEntries(todoListFromUpdate(update) ?? update.entries);
+    if (steps !== undefined) {
+      applySteps(assistant, steps, replay);
+    } else {
+      const planText = textFromContent(update.content);
+      if (planText) {
+        assistant.plan = (assistant.plan ?? '') + planText;
+      }
     }
   }
   const images = imagesFromContent(update.content);
@@ -231,6 +316,7 @@ function ensureAssistant(
   const last = session.messages.at(-1);
   if (last?.role === 'assistant') {
     stampTimes(last, update, replay);
+    stampTurnModel(last, session.models);
     return last;
   }
   const assistant: ChatMessage = {
@@ -245,11 +331,94 @@ function ensureAssistant(
       (replay ? undefined : new Date().toISOString()),
   };
   stampTimes(assistant, update, replay);
+  stampTurnModel(assistant, session.models);
   session.messages.push(assistant);
   return assistant;
 }
 
+export function catalogTurnModel(models: ChatState['models'] | undefined): {
+  modelId?: string;
+  modelName?: string;
+  effort?: string;
+} {
+  const id = models?.currentId;
+  const model = models?.available.find((item) => item.id === id);
+  if (!id && !model) {
+    return {};
+  }
+  return {
+    modelId: id ?? model?.id,
+    modelName: model?.name ?? id,
+    effort: model?.currentEffort,
+  };
+}
+
+export function stampTurnModel(
+  message: ChatMessage,
+  models: ChatState['models'] | undefined,
+): void {
+  if (message.role !== 'assistant') {
+    return;
+  }
+  const stamp = catalogTurnModel(models);
+  if (!message.modelId && stamp.modelId) {
+    message.modelId = stamp.modelId;
+  }
+  if (!message.modelName && stamp.modelName) {
+    message.modelName = stamp.modelName;
+  }
+  if (!message.effort && stamp.effort) {
+    message.effort = stamp.effort;
+  }
+}
+
+function todoListFromUpdate(update: SessionUpdate): unknown {
+  if (update.entries !== undefined) {
+    return update.entries;
+  }
+  return listFromRaw(update.rawOutput) ?? listFromRaw(update.rawInput);
+}
+
+function listFromRaw(raw: unknown): unknown {
+  if (raw == null) {
+    return undefined;
+  }
+  if (Array.isArray(raw)) {
+    return raw;
+  }
+  const obj = asObject(raw);
+  if (Array.isArray(obj['todos'])) {
+    return obj['todos'];
+  }
+  if (Array.isArray(obj['entries'])) {
+    return obj['entries'];
+  }
+  const updated = asObject(obj['TodosUpdated']);
+  if (Array.isArray(updated['todos'])) {
+    return updated['todos'];
+  }
+  const nested = asObject(obj['output']);
+  if (Array.isArray(nested['todos'])) {
+    return nested['todos'];
+  }
+  if (Array.isArray(nested['entries'])) {
+    return nested['entries'];
+  }
+  return undefined;
+}
+
+function isTodoTool(update: SessionUpdate): boolean {
+  const text = `${update.kind ?? ''} ${update.title ?? ''} ${update.toolCallId ?? ''}`.toLowerCase();
+  if (text.includes('todo') || text.includes('updating plan')) {
+    return true;
+  }
+  return false;
+}
+
 function applyTool(session: SessionView, assistant: ChatMessage, update: SessionUpdate): void {
+  if (isTodoTool(update)) {
+    return;
+  }
   const id = update.toolCallId ?? `tool-${assistant.tools.length}`;
   let card = assistant.tools.find((tool) => tool.id === id);
   if (!card) {

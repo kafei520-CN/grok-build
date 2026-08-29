@@ -67,18 +67,26 @@ export function iconTrash(): string {
   return '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M3.5 4.5h9M6.2 4.5V3.4h3.6v1.1M5.2 6.2v6.2M8 6.2v6.2M10.8 6.2v6.2M4.4 4.5l.6 8.4h6l.6-8.4"/></svg>';
 }
 
+export function iconBook(): string {
+  return '<svg viewBox="0 0 16 16" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linejoin="round"><path d="M8 3.3C6.7 2.4 5.2 2.2 3.4 2.6v9.5c1.8-.4 3.3-.2 4.6.7 1.3-.9 2.8-1.1 4.6-.7V2.6C10.8 2.2 9.3 2.4 8 3.3z"/><path d="M8 3.4v9.4"/></svg>';
+}
+
+export function iconSearch(): string {
+  return '<svg viewBox="0 0 16 16" width="70%" height="70%" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"><circle cx="6.8" cy="6.8" r="4.35"/><path d="m10.3 10.3 3.2 3.2"/></svg>';
+}
+
 export function toolIcon(kind?: string): string {
   switch (kind) {
     case 'edit':
     case 'write':
       return '✎';
     case 'read':
-      return '▣';
+      return iconBook();
     case 'execute':
     case 'terminal':
       return '▷';
     case 'search':
-      return '⌕';
+      return iconSearch();
     case 'delete':
       return '⌫';
     default:

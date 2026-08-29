@@ -2,7 +2,7 @@ import { DEFAULT_SETTINGS, type GrokSettings } from '../types';
 import { post, tr, ui } from './app';
 import { iconButton } from './dom';
 import { iconBack, iconClose, iconStar } from './icons';
-import { apiEditStamp, apisNavRow, mountApisBody } from './settingsApi';
+import { apisNavRow, mountApiFormBody, mountApisBody } from './settingsApi';
 import { mountRulesBody, rulesNavRow } from './settingsRules';
 import { mountSkillsBody, skillsNavRow } from './settingsSkills';
 import { mcpsNavRow, mountMcpsBody } from './settingsMcps';
@@ -24,9 +24,10 @@ export function patchSettings(parent: HTMLElement): void {
   const key = [
     ui.state.locale ?? 'en',
     ui.state.settingsPage ?? 'main',
+    ui.state.apiEditId ?? '',
     (ui.state.rules ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     (ui.state.skills ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
-    (ui.state.apis ?? []).map((row) => row.id).join('|'),
+    (ui.state.apis ?? []).map((row) => `${row.id}:${row.enabled ? '1' : '0'}`).join('|'),
     (ui.state.mcps ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     (ui.state.agents ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
     (ui.state.personas ?? []).map((row) => `${row.id}:${row.enabled}`).join('|'),
@@ -39,7 +40,6 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.marketplace ?? []).map((row) => row.id).join('|'),
     (ui.state.workflows ?? []).map((row) => row.id).join('|'),
     (ui.state.memoryFiles ?? []).map((row) => row.id).join('|'),
-    apiEditStamp(),
     `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}`,
   ].join(':');
   if (!existing || paintedKey !== key) {
@@ -64,26 +64,7 @@ function mountSettings(): HTMLElement {
   mark.innerHTML = iconStar();
   const title = document.createElement('span');
   const page = ui.state.settingsPage ?? 'main';
-  title.textContent =
-    page === 'rules'
-      ? tr('settingsRules')
-      : page === 'skills'
-        ? tr('settingsSkills')
-        : page === 'apis'
-          ? tr('settingsApis')
-          : page === 'theme'
-            ? tr('settingsTheme')
-            : page === 'mcps'
-              ? tr('settingsMcps')
-              : page === 'agents'
-                ? tr('settingsAgents')
-                : page === 'worktrees'
-                  ? tr('settingsWorktrees')
-                  : page === 'extensions'
-                    ? tr('settingsExt')
-                    : page === 'memory'
-                      ? tr('settingsMemory')
-                      : tr('settingsTitle');
+  title.textContent = settingsTitle(page);
   brand.append(mark, title);
   const tools = document.createElement('div');
   tools.className = 'settings-head-tools';
@@ -91,6 +72,7 @@ function mountSettings(): HTMLElement {
     page === 'rules' ||
     page === 'skills' ||
     page === 'apis' ||
+    page === 'api-form' ||
     page === 'theme' ||
     page === 'mcps' ||
     page === 'agents' ||
@@ -104,7 +86,9 @@ function mountSettings(): HTMLElement {
           type:
             page === 'skills'
               ? 'closeSkills'
-              : page === 'apis'
+              : page === 'api-form'
+                ? 'closeApiForm'
+                : page === 'apis'
                 ? 'closeApis'
                 : page === 'theme'
                   ? 'closeTheme'
@@ -135,6 +119,10 @@ function mountSettings(): HTMLElement {
   }
   if (page === 'apis') {
     el.append(head, mountApisBody());
+    return el;
+  }
+  if (page === 'api-form') {
+    el.append(head, mountApiFormBody());
     return el;
   }
   if (page === 'theme') {
@@ -250,6 +238,40 @@ function mountSettings(): HTMLElement {
   el.append(head, body);
   syncSettings(el);
   return el;
+}
+
+function settingsTitle(page: string): string {
+  if (page === 'rules') {
+    return tr('settingsRules');
+  }
+  if (page === 'skills') {
+    return tr('settingsSkills');
+  }
+  if (page === 'apis') {
+    return tr('settingsApis');
+  }
+  if (page === 'api-form') {
+    return ui.state.apiEditId ? tr('settingsApisEdit') : tr('settingsApisAdd');
+  }
+  if (page === 'theme') {
+    return tr('settingsTheme');
+  }
+  if (page === 'mcps') {
+    return tr('settingsMcps');
+  }
+  if (page === 'agents') {
+    return tr('settingsAgents');
+  }
+  if (page === 'worktrees') {
+    return tr('settingsWorktrees');
+  }
+  if (page === 'extensions') {
+    return tr('settingsExt');
+  }
+  if (page === 'memory') {
+    return tr('settingsMemory');
+  }
+  return tr('settingsTitle');
 }
 
 function current(): GrokSettings {

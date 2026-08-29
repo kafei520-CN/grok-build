@@ -3,6 +3,7 @@ import {
   CLIENT_IDENTIFIER,
   EXT,
   PROTOCOL_VERSION,
+  RELOAD_MODELS_TIMEOUT_MS,
 } from './constants';
 import { logError, logInfo, logWarn } from './logger';
 import { JsonRpcConnection, RpcError } from './rpc';
@@ -202,9 +203,13 @@ export class GrokAgent {
     });
   }
 
-  async extMethod(method: string, params: unknown = {}): Promise<unknown> {
+  async extMethod(
+    method: string,
+    params: unknown = {},
+    timeoutMs?: number,
+  ): Promise<unknown> {
     const rpcMethod = method.startsWith('_') ? method : `_${method}`;
-    return this.rpc.request(rpcMethod, params ?? {});
+    return this.rpc.request(rpcMethod, params ?? {}, timeoutMs);
   }
 
   async getAuthUrl(): Promise<{ url?: string; mode?: AuthUrlMode }> {
@@ -303,7 +308,7 @@ export class GrokAgent {
   }
 
   async reloadModels(): Promise<void> {
-    await this.extMethod(EXT.modelsReload, {});
+    await this.extMethod(EXT.modelsReload, {}, RELOAD_MODELS_TIMEOUT_MS);
   }
 
   async listMcps(cache = false): Promise<unknown> {
@@ -669,6 +674,7 @@ export function parseSessionUpdate(params: unknown): {
 } {
   const obj = asObject(params);
   const update = asObject(obj['update']);
+  const fields = asObject(update['fields']);
   const meta = asObject(obj['_meta'] ?? obj['meta']);
   const updateMeta = asObject(update['_meta'] ?? update['meta']);
   const noticeTimes = timesFromMeta(meta);
@@ -680,9 +686,9 @@ export function parseSessionUpdate(params: unknown): {
       updateMeta['isReplay'] === true ||
       meta['is_replay'] === true,
     update: {
-      sessionUpdate: asString(update['sessionUpdate']),
+      sessionUpdate: asString(update['sessionUpdate'])?.toLowerCase(),
       content: update['content'] as SessionUpdate['content'],
-      toolCallId: asString(update['toolCallId']),
+      toolCallId: asString(update['toolCallId']) ?? asString(update['tool_call_id']),
       title: asString(update['title']),
       kind: asString(update['kind']),
       status: asString(update['status']),
@@ -695,9 +701,17 @@ export function parseSessionUpdate(params: unknown): {
       message: asString(update['message']),
       error: asString(update['error']),
       isRateLimited: update['isRateLimited'] === true || update['is_rate_limited'] === true,
-      rawInput: update['rawInput'],
-      rawOutput: update['rawOutput'],
-      locations: update['locations'] as SessionUpdate['locations'],
+      rawInput:
+        update['rawInput'] ??
+        update['raw_input'] ??
+        fields['rawInput'] ??
+        fields['raw_input'],
+      rawOutput:
+        update['rawOutput'] ??
+        update['raw_output'] ??
+        fields['rawOutput'] ??
+        fields['raw_output'],
+      locations: (update['locations'] ?? fields['locations']) as SessionUpdate['locations'],
       currentModelId: asString(update['currentModelId']),
       currentModeId:
         asString(update['currentModeId']) ?? asString(update['modeId']),
@@ -711,6 +725,10 @@ export function parseSessionUpdate(params: unknown): {
       turnStartMs: updateTimes.turnStartMs ?? noticeTimes.turnStartMs,
       streamStartMs: updateTimes.streamStartMs ?? noticeTimes.streamStartMs,
       agentTimestampMs: updateTimes.agentTimestampMs ?? noticeTimes.agentTimestampMs,
+      entries:
+        update['entries'] ??
+        update['todos'] ??
+        asObject(update['plan'])['entries'],
     },
   };
 }

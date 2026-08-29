@@ -44,7 +44,6 @@ class VscodeAgentTerminal implements AgentTerminal {
       cwd: opts.cwd,
       pty,
     });
-    this.vsTerm.show(true);
     const env = { ...process.env, ...opts.env };
     this.child = spawn(opts.command, opts.args ?? [], {
       cwd: opts.cwd,
@@ -64,13 +63,14 @@ class VscodeAgentTerminal implements AgentTerminal {
         exitCode: code ?? undefined,
         signal: signal ?? undefined,
       });
-      this.closed.fire(code ?? 0);
+      // VS Code treats a non-zero onDidClose number as "terminal failed to start".
+      this.closed.fire();
     });
     this.child.on('error', (error) => {
       this.push(error.message);
       this.echo(`\r\n${error.message}\r\n`);
       this.finish({ exitCode: 1 });
-      this.closed.fire(1);
+      this.closed.fire();
     });
   }
 

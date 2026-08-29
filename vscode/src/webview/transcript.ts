@@ -1,14 +1,32 @@
 import { totals } from '../edits';
-import { formatClock, formatDuration, toolKindLabel } from '../i18n';
+import { formatDuration, toolKindLabel, turnSourceText } from '../i18n';
 import { permissionButtonClass, permissionLabelKey } from '../permissions';
 import { permissionActions, permissionNeedsCancel, permissionTarget } from '../permissionView';
-import type { ChatMessage, ChatState, FileEdit, PermissionOption, PermissionPrompt } from '../types';
+import type {
+  ChatMessage,
+  ChatState,
+  FileEdit,
+  PermissionOption,
+  PermissionPrompt,
+  PlanStep,
+} from '../types';
 import { loc, post, render, tr, ui } from './app';
 import { patchJumpBottom } from './composer';
 import { restoreScrollTop, shouldPinToBottom, userHeldScroll, type TranscriptScroll } from './scroll';
 import { bootStar, errorCard, home, loginCard, panel, setupCard } from './chrome';
 import { button, iconButton } from './dom';
-import { iconAskHint, iconCheck, iconChevron, iconClose, iconCopy, iconFork, iconStar, toolIcon } from './icons';
+import {
+  iconAskHint,
+  iconCheck,
+  iconChevron,
+  iconClock,
+  iconClose,
+  iconCopy,
+  iconEdit,
+  iconFork,
+  iconStar,
+  toolIcon,
+} from './icons';
 import { fileName, renderMarkdown } from './markdown';
 
 type Turn = { user?: ChatMessage; assistant?: ChatMessage };
@@ -159,9 +177,19 @@ function patchTranscript(): void {
       patchStreamingTurn(node, turn);
       continue;
     }
+    if (turn.assistant && thinkingWork(node)?.classList.contains('live')) {
+      ui.workOpen.set(turn.assistant.id, false);
+    }
     const sig = turnSig(turn, split);
     if (node.dataset.sig !== sig) {
       node.replaceWith(turnEl(turn, split));
+    } else if (turn.assistant?.steps?.length && !node.querySelector('.steps-card')) {
+      node.replaceWith(turnEl(turn, split));
+    } else if (turn.assistant && ui.workOpen.get(turn.assistant.id) === false) {
+      const work = thinkingWork(node);
+      if (work?.open) {
+        work.open = false;
+      }
     }
   }
   while (transcript.children.length > grouped.length) {
@@ -181,8 +209,12 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
     node.replaceWith(turnEl(turn, false));
     return;
   }
+  if (assistant.steps?.length && !col.querySelector('.steps-card')) {
+    node.replaceWith(turnEl(turn, false));
+    return;
+  }
   if (hasWork(assistant)) {
-    let work = col.querySelector('details.work') as HTMLDetailsElement | null;
+    let work = thinkingWork(col);
     if (!work) {
       work = workBlock(assistant);
       col.prepend(work);
@@ -207,7 +239,7 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
     if (!answer) {
       answer = document.createElement('div');
       answer.className = 'md answer';
-      const work = col.querySelector('details.work');
+      const work = thinkingWork(col);
       if (work) {
         work.after(answer);
       } else {
@@ -219,6 +251,8 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
     }
     col.querySelector('.pulse')?.remove();
   }
+  patchErrorCard(col, assistant);
+  patchStepsCard(col, assistant);
 }
 
 function patchWorkBody(body: HTMLElement | null, message: ChatMessage): void {
@@ -271,10 +305,8 @@ function patchWorkBody(body: HTMLElement | null, message: ChatMessage): void {
       row.dataset.kind = tool.kind;
     }
     const title = row.querySelector('.tool-title');
-    if (title) {
-      const kind = toolKindLabel(loc(), tool.kind);
-      const hint = tool.detail ? fileName(tool.detail) : tool.title;
-      title.textContent = `${toolIcon(tool.kind)} ${kind}${hint ? ` · ${hint}` : ''}`;
+    if (title instanceof HTMLElement) {
+      fillToolTitle(title, tool);
     }
   }
 }
@@ -449,6 +481,7 @@ function turnSig(turn: Turn, split: boolean): string {
     a?.error?.retrying ? 'r' : '',
     a?.error?.attempt ?? 0,
     ui.copiedId === a?.id ? 'c' : '',
+    stepsKey(a?.steps),
   ].join(':');
 }
 
@@ -540,6 +573,9 @@ function assistantColumn(message: ChatMessage): HTMLElement {
   if (message.error && !message.error.retrying) {
     el.append(turnErrorCard(message));
   }
+  if (message.steps?.length) {
+    el.append(stepsBlock(message));
+  }
   if (!message.streaming) {
     el.append(turnMeta(message));
     if (message.edits?.length) {
@@ -549,10 +585,50 @@ function assistantColumn(message: ChatMessage): HTMLElement {
   return el;
 }
 
+function patchErrorCard(col: HTMLElement, message: ChatMessage): void {
+  const existing = col.querySelector('.turn-error') as HTMLElement | null;
+  if (!message.error) {
+    existing?.remove();
+    return;
+  }
+  col.querySelector('.pulse')?.remove();
+  const next = turnErrorCard(message);
+  if (existing?.dataset.err === next.dataset.err) {
+    return;
+  }
+  if (existing) {
+    existing.replaceWith(next);
+    return;
+  }
+  const answer = col.querySelector('.md.answer');
+  if (answer) {
+    answer.after(next);
+    return;
+  }
+  const work = thinkingWork(col);
+  if (work) {
+    work.after(next);
+    return;
+  }
+  const later = col.querySelector('.steps-card, .turn-meta, .changes');
+  if (later) {
+    col.insertBefore(next, later);
+    return;
+  }
+  col.append(next);
+}
+
 function turnErrorCard(message: ChatMessage): HTMLElement {
   const error = message.error!;
   const el = document.createElement('div');
   el.className = error.retrying ? 'turn-error live' : 'turn-error';
+  el.dataset.err = [
+    error.retrying ? '1' : '0',
+    error.attempt ?? '',
+    error.maxAttempts ?? '',
+    error.code ?? '',
+    error.message,
+  ].join('|');
   const title = document.createElement('div');
   title.className = 'turn-error-title';
   title.textContent = error.retrying
@@ -574,6 +650,165 @@ function turnErrorCard(message: ChatMessage): HTMLElement {
 
 function hasWork(message: ChatMessage): boolean {
   return Boolean(message.thinking || message.plan || message.tools.length);
+}
+
+function thinkingWork(root: ParentNode): HTMLDetailsElement | null {
+  return root.querySelector('details.work');
+}
+
+function stepsKey(steps: PlanStep[] | undefined): string {
+  return (steps ?? []).map((step) => `${step.status}:${step.content}`).join('\n');
+}
+
+function stepsBlock(message: ChatMessage): HTMLElement {
+  const open = ui.stepsOpen.get(message.id) ?? true;
+  const el = document.createElement('section');
+  el.className = stepsCardClass(message, open);
+  el.dataset.mid = message.id;
+  el.dataset.open = open ? '1' : '0';
+  const head = document.createElement('header');
+  head.className = 'ask-head';
+  const brand = document.createElement('div');
+  brand.className = 'ask-brand';
+  const kicker = document.createElement('span');
+  kicker.className = 'ask-kicker';
+  kicker.textContent = tr('stepsTitle');
+  const preview = document.createElement('span');
+  preview.className = 'ask-preview';
+  preview.textContent = stepsPreview(message.steps ?? []);
+  brand.append(kicker, preview);
+  const tools = document.createElement('div');
+  tools.className = 'ask-head-tools';
+  const foldBtn = document.createElement('button');
+  foldBtn.type = 'button';
+  foldBtn.className = open ? 'icon-btn open' : 'icon-btn';
+  foldBtn.title = tr('stepsTitle');
+  foldBtn.innerHTML = iconChevron();
+  tools.append(foldBtn);
+  head.append(brand, tools);
+  head.addEventListener('click', () => toggleStepsOpen(el, message.id));
+  const list = document.createElement('div');
+  list.className = 'ask-actions steps-list';
+  fillStepRows(list, message.steps ?? [], Boolean(message.streaming));
+  el.append(head, list);
+  return el;
+}
+
+function stepsStopped(message: ChatMessage): boolean {
+  return Boolean(message.steps?.some((step) => step.status === 'abandoned'));
+}
+
+function stepsCardClass(message: ChatMessage, open: boolean): string {
+  return [
+    'ask-card',
+    'steps-card',
+    message.streaming ? 'live' : '',
+    stepsStopped(message) ? 'stopped' : '',
+    open ? 'open' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function toggleStepsOpen(el: HTMLElement, messageId: string): void {
+  const next = !el.classList.contains('open');
+  ui.stepsOpen.set(messageId, next);
+  el.classList.toggle('open', next);
+  el.dataset.open = next ? '1' : '0';
+  el.querySelector('.ask-head-tools .icon-btn')?.classList.toggle('open', next);
+}
+
+function patchStepsCard(col: HTMLElement, message: ChatMessage): void {
+  const existing = col.querySelector('.steps-card') as HTMLElement | null;
+  if (!message.steps?.length) {
+    existing?.remove();
+    return;
+  }
+  if (!existing) {
+    const card = stepsBlock(message);
+    const later = col.querySelector('.turn-meta, .changes');
+    if (later) {
+      col.insertBefore(card, later);
+    } else {
+      col.append(card);
+    }
+    return;
+  }
+  const open = ui.stepsOpen.get(message.id) ?? existing.classList.contains('open');
+  existing.className = stepsCardClass(message, open);
+  existing.dataset.open = open ? '1' : '0';
+  const preview = existing.querySelector('.ask-preview');
+  if (preview) {
+    preview.textContent = stepsPreview(message.steps);
+  }
+  existing.querySelector('.ask-head-tools .icon-btn')?.classList.toggle('open', open);
+  const list = existing.querySelector('.steps-list') as HTMLElement | null;
+  if (list) {
+    fillStepRows(list, message.steps, Boolean(message.streaming));
+  }
+}
+
+function fillStepRows(body: HTMLElement, steps: PlanStep[], streaming: boolean): void {
+  const key = `${streaming ? '1' : '0'}\n${stepsKey(steps)}`;
+  if (body.dataset.steps === key) {
+    return;
+  }
+  body.dataset.steps = key;
+  body.replaceChildren();
+  for (const step of steps) {
+    body.append(stepRow(step, streaming));
+  }
+}
+
+function stepRow(step: PlanStep, streaming: boolean): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'step-row';
+  row.dataset.status = step.status;
+  const icon = document.createElement('span');
+  const live = streaming && step.status === 'in_progress';
+  icon.className = `step-icon ${stepIconKind(step.status, live)}`;
+  icon.innerHTML = stepIcon(step.status, live);
+  const text = document.createElement('span');
+  text.className = 'step-text';
+  text.textContent = step.content;
+  row.append(icon, text);
+  return row;
+}
+
+function stepIconKind(status: PlanStep['status'], live: boolean): string {
+  if (status === 'completed') {
+    return 'ok';
+  }
+  if (status === 'failed') {
+    return 'fail';
+  }
+  if (live) {
+    return 'run';
+  }
+  return 'wait';
+}
+
+function stepIcon(status: PlanStep['status'], live: boolean): string {
+  if (status === 'completed') {
+    return iconCheck();
+  }
+  if (status === 'failed') {
+    return iconClose();
+  }
+  if (live) {
+    return iconEdit();
+  }
+  return iconClock();
+}
+
+function stepsPreview(steps: PlanStep[]): string {
+  const done = steps.filter((step) => step.status === 'completed' || step.status === 'failed').length;
+  const count = tr('stepsCount', { done, n: steps.length });
+  const running = steps.find((step) => step.status === 'in_progress');
+  if (running) {
+    return `${count} · ${running.content}`;
+  }
+  return count;
 }
 
 function workBlock(message: ChatMessage): HTMLDetailsElement {
@@ -657,8 +892,8 @@ function paintWorkLabels(): void {
 
 function workLabel(message: ChatMessage): string {
   const time = durationText(message);
-  if (message.streaming && !time) {
-    return tr('thinkingNow');
+  if (message.streaming) {
+    return time ? tr('elapsedLive', { time }) : tr('thinkingNow');
   }
   if (time) {
     return tr('elapsed', { time });
@@ -692,11 +927,9 @@ function toolRow(tool: ChatMessage['tools'][number]): HTMLElement {
   if (tool.kind) {
     el.dataset.kind = tool.kind;
   }
-  const kind = toolKindLabel(loc(), tool.kind);
-  const hint = tool.detail ? fileName(tool.detail) : tool.title;
   const title = document.createElement('div');
   title.className = 'tool-title';
-  title.textContent = `${toolIcon(tool.kind)} ${kind}${hint ? ` · ${hint}` : ''}`;
+  fillToolTitle(title, tool);
   el.append(title);
   if (tool.detail) {
     const detail = document.createElement('button');
@@ -707,6 +940,26 @@ function toolRow(tool: ChatMessage['tools'][number]): HTMLElement {
     el.append(detail);
   }
   return el;
+}
+
+function fillToolTitle(title: HTMLElement, tool: ChatMessage['tools'][number]): void {
+  const kind = toolKindLabel(loc(), tool.kind);
+  const hint = tool.detail ? fileName(tool.detail) : tool.title;
+  const icon = document.createElement('span');
+  icon.className = 'tool-icon';
+  if (tool.kind) {
+    icon.dataset.kind = tool.kind;
+  }
+  const glyph = toolIcon(tool.kind);
+  if (glyph.startsWith('<svg')) {
+    icon.innerHTML = glyph;
+  } else {
+    icon.textContent = glyph;
+  }
+  const copy = document.createElement('span');
+  copy.className = 'tool-copy';
+  copy.textContent = `${kind}${hint ? ` · ${hint}` : ''}`;
+  title.replaceChildren(icon, copy);
 }
 
 function imageGallery(images: ChatMessage['images']): HTMLElement {
@@ -767,13 +1020,11 @@ function turnMeta(message: ChatMessage): HTMLElement {
   fork.innerHTML = iconFork();
   fork.addEventListener('click', () => post({ type: 'runSlash', command: 'fork' }));
   el.append(copy, fork);
-  const stamp =
-    ui.state.timestamps === false
-      ? ''
-      : formatClock(loc(), message.endedAt ?? message.createdAt);
+  const stamp = turnSourceText(loc(), message, ui.state.timestamps !== false);
   if (stamp) {
     const time = document.createElement('span');
     time.className = 'turn-time';
+    time.title = stamp;
     time.textContent = stamp;
     el.append(time);
   }

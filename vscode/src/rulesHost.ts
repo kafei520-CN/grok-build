@@ -5,6 +5,16 @@ import type { RuleItem } from './types';
 
 const DISABLED = '.disabled';
 
+/** Named instruction files Grok loads from ~/.claude and ~/.cursor. */
+export const COMPAT_NAMED_RULES = [
+  'AGENTS.md',
+  'Agents.md',
+  'AGENT.md',
+  'Claude.md',
+  'CLAUDE.md',
+  'CLAUDE.local.md',
+];
+
 export function parseRuleFileName(fileName: string): { name: string; enabled: boolean } | undefined {
   if (fileName.endsWith(`.md${DISABLED}`)) {
     return { name: fileName.slice(0, -(3 + DISABLED.length)), enabled: false };
@@ -30,12 +40,12 @@ export function projectRulesDir(): string | undefined {
 }
 
 export async function listRules(): Promise<RuleItem[]> {
-  const globalDir = globalRulesDir();
-  const rows = await collectRules(globalDir, 'global');
-  const seen = new Set(rows.map((row) => normalizeDir(row.filePath)));
-  const projectDir = projectRulesDir();
-  if (projectDir && !sameFsPath(projectDir, globalDir, plat().os())) {
-    for (const row of await collectRules(projectDir, 'project')) {
+  const home = plat().homeDir();
+  const workspace = plat().workspaceFolders()[0];
+  const rows: RuleItem[] = [];
+  const seen = new Set<string>();
+  const add = async (batch: Promise<RuleItem[]>) => {
+    for (const row of await batch) {
       const key = normalizeDir(row.filePath);
       if (seen.has(key)) {
         continue;
@@ -43,6 +53,22 @@ export async function listRules(): Promise<RuleItem[]> {
       seen.add(key);
       rows.push(row);
     }
+  };
+  await add(collectRules(globalRulesDir(), 'global', 'grok'));
+  const projectDir = projectRulesDir();
+  if (projectDir && !sameFsPath(projectDir, globalRulesDir(), plat().os())) {
+    await add(collectRules(projectDir, 'project', 'grok'));
+  }
+  await add(collectNamed(path.join(home, '.claude'), 'global', 'claude'));
+  await add(collectRules(path.join(home, '.claude', 'rules'), 'global', 'claude'));
+  await add(collectNamed(path.join(home, '.cursor'), 'global', 'cursor'));
+  await add(collectRules(path.join(home, '.cursor', 'rules'), 'global', 'cursor'));
+  if (workspace) {
+    await add(collectNamed(path.join(workspace, '.claude'), 'project', 'claude'));
+    await add(collectRules(path.join(workspace, '.claude', 'rules'), 'project', 'claude'));
+    await add(collectNamed(path.join(workspace, '.cursor'), 'project', 'cursor'));
+    await add(collectRules(path.join(workspace, '.cursor', 'rules'), 'project', 'cursor'));
+    await add(collectNamed(workspace, 'project', 'grok'));
   }
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -74,8 +100,17 @@ export async function deleteRule(filePath: string): Promise<void> {
   await plat().deleteFile(filePath, true);
 }
 
-async function collectRules(dir: string, scope: RuleItem['scope']): Promise<RuleItem[]> {
-  const names = await plat().readDir(dir);
+async function collectRules(
+  dir: string,
+  scope: RuleItem['scope'],
+  origin: NonNullable<RuleItem['origin']>,
+): Promise<RuleItem[]> {
+  let names: string[];
+  try {
+    names = await plat().readDir(dir);
+  } catch {
+    return [];
+  }
   const rows: RuleItem[] = [];
   for (const fileName of names) {
     const parsed = parseRuleFileName(fileName);
@@ -88,6 +123,44 @@ async function collectRules(dir: string, scope: RuleItem['scope']): Promise<Rule
       name: parsed.name,
       filePath,
       scope,
+      origin,
+      enabled: parsed.enabled,
+    });
+  }
+  return rows;
+}
+
+async function collectNamed(
+  dir: string,
+  scope: RuleItem['scope'],
+  origin: NonNullable<RuleItem['origin']>,
+): Promise<RuleItem[]> {
+  let names: string[];
+  try {
+    names = await plat().readDir(dir);
+  } catch {
+    return [];
+  }
+  const allow = new Set(COMPAT_NAMED_RULES.map((item) => item.toLowerCase()));
+  const seen = new Set<string>();
+  const rows: RuleItem[] = [];
+  for (const fileName of names) {
+    const parsed = parseRuleFileName(fileName);
+    if (!parsed) {
+      continue;
+    }
+    const live = parsed.enabled ? fileName : fileName.slice(0, -DISABLED.length);
+    const key = live.toLowerCase();
+    if (!allow.has(key) || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    rows.push({
+      id: path.join(dir, fileName),
+      name: live,
+      filePath: path.join(dir, fileName),
+      scope,
+      origin,
       enabled: parsed.enabled,
     });
   }

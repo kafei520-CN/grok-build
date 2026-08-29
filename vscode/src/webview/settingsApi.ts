@@ -2,12 +2,6 @@ import type { ApiBackend, ApiEndpoint } from '../types';
 import { post, tr, ui } from './app';
 import { iconChevron } from './icons';
 
-let editingId: string | undefined;
-
-export function apiEditStamp(): string {
-  return editingId ?? '';
-}
-
 export function apisNavRow(): HTMLElement {
   const row = document.createElement('button');
   row.type = 'button';
@@ -33,10 +27,17 @@ export function apisNavRow(): HTMLElement {
 export function mountApisBody(): HTMLElement {
   const body = document.createElement('div');
   body.className = 'settings-body';
+  const actions = document.createElement('div');
+  actions.className = 'settings-actions';
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'btn primary';
+  add.textContent = tr('settingsApisAdd');
+  add.addEventListener('click', () => post({ type: 'openApiForm' }));
+  actions.append(add);
   const hint = document.createElement('div');
   hint.className = 'settings-hint';
   hint.textContent = tr('settingsApisHint');
-  const form = endpointForm();
   const card = document.createElement('div');
   card.className = 'settings-card';
   const apis = ui.state.apis ?? [];
@@ -50,27 +51,44 @@ export function mountApisBody(): HTMLElement {
       card.append(endpointRow(item));
     }
   }
-  body.append(hint, form, card);
+  body.append(actions, hint, card);
   return body;
 }
 
+export function mountApiFormBody(): HTMLElement {
+  const body = document.createElement('div');
+  body.className = 'settings-body';
+  body.append(endpointForm());
+  return body;
+}
+
+function editingId(): string | undefined {
+  return ui.state.apiEditId;
+}
+
 function endpointForm(): HTMLElement {
+  const currentId = editingId();
   const wrap = document.createElement('div');
   wrap.className = 'settings-card api-form';
   const title = document.createElement('div');
   title.className = 'settings-label';
   title.dataset.apiTitle = '1';
-  title.textContent = editingId ? tr('settingsApisEdit') : tr('settingsApisAdd');
+  title.textContent = currentId ? tr('settingsApisEdit') : tr('settingsApisAdd');
   const name = field(tr('settingsApisName'), 'text', 'api-name');
   const model = field(tr('settingsApisModel'), 'text', 'api-model');
   const url = field(tr('settingsApisUrl'), 'text', 'api-url');
-  url.querySelector('input')!.placeholder = 'https://api.example.com/v1';
+  const urlInput = url.querySelector('input') as HTMLInputElement;
+  urlInput.placeholder = 'https://api.example.com/v1';
   const urlHint = document.createElement('div');
   urlHint.className = 'settings-hint';
-  urlHint.textContent = tr('settingsApisUrlHint');
-  url.append(urlHint);
+  const urlPreview = document.createElement('div');
+  urlPreview.className = 'settings-hint';
+  const urlWarn = document.createElement('div');
+  urlWarn.className = 'settings-hint warn';
+  urlWarn.hidden = true;
+  url.append(urlHint, urlPreview, urlWarn);
   const key = field(tr('settingsApisKey'), 'password', 'api-key');
-  key.querySelector('input')!.placeholder = editingId ? tr('settingsApisKeyKeep') : '';
+  key.querySelector('input')!.placeholder = currentId ? tr('settingsApisKeyKeep') : '';
   const proto = document.createElement('div');
   proto.className = 'settings-row stack';
   const protoLabel = document.createElement('div');
@@ -84,6 +102,17 @@ function endpointForm(): HTMLElement {
     ['responses', tr('settingsApisResponses')],
     ['messages', tr('settingsApisMessages')],
   ];
+  const refreshUrlHelp = () => {
+    const backend = (seg.dataset.apiBackend as ApiBackend) || 'chat_completions';
+    const value = urlInput.value.trim();
+    urlHint.textContent =
+      backend === 'messages' ? tr('settingsApisUrlHintMessages') : tr('settingsApisUrlHint');
+    const preview = requestPreview(value, backend);
+    urlPreview.textContent = preview ? tr('settingsApisUrlPreview', { url: preview }) : '';
+    const warn = backend === 'messages' && Boolean(value) && messagesBareHost(value);
+    urlWarn.textContent = warn ? tr('settingsApisMessagesUrlWarn') : '';
+    urlWarn.hidden = !warn;
+  };
   for (const [id, label] of backends) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -97,10 +126,12 @@ function endpointForm(): HTMLElement {
       for (const child of [...seg.children]) {
         child.classList.toggle('on', (child as HTMLElement).dataset.id === id);
       }
+      refreshUrlHelp();
     });
     seg.append(btn);
   }
   proto.append(protoLabel, seg);
+  urlInput.addEventListener('input', refreshUrlHelp);
   const actions = document.createElement('div');
   actions.className = 'settings-actions';
   const save = document.createElement('button');
@@ -115,29 +146,26 @@ function endpointForm(): HTMLElement {
     if (!nameVal || !modelVal || !urlVal) {
       return;
     }
+    const id = editingId();
     post({
       type: 'saveApi',
-      id: editingId,
+      ...(id ? { id } : {}),
       name: nameVal,
       model: modelVal,
       baseUrl: urlVal,
       backend: (seg.dataset.apiBackend as ApiBackend) || 'chat_completions',
       apiKey: keyVal.trim() ? keyVal : undefined,
     });
-    editingId = undefined;
   });
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.className = 'btn';
   cancel.textContent = tr('settingsApisCancel');
-  cancel.addEventListener('click', () => {
-    editingId = undefined;
-    post({ type: 'openApis' });
-  });
+  cancel.addEventListener('click', () => post({ type: 'closeApiForm' }));
   actions.append(save, cancel);
   wrap.append(title, name, model, proto, url, key, actions);
-  if (editingId) {
-    const current = (ui.state.apis ?? []).find((item) => item.id === editingId);
+  if (currentId) {
+    const current = (ui.state.apis ?? []).find((item) => item.id === currentId);
     if (current) {
       (name.querySelector('input') as HTMLInputElement).value = current.name;
       (model.querySelector('input') as HTMLInputElement).value = current.model;
@@ -148,7 +176,31 @@ function endpointForm(): HTMLElement {
       }
     }
   }
+  refreshUrlHelp();
   return wrap;
+}
+
+function requestPreview(raw: string, backend: ApiBackend): string {
+  const base = raw.trim().replace(/\/+$/, '');
+  if (!base) {
+    return '';
+  }
+  const path =
+    backend === 'messages'
+      ? 'messages'
+      : backend === 'responses'
+        ? 'responses'
+        : 'chat/completions';
+  return `${base}/${path}`;
+}
+
+function messagesBareHost(raw: string): boolean {
+  try {
+    const parsed = new URL(raw.trim());
+    return (parsed.pathname.replace(/\/+$/, '') || '/') === '/';
+  } catch {
+    return false;
+  }
 }
 
 function endpointRow(item: ApiEndpoint): HTMLElement {
@@ -168,11 +220,24 @@ function endpointRow(item: ApiEndpoint): HTMLElement {
       : item.backend === 'responses'
         ? tr('settingsApisResponses')
         : tr('settingsApisChat');
-  hint.textContent = `${proto} · ${item.model} · ${item.baseUrl}${item.hasKey ? ` · ${tr('settingsApisHasKey')}` : ''}`;
+  const state = item.enabled ? tr('settingsApisOn') : tr('settingsApisOff');
+  hint.textContent = `${state} · ${proto} · ${item.model} · ${item.baseUrl}${item.hasKey ? ` · ${tr('settingsApisHasKey')}` : ''}`;
   copy.append(name, hint);
-  copy.addEventListener('click', () => {
-    editingId = item.id;
-    post({ type: 'openApis' });
+  copy.addEventListener('click', () => post({ type: 'openApiForm', id: item.id }));
+  const tools = document.createElement('div');
+  tools.className = 'rule-tools';
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = item.enabled ? 'switch on' : 'switch';
+  toggle.setAttribute('role', 'switch');
+  toggle.setAttribute('aria-checked', item.enabled ? 'true' : 'false');
+  toggle.title = item.enabled ? tr('settingsApisOn') : tr('settingsApisOff');
+  const knob = document.createElement('span');
+  knob.className = 'knob';
+  toggle.append(knob);
+  toggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    post({ type: 'toggleApi', id: item.id });
   });
   const del = document.createElement('button');
   del.type = 'button';
@@ -182,7 +247,8 @@ function endpointRow(item: ApiEndpoint): HTMLElement {
     event.stopPropagation();
     post({ type: 'deleteApi', id: item.id });
   });
-  row.append(copy, del);
+  tools.append(toggle, del);
+  row.append(copy, tools);
   return row;
 }
 

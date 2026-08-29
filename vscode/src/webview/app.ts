@@ -36,6 +36,7 @@ export const ui = {
   copiedId: undefined as string | undefined,
   copiedTimer: undefined as ReturnType<typeof setTimeout> | undefined,
   workOpen: new Map<string, boolean>(),
+  stepsOpen: new Map<string, boolean>(),
   sessionGroupOpen: new Map<string, boolean>(),
   permissionOpen: new Map<string, boolean>(),
   askOpen: new Map<string, boolean>(),

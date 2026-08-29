@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { parseSessionUpdate } from './agent';
 import {
   applySessionUpdate,
   captureModels,
   finalizeReplayTimes,
+  freezeTurnSteps,
   isoFromMs,
   mergeModelCatalog,
   modelsFromResult,
+  parsePlanEntries,
   stampTimes,
+  stampTurnModel,
   type SessionView,
 } from './sessionUpdates';
 import type { ChatMessage } from './types';
@@ -67,6 +71,35 @@ describe('session replay times', () => {
     assert.equal(assistant.streaming, false);
     assert.equal(assistant.createdAt, new Date(1_700_000_000_000).toISOString());
     assert.equal(assistant.endedAt, new Date(1_700_000_002_500).toISOString());
+  });
+
+  it('stamps the current model onto a new assistant turn', () => {
+    const session = view({
+      replaying: false,
+      models: {
+        currentId: 'endpoint-2',
+        available: [
+          {
+            id: 'endpoint-2',
+            name: '[Hu]Claude-Opus-5',
+            currentEffort: 'xhigh',
+            efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+          },
+        ],
+      },
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: '你好' },
+    });
+    assert.equal(session.messages[0]?.modelId, 'endpoint-2');
+    assert.equal(session.messages[0]?.modelName, '[Hu]Claude-Opus-5');
+    assert.equal(session.messages[0]?.effort, 'xhigh');
+    stampTurnModel(session.messages[0]!, {
+      currentId: 'grok-4.6',
+      available: [{ id: 'grok-4.6', name: 'Grok 4.6', currentEffort: 'high' }],
+    });
+    assert.equal(session.messages[0]?.modelId, 'endpoint-2');
   });
 
   it('fills missing endedAt after replay', () => {
@@ -154,6 +187,137 @@ describe('model catalog', () => {
     assert.equal(next?.available.length, 2);
     assert.equal(next?.available[0].currentEffort, 'xhigh');
     assert.deepEqual(next?.available[0].efforts, ['high', 'xhigh']);
+  });
+});
+
+describe('plan steps', () => {
+  it('parses ACP plan entries and statuses', () => {
+    const steps = parsePlanEntries([
+      { content: 'Wait', status: 'pending' },
+      { content: 'Edit files', status: 'in_progress' },
+      { content: 'Done', status: 'completed' },
+      { content: 'Broke', status: 'failed' },
+      { content: 'Dropped', status: 'completed', meta: { cancelled: true } },
+    ]);
+    assert.deepEqual(
+      steps?.map((step) => `${step.status}:${step.content}`),
+      [
+        'pending:Wait',
+        'in_progress:Edit files',
+        'completed:Done',
+        'failed:Broke',
+        'failed:Dropped',
+      ],
+    );
+  });
+
+  it('replaces the live assistant step card from plan updates', () => {
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'One', status: 'in_progress' },
+        { content: 'Two', status: 'pending' },
+      ],
+    });
+    assert.equal(session.messages[0]?.steps?.length, 2);
+    assert.equal(session.messages[0]?.steps?.[0]?.status, 'in_progress');
+    applySessionUpdate(session, {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'One', status: 'completed' },
+        { content: 'Two', status: 'in_progress' },
+      ],
+    });
+    assert.equal(session.messages[0]?.steps?.[0]?.status, 'completed');
+    assert.equal(session.messages[0]?.steps?.[1]?.status, 'in_progress');
+  });
+
+  it('builds the step card from todo_write tool output', () => {
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'todo-1',
+      title: 'todo_write',
+      kind: 'plan',
+      status: 'in_progress',
+      rawInput: {
+        merge: false,
+        todos: [
+          { content: 'Fold the card', status: 'in_progress' },
+          { content: 'Show the red X', status: 'pending' },
+        ],
+      },
+    });
+    assert.equal(session.messages[0]?.tools.length, 0);
+    assert.equal(session.messages[0]?.steps?.length, 2);
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'todo-1',
+      title: 'todo_write',
+      kind: 'plan',
+      status: 'completed',
+      rawOutput: {
+        type: 'Todo',
+        TodosUpdated: {
+          todos: [
+            { content: 'Fold the card', status: 'completed' },
+            { content: 'Show the red X', status: 'cancelled' },
+          ],
+        },
+      },
+    });
+    assert.equal(session.messages[0]?.steps?.[0]?.status, 'completed');
+    assert.equal(session.messages[0]?.steps?.[1]?.status, 'failed');
+  });
+
+  it('reads live todo_write rawInput as plan entries', () => {
+    const parsed = parseSessionUpdate({
+      sessionId: 's',
+      update: {
+        sessionUpdate: 'tool_call',
+        title: 'todo_write',
+        rawInput: {
+          todos: [{ content: 'Insert live', status: 'in_progress' }],
+        },
+      },
+    });
+    assert.equal(parsed.update.sessionUpdate, 'tool_call');
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, parsed.update);
+    assert.equal(session.messages[0]?.steps?.[0]?.content, 'Insert live');
+    assert.equal(session.messages[0]?.steps?.[0]?.status, 'in_progress');
+  });
+
+  it('keeps the step card and mutes leftover items when the turn stops', () => {
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'Done', status: 'completed' },
+        { content: 'Running', status: 'in_progress' },
+        { content: 'Waiting', status: 'pending' },
+      ],
+    });
+    const assistant = session.messages[0];
+    assistant.streaming = false;
+    freezeTurnSteps(assistant);
+    assert.equal(assistant.steps?.length, 3);
+    assert.deepEqual(
+      assistant.steps?.map((step) => `${step.status}:${step.content}`),
+      ['completed:Done', 'abandoned:Running', 'abandoned:Waiting'],
+    );
+    applySessionUpdate(session, {
+      sessionUpdate: 'plan',
+      entries: [
+        { content: 'Done', status: 'completed' },
+        { content: 'Running', status: 'completed' },
+        { content: 'Waiting', status: 'completed' },
+      ],
+    });
+    assert.equal(assistant.steps?.[1]?.status, 'abandoned');
+    applySessionUpdate(session, { sessionUpdate: 'plan', entries: [] });
+    assert.equal(assistant.steps?.length, 3);
   });
 });
 

@@ -548,15 +548,18 @@ textarea:focus-visible {
 
 .tool-row[data-kind='execute'],
 .tool-row[data-kind='terminal'] {
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--warn) 80%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ice) 55%, transparent);
 }
 
-.tool-row.completed {
+.tool-row.completed:not(.failed) {
   opacity: 0.88;
 }
 
-.tool-row.failed {
+.tool-row.failed,
+.tool-row.failed[data-kind] {
   box-shadow: inset 2px 0 0 var(--error);
+  border-color: color-mix(in srgb, var(--error) 38%, var(--line));
+  background: color-mix(in srgb, var(--error) 8%, var(--elev));
 }
 
 .tool-row.in_progress,
@@ -565,10 +568,38 @@ textarea:focus-visible {
 }
 
 .tool-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
+  min-width: 0;
+}
+
+.tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  line-height: 1;
+}
+
+.tool-icon[data-kind='read'] {
+  width: 15px;
+  height: 15px;
+}
+
+.tool-icon[data-kind='search'] {
+  width: 18px;
+  height: 18px;
+}
+
+.tool-copy {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .tool-detail {
@@ -627,6 +658,10 @@ textarea:focus-visible {
 
 .turn-time {
   letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .md {
@@ -1600,7 +1635,117 @@ textarea:focus-visible {
 
 .changes-diff .del,
 .change-stat .del {
-  color: #f85149;
+  color: var(--error, #f85149);
+}
+
+.steps-card {
+  margin: 0;
+  overflow: hidden;
+}
+
+.steps-card .ask-head {
+  cursor: pointer;
+  user-select: none;
+  border-radius: 13px 13px 0 0;
+}
+
+.steps-card:not(.open) .ask-head {
+  border-bottom: none;
+  border-radius: 13px;
+}
+
+.steps-card:not(.open) .steps-list {
+  display: none;
+}
+
+.steps-card.stopped .ask-kicker,
+.steps-card.stopped .ask-preview {
+  color: var(--muted);
+}
+
+.step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  background: var(--elev);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.step-row[data-status='completed'] {
+  opacity: 0.88;
+}
+
+.step-row[data-status='failed'] {
+  border-color: color-mix(in srgb, var(--error) 32%, var(--line));
+  background: color-mix(in srgb, var(--error) 8%, var(--elev));
+}
+
+.step-row[data-status='in_progress'] {
+  border-color: color-mix(in srgb, var(--ice) 40%, var(--line));
+}
+
+.step-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.step-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.step-icon.ok {
+  color: var(--ok);
+}
+
+.step-icon.fail {
+  color: var(--error);
+}
+
+.step-icon.run {
+  color: var(--ice);
+}
+
+.steps-card.live .step-icon.run svg {
+  animation: star-pulse 1.2s ease-in-out infinite;
+}
+
+.step-row[data-status='abandoned'] {
+  opacity: 0.55;
+}
+
+.step-row[data-status='abandoned'] .step-text,
+.step-row[data-status='abandoned'] .step-icon {
+  color: var(--muted);
+}
+
+.step-icon.wait {
+  color: var(--muted);
+}
+
+.step-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.step-row[data-status='pending'] .step-text {
+  color: var(--muted);
+}
+
+.step-row[data-status='failed'] .step-text {
+  color: var(--error);
 }
 
 .text-btn {
@@ -2257,6 +2402,10 @@ kbd {
   color: var(--muted);
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.settings-hint.warn {
+  color: var(--warn);
 }
 
 .settings-seg {

@@ -83,7 +83,7 @@ export const EN = {
   settingsLogout: 'Sign out',
   settingsApiKey: 'API key',
   settingsApis: 'API manager',
-  settingsApisHint: 'Custom OpenAI / Anthropic compatible endpoints in ~/.grok/config.toml. The model picker updates without restarting.',
+  settingsApisHint: 'Add as many OpenAI / Anthropic compatible endpoints as you want. Toggle one off to unload it without deleting. Grok does not add /v1 for you.',
   settingsApisCount: '{n} endpoints',
   settingsApisEmpty: 'No custom endpoints yet.',
   settingsApisAdd: 'Add endpoint',
@@ -91,7 +91,10 @@ export const EN = {
   settingsApisName: 'Display name',
   settingsApisModel: 'Model ID',
   settingsApisUrl: 'Base URL',
-  settingsApisUrlHint: 'API root such as https://api.example.com/v1 — not the website, and not /chat/completions.',
+  settingsApisUrlHint: 'API root only. Include /v1 yourself when the provider needs it, e.g. https://api.example.com/v1. Do not append /chat/completions, /responses, or /messages.',
+  settingsApisUrlHintMessages: 'Anthropic Messages. Grok appends /messages, so Claude-compatible hosts need /v1 in the base URL, e.g. https://api.example.com/v1.',
+  settingsApisUrlPreview: 'Grok will POST {url}',
+  settingsApisMessagesUrlWarn: 'This host has no path. Grok will call /messages, not /v1/messages. Add /v1 if the provider uses it.',
   settingsApisKey: 'API key',
   settingsApisKeyKeep: 'Leave blank to keep the current key',
   settingsApisProtocol: 'Protocol',
@@ -104,6 +107,11 @@ export const EN = {
   settingsApisDeleteConfirm: 'Delete endpoint {name}?',
   settingsApisSaved: 'Saved. The model picker will update shortly.',
   settingsApisHasKey: 'key saved',
+  settingsApisOn: 'Enabled',
+  settingsApisOff: 'Disabled',
+  settingsApisUrlInvalid: 'Enter an http(s) API root. Include /v1 yourself if the provider uses it.',
+  settingsApisReloadFailed: 'The agent did not reload models. The new endpoint was turned off so the session can recover.',
+  settingsApisQuarantined: 'Endpoint {name} was turned off because it broke the agent.',
   settingsRestart: 'Restart agent',
   settingsRestartHint: 'CLI path and workspace binary apply after restart.',
   settingsMcps: 'MCP servers',
@@ -141,18 +149,22 @@ export const EN = {
   settingsPersonasImported: 'Imported {n} persona(s).',
   settingsPersonasTab: 'Personas',
   settingsRules: 'Rules',
-  settingsRulesHint: 'Import markdown or text files into ~/.grok/rules. Grok loads enabled .md files.',
+  settingsRulesHint: 'Grok also loads ~/.claude/Claude.md and ~/.cursor instruction files. Disable those here if a closed ~/.grok/rules file still applies.',
   settingsRulesCount: '{n} rules',
   settingsRulesBack: 'Back',
   settingsRulesImport: 'Import .md / .txt',
   settingsRulesEmpty: 'No rules yet. Import a markdown or text file.',
   settingsRulesGlobal: 'Global · ~/.grok/rules',
   settingsRulesProject: 'Project · .grok/rules',
+  settingsRulesClaude: 'Claude · ~/.claude',
+  settingsRulesCursor: 'Cursor · ~/.cursor',
+  settingsRulesClaudeProject: 'Project · .claude',
+  settingsRulesCursorProject: 'Project · .cursor',
   settingsRulesOn: 'Enabled',
   settingsRulesOff: 'Disabled',
   settingsRulesDelete: 'Delete',
   settingsRulesDeleteConfirm: 'Delete rule {name}?',
-  settingsRulesImported: 'Imported {n} rule(s). Restart the agent to apply.',
+  settingsRulesImported: 'Imported {n} rule(s).',
   settingsSkills: 'Skills',
   settingsSkillsHint: 'Import a zip or folder with SKILL.md into ~/.grok/skills.',
   settingsSkillsCount: '{n} skills',
@@ -243,6 +255,8 @@ export const EN = {
   tasksRunning: 'Running',
   tasksDone: 'Done',
   planEmpty: 'No plan in this session yet. Use /plan first.',
+  stepsTitle: 'Steps',
+  stepsCount: '{done}/{n}',
   dashboardApply: 'Apply',
   askTitle: 'Grok has a question',
   askOther: 'Other',
@@ -271,7 +285,10 @@ export const EN = {
   sessionsDeleteConfirm: 'Delete session {name}?',
   sessionsRenamed: 'Renamed to {name}.',
   forkFailed: 'Could not fork this session.',
+  compacting: 'Compacting context…',
   compactDone: 'Compacted conversation history.',
+  compactFailed: 'Could not compact context',
+  compactBusy: 'Wait for the current reply to finish.',
   rewindEmpty: 'No rewind points in this session.',
   rewindPick: 'Rewind to turn',
   queued: 'Queued: {n}',
@@ -338,6 +355,7 @@ export const EN = {
   thinking: 'Thinking',
   thinkingNow: 'Thinking…',
   elapsed: 'Took {time}',
+  elapsedLive: 'Elapsed {time}',
   copy: 'Copy',
   copied: 'Copied',
   working: 'Working',
@@ -387,6 +405,7 @@ export const EN = {
   timeHours: '{n}h',
   timeDays: '{n}d',
   effortXhigh: 'Extra high',
+  effortMax: 'Max',
   effortHigh: 'High',
   effortMedium: 'Medium',
   effortLow: 'Low',
@@ -467,7 +486,7 @@ export const ZH: Record<StringKey, string> = {
   settingsLogout: '退出登录',
   settingsApiKey: 'API 密钥',
   settingsApis: 'API 管理',
-  settingsApisHint: '自定义 OpenAI / Anthropic 兼容端点，写入 ~/.grok/config.toml。模型列表会自动刷新，无需重启。',
+  settingsApisHint: '可以添加多个 OpenAI / Anthropic 兼容端点，用开关启用或停用，停用不会删除。需要 /v1 时请自己写在地址里，插件不会自动加。',
   settingsApisCount: '{n} 个端点',
   settingsApisEmpty: '还没有自定义端点。',
   settingsApisAdd: '添加端点',
@@ -475,7 +494,10 @@ export const ZH: Record<StringKey, string> = {
   settingsApisName: '显示名',
   settingsApisModel: '请求模型 ID',
   settingsApisUrl: 'Base URL',
-  settingsApisUrlHint: '填写接口根地址，例如 https://api.example.com/v1。不要填网站首页，也不要带 /chat/completions。',
+  settingsApisUrlHint: '只填接口根地址。需要 /v1 时请自己加上，例如 https://api.example.com/v1。不要带 /chat/completions、/responses 或 /messages。',
+  settingsApisUrlHintMessages: 'Messages 是 Anthropic 协议。Grok 会在地址后追加 /messages，所以 Claude 兼容接口要把 /v1 写进 Base URL，例如 https://api.example.com/v1。',
+  settingsApisUrlPreview: '实际请求：{url}',
+  settingsApisMessagesUrlWarn: '当前地址没有路径。Grok 会请求 /messages，而不是 /v1/messages。如果服务商走 Anthropic 协议，请补上 /v1。',
   settingsApisKey: 'API Key',
   settingsApisKeyKeep: '留空则保留原密钥',
   settingsApisProtocol: '请求协议',
@@ -488,6 +510,11 @@ export const ZH: Record<StringKey, string> = {
   settingsApisDeleteConfirm: '删除端点 {name}？',
   settingsApisSaved: '已保存。模型列表即将自动更新。',
   settingsApisHasKey: '已保存密钥',
+  settingsApisOn: '已启用',
+  settingsApisOff: '已停用',
+  settingsApisUrlInvalid: '请填写 http(s) 接口根地址。需要 /v1 时请自己加上。',
+  settingsApisReloadFailed: '模型列表刷新失败，已关闭该端点以免卡住代理。',
+  settingsApisQuarantined: '端点 {name} 导致代理异常，已自动关闭。',
   settingsRestart: '重启 Agent',
   settingsRestartHint: 'CLI 路径和仓库内二进制会在重启后生效。',
   settingsMcps: 'MCP 服务器',
@@ -525,18 +552,22 @@ export const ZH: Record<StringKey, string> = {
   settingsPersonasImported: '已导入 {n} 个 Persona。',
   settingsPersonasTab: 'Personas',
   settingsRules: '规则',
-  settingsRulesHint: '导入 Markdown 或文本文件到 ~/.grok/rules。Grok 会加载已启用的 .md。',
+  settingsRulesHint: 'Grok 默认还会读取 ~/.claude/Claude.md 和 Cursor 指令文件。若 ~/.grok/rules 已关闭仍生效，请在这里关掉对应副本。',
   settingsRulesCount: '{n} 条规则',
   settingsRulesBack: '返回',
   settingsRulesImport: '导入 .md / .txt',
   settingsRulesEmpty: '还没有规则。导入 markdown 或 txt 文件即可。',
   settingsRulesGlobal: '全局 · ~/.grok/rules',
   settingsRulesProject: '项目 · .grok/rules',
+  settingsRulesClaude: 'Claude · ~/.claude',
+  settingsRulesCursor: 'Cursor · ~/.cursor',
+  settingsRulesClaudeProject: '项目 · .claude',
+  settingsRulesCursorProject: '项目 · .cursor',
   settingsRulesOn: '已启用',
   settingsRulesOff: '已停用',
   settingsRulesDelete: '删除',
   settingsRulesDeleteConfirm: '删除规则 {name}？',
-  settingsRulesImported: '已导入 {n} 条规则。重启 Agent 后生效。',
+  settingsRulesImported: '已导入 {n} 条规则。',
   settingsSkills: '技能',
   settingsSkillsHint: '把带 SKILL.md 的 zip 或文件夹导入到 ~/.grok/skills。',
   settingsSkillsCount: '{n} 个 skill',
@@ -619,7 +650,7 @@ export const ZH: Record<StringKey, string> = {
   settingsMemoryWorkspace: '工作区',
   settingsMemoryFlush: 'Flush 会话',
   settingsMemoryFlushed: '已把会话知识写入记忆。',
-  settingsMemoryNeedSession: '先开始一场对话，再 flush 记忆。',
+  settingsMemoryNeedSession: '先开始一场对话，再 flush 记��。',
   drawerTasks: '任务',
   drawerPlan: '计划',
   tasksEmpty: '当前会话没有后台任务。',
@@ -627,6 +658,8 @@ export const ZH: Record<StringKey, string> = {
   tasksRunning: '运行中',
   tasksDone: '已结束',
   planEmpty: '这个会话还没有计划。先用 /plan。',
+  stepsTitle: '步骤',
+  stepsCount: '{done}/{n}',
   dashboardApply: '合回',
   askTitle: 'Grok 想确认一下',
   askOther: '其他',
@@ -655,7 +688,10 @@ export const ZH: Record<StringKey, string> = {
   sessionsDeleteConfirm: '删除会话 {name}？',
   sessionsRenamed: '已重命名为 {name}。',
   forkFailed: '无法分叉此会话。',
+  compacting: '正在压缩上下文…',
   compactDone: '已压缩对话历史。',
+  compactFailed: '压缩上下文失败',
+  compactBusy: '请等当前回复结束后再压缩。',
   rewindEmpty: '当前会话没有可回退的回合。',
   rewindPick: '回退到回合',
   queued: '已排队：{n}',
@@ -718,6 +754,7 @@ export const ZH: Record<StringKey, string> = {
   thinking: '思考',
   thinkingNow: '思考中…',
   elapsed: '用时 {time}',
+  elapsedLive: '已用时 {time}',
   copy: '复制',
   copied: '已复制',
   working: '正在处理',
@@ -767,6 +804,7 @@ export const ZH: Record<StringKey, string> = {
   timeHours: '{n} 小时',
   timeDays: '{n} 天',
   effortXhigh: '极高',
+  effortMax: '最强',
   effortHigh: '高',
   effortMedium: '中',
   effortLow: '低',
@@ -867,6 +905,8 @@ export function formatRelativeTime(
 
 export function effortLabel(locale: UiLocale, effort?: string): string {
   switch (effort) {
+    case 'max':
+      return t(locale, 'effortMax');
     case 'xhigh':
       return t(locale, 'effortXhigh');
     case 'high':
@@ -878,6 +918,44 @@ export function effortLabel(locale: UiLocale, effort?: string): string {
     default:
       return '';
   }
+}
+
+export function modelDisplayName(id?: string, name?: string): string {
+  const raw = (name ?? id ?? '').trim();
+  if (!raw) {
+    return '';
+  }
+  return raw.replace(/^Grok\s+/i, 'Grok ');
+}
+
+/** Timestamp, then the model and effort that produced this assistant turn. */
+export function turnSourceText(
+  locale: UiLocale,
+  source: {
+    modelId?: string;
+    modelName?: string;
+    effort?: string;
+    createdAt?: string;
+    endedAt?: string;
+  },
+  timestamps: boolean,
+): string {
+  const parts: string[] = [];
+  if (timestamps) {
+    const clock = formatClock(locale, source.endedAt ?? source.createdAt);
+    if (clock) {
+      parts.push(clock);
+    }
+  }
+  const name = modelDisplayName(source.modelId, source.modelName);
+  if (name) {
+    parts.push(name);
+  }
+  const effort = effortLabel(locale, source.effort) || (source.effort ?? '').trim();
+  if (effort) {
+    parts.push(effort);
+  }
+  return parts.join(' · ');
 }
 
 export function toolKindLabel(locale: UiLocale, kind?: string): string {

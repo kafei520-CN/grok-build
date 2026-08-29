@@ -53,6 +53,7 @@ export type SettingsPage =
   | 'rules'
   | 'skills'
   | 'apis'
+  | 'api-form'
   | 'theme'
   | 'mcps'
   | 'agents'
@@ -75,6 +76,7 @@ export interface ApiEndpoint {
   baseUrl: string;
   backend: ApiBackend;
   hasKey: boolean;
+  enabled: boolean;
 }
 
 export interface RuleItem {
@@ -82,6 +84,8 @@ export interface RuleItem {
   name: string;
   filePath: string;
   scope: 'global' | 'project';
+  /** Where Grok actually discovered the file. */
+  origin?: 'grok' | 'claude' | 'cursor';
   enabled: boolean;
 }
 
@@ -279,6 +283,13 @@ export interface TurnError {
   maxAttempts?: number;
 }
 
+export type PlanStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'abandoned';
+
+export interface PlanStep {
+  content: string;
+  status: PlanStepStatus;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -288,10 +299,17 @@ export interface ChatMessage {
   images?: MediaItem[];
   edits?: FileEdit[];
   plan?: string;
+  steps?: PlanStep[];
   streaming?: boolean;
   createdAt?: string;
   endedAt?: string;
   error?: TurnError;
+  /** Catalog id at the time this assistant turn started. */
+  modelId?: string;
+  /** Picker display name for that model. */
+  modelName?: string;
+  /** Reasoning effort sent with this turn. */
+  effort?: string;
 }
 
 export interface PermissionOption {
@@ -395,6 +413,7 @@ export interface ChatState {
   settings?: GrokSettings;
   settingsOpen?: boolean;
   settingsPage?: SettingsPage;
+  apiEditId?: string;
   rules?: RuleItem[];
   skills?: SkillItem[];
   apis?: ApiEndpoint[];
@@ -482,6 +501,7 @@ export interface SessionUpdate {
   turnStartMs?: number;
   streamStartMs?: number;
   agentTimestampMs?: number;
+  entries?: unknown;
 }
 
 export interface HostToWebview {
@@ -553,6 +573,9 @@ export type WebviewToHost =
   | { type: 'openSkill'; id: string }
   | { type: 'openApis' }
   | { type: 'closeApis' }
+  | { type: 'openApiForm'; id?: string }
+  | { type: 'closeApiForm' }
+  | { type: 'toggleApi'; id: string }
   | { type: 'openTheme' }
   | { type: 'closeTheme' }
   | { type: 'setTheme'; primary: string; secondary: string; background?: string }

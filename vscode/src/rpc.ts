@@ -4,6 +4,7 @@ import type { Writable } from 'node:stream';
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
 };
 
 export class RpcError extends Error {
@@ -63,14 +64,24 @@ export class JsonRpcConnection extends EventEmitter {
     }
   }
 
-  request(method: string, params?: unknown): Promise<unknown> {
+  request(method: string, params?: unknown, timeoutMs?: number): Promise<unknown> {
     if (this.closed) {
       return Promise.reject(new Error('ACP connection is closed'));
     }
     const id = this.nextId++;
     this.write({ jsonrpc: '2.0', id, method, params: params ?? {} });
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const pending: Pending = { resolve, reject };
+      if (timeoutMs && timeoutMs > 0) {
+        pending.timer = setTimeout(() => {
+          if (!this.pending.has(id)) {
+            return;
+          }
+          this.pending.delete(id);
+          reject(new Error(`${method} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }
+      this.pending.set(id, pending);
     });
   }
 
@@ -97,6 +108,9 @@ export class JsonRpcConnection extends EventEmitter {
     this.closed = true;
     this.buffer = '';
     for (const [id, pending] of this.pending) {
+      if (pending.timer) {
+        clearTimeout(pending.timer);
+      }
       pending.reject(error ?? new Error('ACP connection closed'));
       this.pending.delete(id);
     }
@@ -143,6 +157,9 @@ export class JsonRpcConnection extends EventEmitter {
       return;
     }
     this.pending.delete(key);
+    if (pending.timer) {
+      clearTimeout(pending.timer);
+    }
     if (message['error']) {
       const err = message['error'] as { message?: string; code?: number; data?: unknown };
       pending.reject(
