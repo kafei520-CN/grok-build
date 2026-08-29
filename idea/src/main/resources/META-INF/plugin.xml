@@ -1,6 +1,6 @@
 <idea-plugin>
   <id>cn.mckafei.grok-build</id>
-  <name>Grok Build</name>
+  <name>Grok Build By Kafei</name>
   <vendor url="https://github.com/kafei520-CN/Grok-For-VS-Code">kafei520cn</vendor>
   <description><![CDATA[Grok Build is an IntelliJ chat for the xAI Grok agent. It uses the same WebView UI and ACP grok agent stdio core as the VS Code extension, hosted with JCEF and a Node sidecar. Requires Node.js and the Grok CLI.
 <p>IntelliJ 版 Grok Build：与 VS Code 插件共用同一套 WebView UI 和 Agent 核心。</p>
@@ -12,7 +12,7 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build 0.1.88 marketplace metadata: Latin description, optional Terminal config-file, muted cancelled steps.
+  <change-notes><![CDATA[Grok Build By Kafei 0.1.88: unique marketplace name, Latin description, optional Terminal config-file, muted cancelled steps.
 <p>0.1.88 — Cancelled and leftover steps stay on the card and render muted instead of as errors.</p>
 <p>0.1.87 — Full host rewrite: every VS Code command, live editor context, IntelliJ theme, status bar, settings, Grok Diff, terminal.</p>
 ]]></change-notes>
