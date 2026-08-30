@@ -4,8 +4,11 @@ import { bindRender, isBooting, normalizeState, persistUi, post, root, ui } from
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
 import { mountComposer, patchComposer } from './composer';
 import { removeSlot, replaceSlot } from './dom';
-import { patchSettings } from './settings';
+import { patchSettings, settingsBackMessage } from './settings';
+import { bindFileDrop, syncDropHint } from './drop';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
+import { chromeKeepers, overlayKind, syncSurface, syncWallpaper } from './wallpaper';
+import { playNotify } from './notify';
 
 bindRender(render);
 
@@ -15,6 +18,10 @@ window.addEventListener(
     if (event.data?.type === 'state' && event.data.state) {
       ui.state = normalizeState(event.data.state);
       persistUi();
+      const cue = ui.state.notify;
+      if (cue && ui.state.settings?.notifySound !== false) {
+        playNotify(cue);
+      }
       render();
       return;
     }
@@ -42,11 +49,24 @@ function render(): void {
   try {
     document.documentElement.lang = ui.state.locale === 'zh-CN' ? 'zh-CN' : 'en';
     applyThemeTo(document.documentElement.style, ui.state.theme);
+    syncSurface(
+      root,
+      ui.state.theme,
+      overlayKind({
+        settingsOpen: ui.state.settingsOpen,
+        settingsPage: ui.state.settingsPage,
+        drawer: ui.state.drawer,
+      }),
+    );
     root.dataset.status = ui.state.status;
     root.classList.toggle('compact', Boolean(ui.state.compactMode));
     root.classList.toggle('focused', ui.composerFocused);
     if (!isBooting() && !document.getElementById('grok-header')) {
+      const keep = chromeKeepers();
       root.replaceChildren();
+      for (const node of keep) {
+        root.append(node);
+      }
     }
     patchHeader(root);
     patchBody(root);
@@ -55,6 +75,7 @@ function render(): void {
       mountComposer(root);
     }
     patchComposer();
+    syncDropHint();
     const composer = document.getElementById('composer-wrap');
     if (composer) {
       composer.hidden = booting || Boolean(ui.state.settingsOpen);
@@ -70,6 +91,7 @@ function render(): void {
     } else {
       removeSlot('grok-lightbox');
     }
+    syncWallpaper(root, ui.state.theme);
     scrollTranscript();
     syncWorkClock();
   } catch (error) {
@@ -99,28 +121,7 @@ function boot(): void {
     }
     if (ui.state.settingsOpen) {
       event.preventDefault();
-      post({
-        type:
-          ui.state.settingsPage === 'rules'
-            ? 'closeRules'
-            : ui.state.settingsPage === 'skills'
-              ? 'closeSkills'
-              : ui.state.settingsPage === 'apis'
-                ? 'closeApis'
-                : ui.state.settingsPage === 'theme'
-                  ? 'closeTheme'
-                  : ui.state.settingsPage === 'mcps'
-                    ? 'closeMcps'
-                    : ui.state.settingsPage === 'agents'
-                      ? 'closeAgents'
-                      : ui.state.settingsPage === 'worktrees'
-                        ? 'closeWorktrees'
-                        : ui.state.settingsPage === 'extensions'
-                          ? 'closeExt'
-                          : ui.state.settingsPage === 'memory'
-                            ? 'closeMemory'
-                            : 'closeSettings',
-      });
+      post(settingsBackMessage(ui.state.settingsPage ?? 'main'));
       return;
     }
     if (ui.state.drawer) {
@@ -140,26 +141,7 @@ function boot(): void {
       render();
     }
   });
-  root.addEventListener('dragover', (event) => {
-    event.preventDefault();
-    root.classList.add('drop');
-  });
-  root.addEventListener('dragleave', () => root.classList.remove('drop'));
-  root.addEventListener('drop', (event) => {
-    event.preventDefault();
-    root.classList.remove('drop');
-    const uriList = event.dataTransfer?.getData('text/uri-list') ?? '';
-    const first = uriList
-      .split('\n')
-      .map((line) => line.trim())
-      .find((line) => line && !line.startsWith('#'));
-    if (first?.startsWith('file:')) {
-      const path = decodeURIComponent(
-        first.replace(/^file:\/\//, '').replace(/^\/([A-Za-z]:)/, '$1'),
-      );
-      post({ type: 'pickFile', path });
-    }
-  });
+  bindFileDrop();
   render();
 }
 

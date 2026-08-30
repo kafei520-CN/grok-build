@@ -14,7 +14,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.ContentFactory
-import com.intellij.util.Alarm
+import java.io.File
 import java.util.ArrayDeque
 
 @Service(Service.Level.PROJECT)
@@ -29,7 +29,6 @@ class GrokSession(val project: Project) : Disposable {
     private var dispatcher: HostRpc? = null
     private var context: GrokContext? = null
     val diff = GrokDiffSupport(project, this)
-    private val diffWarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
     private var logConsole: ConsoleView? = null
     private var ready = false
     private val pendingCommands = ArrayDeque<String>()
@@ -57,7 +56,7 @@ class GrokSession(val project: Project) : Disposable {
     fun attach(panel: GrokChatPanel) {
         this.panel = panel
         ensureSidecar()
-        scheduleDiffWarm()
+        context?.pushNow()
     }
 
     fun ensureSidecar() {
@@ -82,7 +81,16 @@ class GrokSession(val project: Project) : Disposable {
             dispatcher = null
             throw error
         }
-        context?.pushNow()
+    }
+
+    fun sendDropped(paths: List<String>) {
+        if (paths.isEmpty()) {
+            return
+        }
+        val uris = paths.joinToString(",") { path ->
+            jsonString(fileUri(path))
+        }
+        sendUi("""{"type":"pasteClipboard","uris":[$uris]}""")
     }
 
     fun sendUi(messageJson: String) {
@@ -124,19 +132,7 @@ class GrokSession(val project: Project) : Disposable {
             app.invokeLater({ showDiff(params) }, ModalityState.any())
             return
         }
-        diffWarm.cancelAllRequests()
         diff.show(params)
-    }
-
-    private fun scheduleDiffWarm() {
-        diffWarm.cancelAllRequests()
-        diffWarm.addRequest({
-            try {
-                diff.warm()
-            } catch (error: Throwable) {
-                log.warn("diff warm failed", error)
-            }
-        }, 700)
     }
 
     fun showLogDialog() {
@@ -176,7 +172,13 @@ class GrokSession(val project: Project) : Disposable {
     private var webviewFlushPosted = false
 
     private fun enqueueWebview(event: JsonObject) {
-        val json = event.toString()
+        val payload = try {
+            GrokWallpaper.prepare(event)
+        } catch (error: Throwable) {
+            log.warn("wallpaper stage", error)
+            event
+        }
+        val json = payload.toString()
         synchronized(webviewLock) {
             if (event.get("type")?.asString == "state") {
                 pendingState = json
@@ -260,7 +262,6 @@ class GrokSession(val project: Project) : Disposable {
         sidecar = null
         dispatcher = null
         context = null
-        diffWarm.cancelAllRequests()
         logConsole = null
         ready = false
         pendingCommands.clear()
@@ -268,5 +269,16 @@ class GrokSession(val project: Project) : Disposable {
 
     companion object {
         fun get(project: Project): GrokSession = project.getService(GrokSession::class.java)
+
+        private fun jsonString(value: String): String =
+            "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
+        private fun fileUri(path: String): String {
+            if (path.startsWith("file:")) {
+                return path
+            }
+            val abs = File(path).absolutePath.replace('\\', '/')
+            return if (abs.length >= 2 && abs[1] == ':') "file:///$abs" else "file://$abs"
+        }
     }
 }

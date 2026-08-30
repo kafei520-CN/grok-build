@@ -97,6 +97,10 @@ export interface Platform {
   }): void;
   onTrustChange(cb: () => void): Disposable;
   onConfigChange(cb: () => void): Disposable;
+  /** Bundled media file such as grok-symbol.png. */
+  mediaFile?(name: string): string | undefined;
+  /** Webview or file URL the chat page can load. */
+  toResourceUrl?(filePath: string): string | undefined;
 }
 
 let current: Platform | undefined;

@@ -7,7 +7,7 @@ import java.io.File
 /** Shared WebView / sidecar assets: classpath first, vscode/dist when running from source. */
 object SharedAssets {
     const val PLUGIN_ID = "cn.mckafei.grok-build"
-    const val PLUGIN_VERSION = "0.1.97"
+    const val PLUGIN_VERSION = "0.2.0"
     const val TOOL_WINDOW_ID = "Grok Build"
     const val NOTIFICATION_GROUP = "Grok Build"
     const val STATUS_WIDGET_ID = "GrokBuildWidget"
@@ -23,6 +23,8 @@ object SharedAssets {
     fun chatCss(): File = resolve("chat.css", "media")
 
     fun diffCss(): File = resolve("diff.css", "media")
+
+    fun grokSymbol(): File = resolve("grok-symbol.png", "media")
 
     fun workDir(kind: String): File {
         val dir = File(PathManager.getTempPath(), "grok-build/$kind-${pluginVersion()}")

@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { parseContextWindow } from './contextWindow';
 import { plat } from './platform';
 import type { ApiBackend, ApiEndpoint } from './types';
 
@@ -12,6 +13,7 @@ export interface ApiEndpointInput {
   backend: ApiBackend;
   apiKey?: string;
   enabled?: boolean;
+  contextWindow?: number;
 }
 
 /** Plugin-owned endpoint row. Source of truth in ~/.grok/vscode-apis.json. */
@@ -23,6 +25,7 @@ export interface StoredEndpoint {
   backend: ApiBackend;
   apiKey?: string;
   enabled: boolean;
+  contextWindow?: number;
 }
 
 const MANAGED = new Set([
@@ -35,6 +38,7 @@ const MANAGED = new Set([
   'supports_reasoning_effort',
   'reasoning_effort',
   'reasoning_efforts',
+  'context_window',
 ]);
 
 export const DEFAULT_CUSTOM_EFFORT = 'high';
@@ -202,6 +206,7 @@ export function upsertStoredEndpoint(
       input.apiKey?.trim() ||
       (input.apiKey === '' ? undefined : existing?.apiKey),
     enabled: input.enabled ?? existing?.enabled ?? true,
+    contextWindow: input.contextWindow,
   };
   if (!existing) {
     return { rows: [...rows, saved], saved };
@@ -402,6 +407,7 @@ function storedFromUnknown(raw: unknown): StoredEndpoint | undefined {
       backend: normalizeBackend(typeof obj.backend === 'string' ? obj.backend : undefined),
       apiKey: typeof obj.apiKey === 'string' && obj.apiKey.trim() ? obj.apiKey : undefined,
       enabled: obj.enabled !== false,
+      contextWindow: parseStoredWindow(obj.contextWindow),
     };
   } catch {
     return undefined;
@@ -417,6 +423,7 @@ function storedFromTable(table: ModelTable): StoredEndpoint {
     backend: normalizeBackend(table.values['api_backend']),
     apiKey: table.values['api_key'] || undefined,
     enabled: table.enabled,
+    contextWindow: parseStoredWindow(table.values['context_window']),
   };
 }
 
@@ -429,6 +436,7 @@ function toPublic(row: StoredEndpoint): ApiEndpoint {
     backend: row.backend,
     hasKey: Boolean(row.apiKey),
     enabled: row.enabled,
+    contextWindow: row.contextWindow,
   };
 }
 
@@ -480,6 +488,7 @@ function inputFromTable(
     baseUrl: table.values['base_url'] || '',
     backend: normalizeBackend(table.values['api_backend']),
     enabled: table.enabled,
+    contextWindow: parseStoredWindow(table.values['context_window']),
     ...patch,
   };
 }
@@ -494,6 +503,7 @@ function appendModelTable(toml: string, row: StoredEndpoint): string {
     backend: row.backend,
     apiKey: row.apiKey,
     enabled: true,
+    contextWindow: row.contextWindow,
   });
   return `${body}${body ? '\n\n' : ''}${table}\n`;
 }
@@ -520,6 +530,11 @@ function serializeTable(id: string, input: ApiEndpointInput, existing?: ModelTab
     `reasoning_effort = ${tomlString(effort)}`,
     `reasoning_efforts = ${efforts}`,
   ];
+  const window =
+    input.contextWindow ?? parseStoredWindow(existing?.values['context_window']);
+  if (window) {
+    rows.push(`context_window = ${window}`);
+  }
   if (key) {
     rows.push(`api_key = ${tomlString(key)}`);
   }
@@ -545,6 +560,24 @@ function clampEffort(input: ApiEndpointInput, raw?: string): string {
   const efforts = effortListFor(input);
   const effort = raw || DEFAULT_CUSTOM_EFFORT;
   return efforts.includes(effort) ? effort : DEFAULT_CUSTOM_EFFORT;
+}
+
+function parseStoredWindow(raw: unknown): number | undefined {
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    try {
+      return parseContextWindow(String(Math.floor(raw)));
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return undefined;
+  }
+  try {
+    return parseContextWindow(raw);
+  } catch {
+    return undefined;
+  }
 }
 
 function extraHeadersLine(backend: ApiBackend): string | undefined {

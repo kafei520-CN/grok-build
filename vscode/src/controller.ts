@@ -87,6 +87,7 @@ import { disposeAllTerminals } from './acpTerminal';
 import { AGENT_RECONNECT_MAX, reconnectDelayMs } from './reconnect';
 import { workspaceStartupHints } from './startup';
 import { DEFAULT_THEME, normalizeTheme } from './theme';
+import type { NotifyCue } from './notify';
 
 export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   agent?: GrokAgent;
@@ -97,6 +98,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   compactMode = false;
   timestamps = false;
   multiline = false;
+  private notify?: NotifyCue;
   settingsOpen = false;
   settingsPage: SettingsPage = 'main';
   apiEditId?: string;
@@ -267,6 +269,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       hideSessionPreview: this.hideSessionPreview,
       workspacePath: this.cwd(),
       alwaysApprove: settings.alwaysApprove,
+      notify: this.notify,
       locale: uiLocale(),
       context: this.meter.usage,
       settings,
@@ -290,7 +293,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       tasks: this.tasks,
       memoryFiles: this.memoryFiles,
       extTab: this.extTab,
-      theme: this.theme,
+      theme: drawers.themeForUi(this.theme),
     };
   }
 
@@ -535,19 +538,16 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
         return;
       }
       if (isCancelError(error)) {
-        this.finishAssistant();
-        this.setStatus('ready');
+        this.endStreaming();
         return;
       }
-      this.finishAssistant();
       this.fail(tr('turnError'), error);
       return;
     }
     if (run !== this.runGen) {
       return;
     }
-    this.finishAssistant();
-    this.setStatus('ready');
+    this.endStreaming('done');
     await this.flushQueue();
   }
 
@@ -557,8 +557,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.agent?.cancelTurn();
     this.queue = [];
     if (this.status === 'streaming') {
-      this.finishAssistant();
-      this.setStatus('ready');
+      this.endStreaming();
     }
   }
 
@@ -640,8 +639,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
 
   private scheduleReconnect(error: Error): void {
     if (this.status === 'streaming') {
-      this.finishAssistant();
-      this.status = 'ready';
+      this.endStreaming('fail');
     }
     this.reconnectFails += 1;
     const delay = reconnectDelayMs(this.reconnectFails);
@@ -796,7 +794,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       card.text = tr('compactDone');
       card.streaming = false;
       card.endedAt = new Date().toISOString();
+      this.notify = 'done';
       this.setStatus('ready');
+      this.notify = undefined;
     } catch (error) {
       this.fail(tr('compactFailed'), error);
     }
@@ -1087,7 +1087,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       locale: uiLocale(),
       files,
       messageId: assistant?.id,
-      theme: this.theme,
+      theme: drawers.themeForUi(this.theme),
       onRevert: () => {
         void this.journal.revert(assistant?.id).then(async (result) => {
           if (result === 'cancelled' || result === 'empty') {
@@ -1136,6 +1136,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   closeApiForm(): void { drawers.closeApiForm(this); }
   openTheme(): void { drawers.openTheme(this); }
   closeTheme(): void { drawers.closeTheme(this); }
+  openThemePreview(): void { drawers.openThemePreview(this); }
+  closeThemePreview(): void { drawers.closeThemePreview(this); }
   openMcps(): void { drawers.openMcps(this); }
   closeMcps(): void { drawers.closeMcps(this); }
   openAgents(): void { drawers.openAgents(this); }
@@ -1171,8 +1173,25 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   openPlan(): void { drawers.openPlan(this); }
   refreshMcps(): void { drawers.refreshMcps(this); }
   async toggleMcp(id: string): Promise<void> { await drawers.toggleMcp(this, id); }
-  setTheme(primary: string, secondary: string, background?: string): void {
-    drawers.setTheme(this, primary, secondary, background);
+  setTheme(
+    primary: string,
+    secondary: string,
+    background?: string,
+    patch?: {
+      wallpaper?: 'icon' | 'custom' | '';
+      wallpaperOpacity?: number;
+      wallpaperScale?: number;
+      wallpaperX?: number;
+      wallpaperY?: number;
+      surface?: 'glass' | 'solid' | '';
+      glassOpacity?: number;
+      glassBlur?: number;
+    },
+  ): void {
+    drawers.setTheme(this, primary, secondary, background, patch);
+  }
+  async pickThemeWallpaper(): Promise<void> {
+    await drawers.pickThemeWallpaper(this);
   }
   async saveApi(input: {
     id?: string;
@@ -1181,6 +1200,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     baseUrl: string;
     backend: ApiEndpoint['backend'];
     apiKey?: string;
+    contextWindow?: number;
   }): Promise<void> { await drawers.saveApi(this, input); }
   async deleteApi(id: string): Promise<void> { await drawers.deleteApi(this, id); }
   async toggleApi(id: string): Promise<void> { await drawers.toggleApi(this, id); }
@@ -1224,19 +1244,16 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
         return;
       }
       if (isCancelError(error)) {
-        this.finishAssistant();
-        this.setStatus('ready');
+        this.endStreaming();
         return;
       }
-      this.finishAssistant();
       this.fail('Command failed', error);
       return;
     }
     if (run !== this.runGen) {
       return;
     }
-    this.finishAssistant();
-    this.setStatus('ready');
+    this.endStreaming('done');
   }
 
   resolveModelId(name: string): string | undefined {
@@ -1678,6 +1695,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     void this.meter.refresh();
   }
 
+  private endStreaming(cue?: NotifyCue): void {
+    this.finishAssistant();
+    this.notify = cue;
+    this.setStatus('ready');
+    this.notify = undefined;
+  }
+
   private setStatus(status: ChatStatus): void {
     this.status = status;
     if (status !== 'error') {
@@ -1697,14 +1721,17 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       assistant.streaming = false;
       freezeTurnSteps(assistant);
     }
+    const interrupted = this.status === 'streaming';
     if (this.status === 'streaming' || this.status === 'ready') {
       this.status = 'ready';
       plat().warn(line);
     } else if (this.status !== 'login' && this.status !== 'authenticating') {
       this.status = 'error';
     }
+    this.notify = interrupted ? 'fail' : undefined;
     logError(message, error);
     this.emit();
+    this.notify = undefined;
   }
 }
 

@@ -74,17 +74,32 @@ export function emptyState(): ChatState {
 }
 
 export function isBooting(): boolean {
-  return ui.state.status === 'connecting' || Boolean(ui.state.restoringSession);
+  return ui.state.status === 'connecting';
 }
 
+let prefsToken = '';
+
 export function persistUi(): void {
+  const theme = normalizeTheme(ui.state.theme);
+  const next = JSON.stringify({
+    locale: ui.state.locale,
+    compactMode: ui.state.compactMode,
+    timestamps: ui.state.timestamps,
+    multiline: ui.state.multiline,
+    sessionsMode: ui.sessionsMode,
+    theme,
+  });
+  if (next === prefsToken) {
+    return;
+  }
+  prefsToken = next;
   vscode.setState({
     locale: ui.state.locale,
     compactMode: ui.state.compactMode,
     timestamps: ui.state.timestamps,
     multiline: ui.state.multiline,
     sessionsMode: ui.sessionsMode,
-    theme: normalizeTheme(ui.state.theme),
+    theme,
   });
 }
 

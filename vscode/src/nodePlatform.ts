@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { FileDiff } from './diff';
 import {
   FILE_SEARCH_LIMIT,
@@ -311,6 +312,19 @@ export class NodePlatform implements Platform {
 
   onConfigChange(): { dispose(): void } {
     return { dispose() {} };
+  }
+
+  mediaFile(name: string): string | undefined {
+    const candidates = [
+      path.join(__dirname, name),
+      path.join(__dirname, '..', 'media', name),
+      path.join(__dirname, '..', '..', 'media', name),
+    ];
+    return candidates.find((file) => fs.existsSync(file));
+  }
+
+  toResourceUrl(filePath: string): string | undefined {
+    return pathToFileURL(filePath).href;
   }
 }
 

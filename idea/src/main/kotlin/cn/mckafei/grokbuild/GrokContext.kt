@@ -30,7 +30,6 @@ class GrokContext(
                 }
             },
         )
-        publish()
     }
 
     fun snapshot(): Pair<JsonObject?, JsonObject?> =

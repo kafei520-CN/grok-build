@@ -189,7 +189,25 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       controller.closeTheme();
       return;
     case 'setTheme':
-      controller.setTheme(message.primary, message.secondary, message.background);
+      controller.setTheme(message.primary, message.secondary, message.background, {
+        wallpaper: message.wallpaper,
+        wallpaperOpacity: message.wallpaperOpacity,
+        wallpaperScale: message.wallpaperScale,
+        wallpaperX: message.wallpaperX,
+        wallpaperY: message.wallpaperY,
+        surface: message.surface,
+        glassOpacity: message.glassOpacity,
+        glassBlur: message.glassBlur,
+      });
+      return;
+    case 'pickThemeWallpaper':
+      await controller.pickThemeWallpaper();
+      return;
+    case 'openThemePreview':
+      controller.openThemePreview();
+      return;
+    case 'closeThemePreview':
+      controller.closeThemePreview();
       return;
     case 'openMcps':
       controller.openMcps();
@@ -325,6 +343,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       return;
     case 'reviewEdits':
       await controller.reviewEdits(message.messageId, message.path);
+      return;
+    case 'editUserPrompt':
+      await controller.editUserPrompt(message.messageId, message.text);
       return;
     case 'openEdit':
       controller.openEdit(message.path, message.messageId);

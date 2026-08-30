@@ -1,10 +1,13 @@
 package cn.mckafei.grokbuild
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.components.JBLabel
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.io.File
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -14,13 +17,15 @@ class GrokChatPanel(
     private val session: GrokSession,
     parent: Disposable,
 ) : Disposable {
-    val component: JComponent
+    private val content = JPanel(BorderLayout())
+    val component: JComponent = GrokDrop.attach(content, this) { session.sendDropped(it) }
     private var browser: GrokBrowser? = null
+    private var disposed = false
 
     init {
         Disposer.register(parent, this)
-        component = JPanel(BorderLayout())
-        mount()
+        showCenter(JBLabel("Starting Grok…", SwingConstants.CENTER))
+        scheduleMount()
     }
 
     fun postToWebview(json: String) {
@@ -42,35 +47,55 @@ class GrokChatPanel(
         )
     }
 
-    private fun mount() {
+    private fun scheduleMount() {
+        val app = ApplicationManager.getApplication()
+        app.executeOnPooledThread {
+            if (disposed) {
+                return@executeOnPooledThread
+            }
+            if (!GrokJcef.isSupported()) {
+                app.invokeLater({ if (!disposed) showCenter(missingJcef()) }, ModalityState.any())
+                return@executeOnPooledThread
+            }
+            if (Sidecar.findNode() == null) {
+                app.invokeLater({ if (!disposed) showCenter(missingNode()) }, ModalityState.any())
+                return@executeOnPooledThread
+            }
+            val page = try {
+                GrokHtml.writeChatPage()
+            } catch (error: Throwable) {
+                app.invokeLater({
+                    if (!disposed) showCenter(errorPanel(error.message ?: error.toString()))
+                }, ModalityState.any())
+                return@executeOnPooledThread
+            }
+            app.invokeLater({ mountBrowser(page) }, ModalityState.any())
+        }
+    }
+
+    private fun mountBrowser(page: File) {
+        if (disposed) {
+            return
+        }
         browser?.let { Disposer.dispose(it) }
         browser = null
-        val panel = component as JPanel
-        panel.removeAll()
-        if (!GrokJcef.isSupported()) {
-            panel.add(missingJcef(), BorderLayout.CENTER)
-            panel.revalidate()
-            panel.repaint()
-            return
-        }
-        if (Sidecar.findNode() == null) {
-            panel.add(missingNode(), BorderLayout.CENTER)
-            panel.revalidate()
-            panel.repaint()
-            return
-        }
         try {
-            val page = GrokHtml.writeChatPage()
             val view = GrokBrowser(page) { payload -> session.sendUi(payload) }
             browser = view
             Disposer.register(this, view)
-            panel.add(view.component, BorderLayout.CENTER)
+            GrokDrop.install(view.dropTargetComponent) { session.sendDropped(it) }
+            showCenter(view.component)
             session.attach(this)
         } catch (error: Throwable) {
-            panel.add(errorPanel(error.message ?: error.toString()), BorderLayout.CENTER)
+            showCenter(errorPanel(error.message ?: error.toString()))
         }
-        panel.revalidate()
-        panel.repaint()
+    }
+
+    private fun showCenter(child: JComponent) {
+        content.removeAll()
+        content.add(child, BorderLayout.CENTER)
+        content.revalidate()
+        content.repaint()
     }
 
     private fun missingJcef(): JComponent {
@@ -103,12 +128,13 @@ class GrokChatPanel(
     private fun retryBar(): JComponent {
         val bar = JPanel(FlowLayout(FlowLayout.CENTER))
         val retry = JButton("Retry")
-        retry.addActionListener { mount() }
+        retry.addActionListener { scheduleMount() }
         bar.add(retry)
         return bar
     }
 
     override fun dispose() {
+        disposed = true
         browser = null
     }
 

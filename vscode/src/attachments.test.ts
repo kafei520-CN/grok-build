@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ATTACH_TEXT_MAX, addActiveFile, type AttachmentHost } from './attachments';
+import { ATTACH_TEXT_MAX, addActiveFile, pasteClipboard, type AttachmentHost } from './attachments';
 import { bindPlatform, type Platform } from './platform';
 
 function fakePlat(over: Partial<Platform> = {}): Platform {
@@ -73,5 +73,19 @@ describe('attachments', () => {
     addActiveFile(host);
     assert.equal(host.attachments[0]?.path, '/work/app/huge.ts');
     assert.equal(host.attachments[0]?.text, undefined);
+  });
+
+  it('attaches dropped file URIs as chips', async () => {
+    bindPlatform(
+      fakePlat({
+        readFile: async () => new TextEncoder().encode('export const n = 1;\n'),
+      }),
+    );
+    const host: AttachmentHost = { attachments: [], emit() {} };
+    await pasteClipboard(host, { uris: ['file:///C:/work/a.ts', 'file:///C:/work/a.ts'] });
+    assert.equal(host.attachments.length, 1);
+    assert.equal(host.attachments[0]?.path, 'C:/work/a.ts');
+    assert.equal(host.attachments[0]?.label, 'a.ts');
+    assert.equal(host.attachments[0]?.text, 'export const n = 1;\n');
   });
 });

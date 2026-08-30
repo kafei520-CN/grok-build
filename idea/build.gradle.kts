@@ -41,6 +41,7 @@ val copySharedAssets by tasks.registering(Copy::class) {
     from(vscodeRoot.resolve("media/chat.css"))
     from(vscodeRoot.resolve("media/diff.css"))
     from(vscodeRoot.resolve("media/icon.svg"))
+    from(vscodeRoot.resolve("media/grok-symbol.png"))
     into(generatedGrok.map { it.dir("grok") })
     doFirst {
         val host = vscodeRoot.resolve("dist/host.js")

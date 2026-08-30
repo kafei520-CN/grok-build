@@ -313,6 +313,19 @@ api_key = "sk-test"
 });
 
 describe('api endpoint store', () => {
+  it('writes context_window as an integer for auto-compact', () => {
+    const next = upsertStoredEndpoint([], {
+      name: 'Local',
+      model: 'llama',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      backend: 'chat_completions',
+      contextWindow: 128_000,
+    });
+    assert.equal(next.saved.contextWindow, 128_000);
+    const toml = applyStoreToToml('', next.rows);
+    assert.match(toml, /context_window = 128000/);
+  });
+
   it('keeps every saved endpoint in the plugin list', () => {
     const first = upsertStoredEndpoint([], {
       name: '[La]GPT-5.6-Terra',

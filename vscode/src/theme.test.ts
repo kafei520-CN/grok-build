@@ -37,6 +37,19 @@ describe('theme', () => {
       secondary: '#00ff00',
     });
     assert.equal(normalizeTheme({ background: '#0b1620' }).background, '#0b1620');
+    assert.equal(normalizeTheme({ wallpaper: 'icon', wallpaperOpacity: 40 }).wallpaper, 'icon');
+    assert.equal(normalizeTheme({ wallpaper: 'icon', wallpaperOpacity: 40 }).wallpaperOpacity, 40);
+    assert.equal(normalizeTheme({ wallpaper: 'custom' }).wallpaper, undefined);
+    assert.equal(normalizeTheme({ surface: 'glass' }).surface, 'glass');
+    assert.equal(
+      normalizeTheme({ wallpaper: 'icon', wallpaperScale: 140, wallpaperX: 20, wallpaperY: 80 }).wallpaperScale,
+      140,
+    );
+    assert.equal(normalizeTheme({ wallpaper: 'icon' }).wallpaperScale, undefined);
+    assert.equal(normalizeTheme({ surface: 'glass' }).glassOpacity, 46);
+    assert.equal(normalizeTheme({ surface: 'glass', glassOpacity: 70 }).glassOpacity, 70);
+    assert.equal(normalizeTheme({ surface: 'glass' }).glassBlur, 18);
+    assert.equal(normalizeTheme({ surface: 'glass', glassBlur: 28 }).glassBlur, 28);
   });
 
   it('matches presets including background', () => {

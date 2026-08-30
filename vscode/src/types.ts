@@ -55,6 +55,7 @@ export type SettingsPage =
   | 'apis'
   | 'api-form'
   | 'theme'
+  | 'theme-preview'
   | 'mcps'
   | 'agents'
   | 'worktrees'
@@ -65,6 +66,23 @@ export interface ThemeColors {
   primary: string;
   secondary: string;
   background?: string;
+  /** Bundled Grok mark, or a user-picked image/video copied into ~/.grok. */
+  wallpaper?: 'icon' | 'custom';
+  /** 0–100. Media layer only; empty areas keep the background color. */
+  wallpaperOpacity?: number;
+  wallpaperPath?: string;
+  /** Host-resolved webview / file URL. Not persisted. */
+  wallpaperUrl?: string;
+  /** Zoom 20–800 percent of the viewport width. When set, the media is placed manually instead of auto-fit. */
+  wallpaperScale?: number;
+  wallpaperX?: number;
+  wallpaperY?: number;
+  /** Chat chrome: frosted glass or an opaque floating sheet. */
+  surface?: 'glass' | 'solid';
+  /** 0–100 mix of --bg into the frosted panel. */
+  glassOpacity?: number;
+  /** Frost blur in px, 0–40. */
+  glassBlur?: number;
 }
 
 export type ApiBackend = 'chat_completions' | 'responses' | 'messages';
@@ -77,6 +95,8 @@ export interface ApiEndpoint {
   backend: ApiBackend;
   hasKey: boolean;
   enabled: boolean;
+  /** Token window written to grok config.toml as context_window. */
+  contextWindow?: number;
 }
 
 export interface RuleItem {
@@ -362,6 +382,8 @@ export interface GrokSettings {
   includeSelectionOnSend: boolean;
   alwaysApprove: boolean;
   locale: 'auto' | 'en' | 'zh-CN';
+  /** Play a chime when a turn finishes or is interrupted. */
+  notifySound: boolean;
 }
 
 export const DEFAULT_SETTINGS: GrokSettings = {
@@ -372,6 +394,7 @@ export const DEFAULT_SETTINGS: GrokSettings = {
   includeSelectionOnSend: true,
   alwaysApprove: false,
   locale: 'auto',
+  notifySound: true,
 };
 
 export function settingNeedsRestart(key: keyof GrokSettings): boolean {
@@ -404,6 +427,7 @@ export interface ChatState {
   multiline?: boolean;
   queue?: string[];
   alwaysApprove?: boolean;
+  notify?: 'done' | 'fail';
   currentSessionId?: string;
   restoringSession?: boolean;
   hideSessionPreview?: boolean;
@@ -579,7 +603,23 @@ export type WebviewToHost =
   | { type: 'toggleApi'; id: string }
   | { type: 'openTheme' }
   | { type: 'closeTheme' }
-  | { type: 'setTheme'; primary: string; secondary: string; background?: string }
+  | {
+      type: 'setTheme';
+      primary: string;
+      secondary: string;
+      background?: string;
+      wallpaper?: 'icon' | 'custom' | '';
+      wallpaperOpacity?: number;
+      wallpaperScale?: number;
+      wallpaperX?: number;
+      wallpaperY?: number;
+      surface?: 'glass' | 'solid' | '';
+      glassOpacity?: number;
+      glassBlur?: number;
+    }
+  | { type: 'pickThemeWallpaper' }
+  | { type: 'openThemePreview' }
+  | { type: 'closeThemePreview' }
   | { type: 'openMcps' }
   | { type: 'closeMcps' }
   | { type: 'toggleMcp'; id: string }
@@ -624,6 +664,7 @@ export type WebviewToHost =
       baseUrl: string;
       backend: ApiBackend;
       apiKey?: string;
+      contextWindow?: number;
     }
   | { type: 'deleteApi'; id: string }
   | {

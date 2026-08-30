@@ -10,6 +10,7 @@ import com.intellij.ui.jcef.JBCefJSQuery
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
+import java.awt.Component
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Base64
@@ -25,6 +26,9 @@ class GrokBrowser(
         .setEnableOpenDevToolsMenuItem(true)
         .build()
     val component: JComponent get() = browser.component
+    /** Native CEF widget; AWT file drops land here rather than on the Swing wrapper. */
+    val dropTargetComponent: Component
+        get() = browser.cefBrowser.uiComponent ?: browser.component
 
     private val query = JBCefJSQuery.create(browser as JBCefBrowserBase)
     private val pending = mutableListOf<String>()
@@ -52,7 +56,6 @@ class GrokBrowser(
             },
             browser.cefBrowser,
         )
-        browser.createImmediately()
         browser.loadURL(page.toURI().toString())
     }
 

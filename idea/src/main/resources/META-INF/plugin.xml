@@ -12,7 +12,25 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.1.97: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.0: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.0 — Louder notification chime. Wallpaper preview, video wallpaper, and turn-complete sounds.</p>
+<p>0.1.114 — Wallpaper preview restores pan and zoom as soon as it opens, without nudging the slider.</p>
+<p>0.1.113 — Notification chime is louder.</p>
+<p>0.1.112 — Optional chime when a turn finishes or is interrupted.</p>
+<p>0.1.111 — IDEA wallpaper videos: stage next to the chat page; transcode H.264 to WebM when ffmpeg is installed.</p>
+<p>0.1.110 — Wallpaper zoom goes to 800% and always keeps the original aspect ratio.</p>
+<p>0.1.109 — Wallpaper accepts looping videos (mp4, webm) and the full-window preview pans and centers them.</p>
+<p>0.1.108 — Wallpaper preview is a full-window editor: click to set the center, drag to pan, at the current viewport size.</p>
+<p>0.1.107 — Settings, history, and dashboard drawers actually frost-blur the home/chat behind them.</p>
+<p>0.1.106 — One frost plate on home/chat; settings and drawers blur that main page. Less backdrop-filter jank.</p>
+<p>0.1.105 — Keep wallpaper mounted when restoring a session; glass blur is adjustable.</p>
+<p>0.1.104 — Home uses the same floating sheet as chat; more-menu stacks above the composer; glass opacity is adjustable.</p>
+<p>0.1.103 — Theme panel style: frosted glass or a solid floating sheet; wallpaper can be panned and zoomed.</p>
+<p>0.1.102 — Theme wallpaper: Grok icon or a custom image, with opacity, background color in the gaps, and center-crop when the image is larger than the chat.</p>
+<p>0.1.101 — Drag workspace files onto the chat to attach them as references.</p>
+<p>0.1.100 — Custom endpoints accept a max context window, including 128k-style values.</p>
+<p>0.1.99 — Confirming an edited user message actually resends it (editUserPrompt was dropped by the host).</p>
+<p>0.1.98 — Do not freeze the IDE on first open: show the tool window first, start Chromium on the next frame, and do not pre-warm a second Diff browser.</p>
 <p>0.1.97 — Plugin Verifier: drop internal PluginManagerCore, deprecated ReadAction.compute, and override-only ActionGroup.getChildren.</p>
 <p>0.1.96 — Pre-warm the Grok Diff browser so the first Review is a tab switch, not a JCEF cold start.</p>
 <p>0.1.95 — Review clicks hop off the JCEF thread onto the EDT so Grok Diff can open.</p>

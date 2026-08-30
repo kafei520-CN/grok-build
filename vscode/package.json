@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.1.92",
+  "version": "0.2.0",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -230,6 +230,11 @@
           "type": "boolean",
           "default": false,
           "description": "%config.alwaysApprove%"
+        },
+        "grok.notifySound": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.notifySound%"
         },
         "grok.locale": {
           "type": "string",

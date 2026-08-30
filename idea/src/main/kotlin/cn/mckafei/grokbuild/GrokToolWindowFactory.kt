@@ -12,6 +12,10 @@ class GrokToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         GrokJcef.prepare()
         val session = GrokSession.get(project)
+        try {
+            session.ensureSidecar()
+        } catch (_: Exception) {
+        }
         val panel = GrokChatPanel(session, toolWindow.disposable)
         val content = ContentFactory.getInstance().createContent(panel.component, "", false)
         content.isCloseable = false

@@ -9,8 +9,14 @@ import {
   rgbToHex,
 } from '../theme';
 import type { ThemeColors } from '../types';
+import {
+  DEFAULT_GLASS_BLUR,
+  DEFAULT_GLASS_OPACITY,
+  DEFAULT_WALLPAPER_OPACITY,
+} from '../wallpaper';
 import { post, tr, ui } from './app';
 import { iconChevron } from './icons';
+import { overlayKind, syncSurface, syncWallpaper } from './wallpaper';
 
 const PRESET_KEYS: Record<string, StringKey> = {
   ice: 'themePresetIce',
@@ -61,6 +67,8 @@ export function mountThemeBody(): HTMLElement {
     previewCard(),
     block(tr('themePresets'), presetGrid(live)),
     block(tr('themeCustom'), pickerCard(live)),
+    block(tr('themeSurface'), surfaceCard(live)),
+    block(tr('themeWallpaper'), wallpaperCard(live)),
   );
   return body;
 }
@@ -136,7 +144,19 @@ function presetGrid(theme: ThemeColors): HTMLElement {
     label.className = 'theme-preset-name';
     label.textContent = presetLabel(preset.id);
     btn.append(dots, label);
-    btn.addEventListener('click', () => commit(preset, true));
+    btn.addEventListener('click', () => {
+      const next: ThemeColors = {
+        ...live,
+        primary: preset.primary,
+        secondary: preset.secondary,
+      };
+      if (preset.background) {
+        next.background = preset.background;
+      } else {
+        delete next.background;
+      }
+      commit(next, true);
+    });
     card.append(btn);
   }
   return card;
@@ -182,6 +202,178 @@ function pickerCard(initial: ThemeColors): HTMLElement {
   card.append(primary.row, secondary.row, background.row, actions);
   syncAuto();
   return card;
+}
+
+function surfaceCard(initial: ThemeColors): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'settings-card';
+  const hint = document.createElement('div');
+  hint.className = 'settings-hint';
+  hint.textContent = tr('themeSurfaceHint');
+  const row = document.createElement('div');
+  row.className = 'settings-row stack';
+  const seg = document.createElement('div');
+  seg.className = 'seg settings-seg';
+  const current = initial.surface ?? 'flat';
+  for (const [id, label] of [
+    ['flat', tr('themeSurfaceFlat')],
+    ['glass', tr('themeSurfaceGlass')],
+    ['solid', tr('themeSurfaceSolid')],
+  ] as const) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.surface = id;
+    btn.textContent = label;
+    if (id === current) {
+      btn.classList.add('on');
+    }
+    btn.addEventListener('click', () => {
+      const next = { ...live };
+      if (id === 'flat') {
+        delete next.surface;
+      } else {
+        next.surface = id;
+      }
+      commit(next, true);
+    });
+    seg.append(btn);
+  }
+  row.append(seg);
+  card.append(
+    hint,
+    row,
+    sliderRow(
+      'glass',
+      tr('themeGlassOpacity'),
+      0,
+      100,
+      initial.glassOpacity ?? DEFAULT_GLASS_OPACITY,
+      current !== 'glass',
+      (n, persist) => {
+        live = { ...live, glassOpacity: n };
+        if (persist) {
+          commit(live, true);
+        } else {
+          applyLive();
+        }
+      },
+    ),
+    sliderRow(
+      'blur',
+      tr('themeGlassBlur'),
+      0,
+      40,
+      initial.glassBlur ?? DEFAULT_GLASS_BLUR,
+      current !== 'glass',
+      (n, persist) => {
+        live = { ...live, glassBlur: n };
+        if (persist) {
+          commit(live, true);
+        } else {
+          applyLive();
+        }
+      },
+      'px',
+    ),
+  );
+  return card;
+}
+
+function wallpaperCard(initial: ThemeColors): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'settings-card';
+  const hint = document.createElement('div');
+  hint.className = 'settings-hint';
+  hint.textContent = tr('themeWallpaperHint');
+  const actions = document.createElement('div');
+  actions.className = 'settings-actions';
+  const icon = document.createElement('button');
+  icon.type = 'button';
+  icon.className = 'btn';
+  icon.textContent = tr('themeWallpaperIcon');
+  icon.addEventListener('click', () => {
+    commit({ ...live, wallpaper: 'icon' }, true);
+  });
+  const pick = document.createElement('button');
+  pick.type = 'button';
+  pick.className = 'btn';
+  pick.textContent = tr('themeWallpaperPick');
+  pick.addEventListener('click', () => post({ type: 'pickThemeWallpaper' }));
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'btn';
+  clear.textContent = tr('themeWallpaperClear');
+  clear.addEventListener('click', () => {
+    const next = { ...live };
+    delete next.wallpaper;
+    delete next.wallpaperPath;
+    delete next.wallpaperUrl;
+    delete next.wallpaperOpacity;
+    delete next.wallpaperScale;
+    delete next.wallpaperX;
+    delete next.wallpaperY;
+    commit(next, true);
+  });
+  const preview = document.createElement('button');
+  preview.type = 'button';
+  preview.className = 'btn primary';
+  preview.textContent = tr('themePreviewOpen');
+  preview.disabled = !initial.wallpaper;
+  preview.addEventListener('click', () => post({ type: 'openThemePreview' }));
+  actions.append(icon, pick, clear, preview);
+  card.append(
+    hint,
+    actions,
+    sliderRow('opacity', tr('themeWallpaperOpacity'), 0, 100, initial.wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY, !initial.wallpaper, (n, persist) => {
+      live = { ...live, wallpaperOpacity: n };
+      if (persist) {
+        commit(live, true);
+      } else {
+        applyLive();
+      }
+    }),
+  );
+  icon.classList.toggle('primary', initial.wallpaper === 'icon');
+  return card;
+}
+
+function sliderRow(
+  key: string,
+  label: string,
+  min: number,
+  max: number,
+  value: number,
+  disabled: boolean,
+  onChange: (n: number, persist: boolean) => void,
+  unit = '%',
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'settings-row theme-opacity-row';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = label;
+  const tools = document.createElement('div');
+  tools.className = 'theme-opacity';
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = String(min);
+  slider.max = String(max);
+  slider.value = String(value);
+  slider.disabled = disabled;
+  slider.setAttribute('aria-label', label);
+  slider.dataset.key = key;
+  const readout = document.createElement('span');
+  readout.className = 'theme-opacity-value';
+  readout.textContent = `${slider.value}${unit}`;
+  slider.addEventListener('input', () => {
+    const n = Number(slider.value);
+    readout.textContent = `${n}${unit}`;
+    onChange(n, false);
+  });
+  slider.addEventListener('change', () => onChange(Number(slider.value), true));
+  tools.append(slider, readout);
+  row.append(name, tools);
+  return row;
 }
 
 function colorRow(
@@ -247,12 +439,34 @@ function colorRow(
   };
 }
 
+function applyLive(): void {
+  applyThemeTo(document.documentElement.style, live);
+  const app = document.getElementById('app') ?? document.body;
+  syncSurface(
+    app,
+    live,
+    overlayKind({
+      settingsOpen: ui.state.settingsOpen,
+      settingsPage: ui.state.settingsPage,
+      drawer: ui.state.drawer,
+    }),
+  );
+  syncWallpaper(app, {
+    ...ui.state.theme,
+    ...live,
+    wallpaperUrl: ui.state.theme?.wallpaperUrl ?? live.wallpaperUrl,
+  });
+}
+
 function commit(theme: ThemeColors, persist: boolean): void {
   live = normalizeTheme(theme);
-  applyThemeTo(document.documentElement.style, live);
+  applyLive();
   const selected = matchingPresetId(live);
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.theme-preset')) {
     btn.classList.toggle('on', btn.dataset.id === selected);
+  }
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-surface]')) {
+    btn.classList.toggle('on', (btn.dataset.surface || 'flat') === (live.surface ?? 'flat'));
   }
   primaryInputs?.set(live.primary);
   secondaryInputs?.set(live.secondary);
@@ -264,6 +478,14 @@ function commit(theme: ThemeColors, persist: boolean): void {
       primary: live.primary,
       secondary: live.secondary,
       background: live.background ?? '',
+      wallpaper: live.wallpaper ?? '',
+      wallpaperOpacity: live.wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY,
+      wallpaperScale: live.wallpaperScale,
+      wallpaperX: live.wallpaperX,
+      wallpaperY: live.wallpaperY,
+      surface: live.surface ?? '',
+      glassOpacity: live.glassOpacity ?? DEFAULT_GLASS_OPACITY,
+      glassBlur: live.glassBlur ?? DEFAULT_GLASS_BLUR,
     });
   }
 }

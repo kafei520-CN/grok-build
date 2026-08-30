@@ -1,3 +1,4 @@
+import { formatContextWindow, parseContextWindow } from '../contextWindow';
 import type { ApiBackend, ApiEndpoint } from '../types';
 import { post, tr, ui } from './app';
 import { iconChevron } from './icons';
@@ -87,6 +88,15 @@ function endpointForm(): HTMLElement {
   urlWarn.className = 'settings-hint warn';
   urlWarn.hidden = true;
   url.append(urlHint, urlPreview, urlWarn);
+  const windowRow = field(tr('settingsApisWindow'), 'text', 'api-window');
+  windowRow.querySelector('input')!.placeholder = '128k';
+  const windowHint = document.createElement('div');
+  windowHint.className = 'settings-hint';
+  windowHint.textContent = tr('settingsApisWindowHint');
+  const windowWarn = document.createElement('div');
+  windowWarn.className = 'settings-hint warn';
+  windowWarn.hidden = true;
+  windowRow.append(windowHint, windowWarn);
   const key = field(tr('settingsApisKey'), 'password', 'api-key');
   key.querySelector('input')!.placeholder = currentId ? tr('settingsApisKeyKeep') : '';
   const proto = document.createElement('div');
@@ -143,7 +153,17 @@ function endpointForm(): HTMLElement {
     const modelVal = (model.querySelector('input') as HTMLInputElement).value.trim();
     const urlVal = (url.querySelector('input') as HTMLInputElement).value.trim();
     const keyVal = (key.querySelector('input') as HTMLInputElement).value;
+    const windowVal = (windowRow.querySelector('input') as HTMLInputElement).value;
     if (!nameVal || !modelVal || !urlVal) {
+      return;
+    }
+    let contextWindow: number | undefined;
+    try {
+      contextWindow = parseContextWindow(windowVal);
+      windowWarn.hidden = true;
+    } catch {
+      windowWarn.textContent = tr('settingsApisWindowInvalid');
+      windowWarn.hidden = false;
       return;
     }
     const id = editingId();
@@ -155,6 +175,7 @@ function endpointForm(): HTMLElement {
       baseUrl: urlVal,
       backend: (seg.dataset.apiBackend as ApiBackend) || 'chat_completions',
       apiKey: keyVal.trim() ? keyVal : undefined,
+      contextWindow,
     });
   });
   const cancel = document.createElement('button');
@@ -163,13 +184,16 @@ function endpointForm(): HTMLElement {
   cancel.textContent = tr('settingsApisCancel');
   cancel.addEventListener('click', () => post({ type: 'closeApiForm' }));
   actions.append(save, cancel);
-  wrap.append(title, name, model, proto, url, key, actions);
+  wrap.append(title, name, model, proto, url, windowRow, key, actions);
   if (currentId) {
     const current = (ui.state.apis ?? []).find((item) => item.id === currentId);
     if (current) {
       (name.querySelector('input') as HTMLInputElement).value = current.name;
       (model.querySelector('input') as HTMLInputElement).value = current.model;
       (url.querySelector('input') as HTMLInputElement).value = current.baseUrl;
+      (windowRow.querySelector('input') as HTMLInputElement).value = formatContextWindow(
+        current.contextWindow,
+      );
       seg.dataset.apiBackend = current.backend;
       for (const child of [...seg.children]) {
         child.classList.toggle('on', (child as HTMLElement).dataset.id === current.backend);
@@ -221,7 +245,8 @@ function endpointRow(item: ApiEndpoint): HTMLElement {
         ? tr('settingsApisResponses')
         : tr('settingsApisChat');
   const state = item.enabled ? tr('settingsApisOn') : tr('settingsApisOff');
-  hint.textContent = `${state} · ${proto} · ${item.model} · ${item.baseUrl}${item.hasKey ? ` · ${tr('settingsApisHasKey')}` : ''}`;
+  const windowHint = item.contextWindow ? ` · ${formatContextWindow(item.contextWindow)}` : '';
+  hint.textContent = `${state} · ${proto} · ${item.model} · ${item.baseUrl}${windowHint}${item.hasKey ? ` · ${tr('settingsApisHasKey')}` : ''}`;
   copy.append(name, hint);
   copy.addEventListener('click', () => post({ type: 'openApiForm', id: item.id }));
   const tools = document.createElement('div');

@@ -41,7 +41,15 @@ import {
   toggleSkill as toggleSkillDir,
 } from './skillsHost';
 import { mergeModelCatalog } from './sessionUpdates';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { normalizeTheme } from './theme';
+import {
+  isWallpaperFile,
+  WALLPAPER_IMAGE_EXTS,
+  WALLPAPER_VIDEO_EXTS,
+  withWallpaperUrl,
+} from './wallpaper';
 import type {
   AgentDefItem,
   ApiEndpoint,
@@ -404,6 +412,17 @@ export function openTheme(host: SettingsHost): void {
 export function closeTheme(host: SettingsHost): void {
   host.settingsPage = 'main';
   host.emit();
+}
+
+export function openThemePreview(host: SettingsHost): void {
+  if (!host.theme.wallpaper) {
+    return;
+  }
+  openSettingsPage(host, 'theme-preview');
+}
+
+export function closeThemePreview(host: SettingsHost): void {
+  openSettingsPage(host, 'theme');
 }
 
 export function openMcps(host: SettingsHost): void {
@@ -909,23 +928,97 @@ export async function refreshMcpsInner(host: SettingsHost): Promise<void> {
   }
 }
 
+export function themeForUi(theme: ThemeColors): ThemeColors {
+  return withWallpaperUrl(theme, plat());
+}
+
 export function setTheme(
   host: SettingsHost,
   primary: string,
   secondary: string,
   background?: string,
+  patch?: {
+    wallpaper?: 'icon' | 'custom' | '';
+    wallpaperOpacity?: number;
+    wallpaperScale?: number;
+    wallpaperX?: number;
+    wallpaperY?: number;
+    surface?: 'glass' | 'solid' | '';
+    glassOpacity?: number;
+    glassBlur?: number;
+  },
 ): void {
-  const next = normalizeTheme({ primary, secondary, background });
+  const next = normalizeTheme({
+    ...host.theme,
+    primary,
+    secondary,
+    background: background || undefined,
+    wallpaper: patch?.wallpaper === '' ? undefined : (patch?.wallpaper ?? host.theme.wallpaper),
+    wallpaperOpacity: patch?.wallpaperOpacity ?? host.theme.wallpaperOpacity,
+    wallpaperScale: patch && 'wallpaperScale' in patch ? patch.wallpaperScale : host.theme.wallpaperScale,
+    wallpaperX: patch && 'wallpaperX' in patch ? patch.wallpaperX : host.theme.wallpaperX,
+    wallpaperY: patch && 'wallpaperY' in patch ? patch.wallpaperY : host.theme.wallpaperY,
+    surface: patch?.surface === '' ? undefined : (patch?.surface ?? host.theme.surface),
+    glassOpacity: patch && 'glassOpacity' in patch ? patch.glassOpacity : host.theme.glassOpacity,
+    glassBlur: patch && 'glassBlur' in patch ? patch.glassBlur : host.theme.glassBlur,
+  });
   if (
     next.primary === host.theme.primary &&
     next.secondary === host.theme.secondary &&
-    (next.background ?? '') === (host.theme.background ?? '')
+    (next.background ?? '') === (host.theme.background ?? '') &&
+    (next.wallpaper ?? '') === (host.theme.wallpaper ?? '') &&
+    (next.wallpaperOpacity ?? 0) === (host.theme.wallpaperOpacity ?? 0) &&
+    (next.wallpaperPath ?? '') === (host.theme.wallpaperPath ?? '') &&
+    (next.wallpaperScale ?? 0) === (host.theme.wallpaperScale ?? 0) &&
+    (next.wallpaperX ?? 0) === (host.theme.wallpaperX ?? 0) &&
+    (next.wallpaperY ?? 0) === (host.theme.wallpaperY ?? 0) &&
+    (next.surface ?? '') === (host.theme.surface ?? '') &&
+    (next.glassOpacity ?? 0) === (host.theme.glassOpacity ?? 0) &&
+    (next.glassBlur ?? 0) === (host.theme.glassBlur ?? 0)
   ) {
     return;
   }
   host.theme = next;
-  void plat().setState('ui.theme', host.theme);
+  void plat().setState('ui.theme', next);
   host.emit();
+}
+
+export async function pickThemeWallpaper(host: SettingsHost): Promise<void> {
+  const picked = await plat().openFiles({
+    title: tr('themeWallpaperPick'),
+    filters: {
+      [tr('themeWallpaperPick')]: [...WALLPAPER_IMAGE_EXTS, ...WALLPAPER_VIDEO_EXTS],
+      [tr('themeWallpaperImages')]: [...WALLPAPER_IMAGE_EXTS],
+      [tr('themeWallpaperVideos')]: [...WALLPAPER_VIDEO_EXTS],
+    },
+  });
+  const src = picked?.[0];
+  if (!src) {
+    return;
+  }
+  if (!isWallpaperFile(src)) {
+    logWarn(`wallpaper type: ${path.extname(src)}`);
+    return;
+  }
+  try {
+    const ext = path.extname(src).toLowerCase() || '.png';
+    const dest = path.join(plat().homeDir(), '.grok', `theme-wallpaper-${Date.now()}${ext}`);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.copyFile(src, dest);
+    const prev = host.theme.wallpaperPath;
+    if (prev && path.resolve(prev) !== path.resolve(dest) && path.basename(prev).startsWith('theme-wallpaper')) {
+      void fs.unlink(prev).catch(() => undefined);
+    }
+    host.theme = normalizeTheme({
+      ...host.theme,
+      wallpaper: 'custom',
+      wallpaperPath: dest,
+    });
+    void plat().setState('ui.theme', host.theme);
+    host.emit();
+  } catch (error) {
+    plat().warn(error instanceof Error ? error.message : String(error));
+  }
 }
 
 export async function saveApi(
@@ -937,6 +1030,7 @@ export async function saveApi(
     baseUrl: string;
     backend: ApiEndpoint['backend'];
     apiKey?: string;
+    contextWindow?: number;
   },
 ): Promise<void> {
   try {

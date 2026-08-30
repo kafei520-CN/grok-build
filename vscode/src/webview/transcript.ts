@@ -649,7 +649,9 @@ function submitUserEdit(message: ChatMessage): void {
     return;
   }
   ui.editingUserId = undefined;
+  ui.editDraft = '';
   post({ type: 'editUserPrompt', messageId: message.id, text });
+  render();
 }
 
 function assistantColumn(message: ChatMessage): HTMLElement {

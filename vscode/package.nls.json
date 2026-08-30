@@ -30,6 +30,7 @@
   "config.permissionMode.auto": "Approve Allow once without prompting.",
   "config.includeSelectionOnSend": "When the editor has a selection, attach it to the next prompt.",
   "config.alwaysApprove": "Skip tool permission prompts on new and loaded sessions. Does not require restarting the agent.",
+  "config.notifySound": "Play a sound when a turn finishes or is interrupted.",
   "config.locale": "Language for the Grok sidebar. auto follows the VS Code display language.",
   "config.locale.auto": "Follow VS Code display language",
   "config.locale.en": "English",

@@ -1,10 +1,13 @@
 import { randomBytes } from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { COMMANDS, VIEW_ID } from './constants';
 import type { GrokController } from './controller';
 import { dispatchUi } from './dispatch';
 import { logInfo } from './logger';
 import type { ChatState, WebviewToHost } from './types';
+import { bindChatWebview } from './vscodePlatform';
 
 export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = VIEW_ID;
@@ -33,11 +36,14 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
     logInfo('webview resolved');
     this.view = webviewView;
     const webview = webviewView.webview;
+    bindChatWebview(webview);
     webview.options = {
       enableScripts: true,
       localResourceRoots: [
         vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
         vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+        vscode.Uri.joinPath(this.context.extensionUri, 'resources'),
+        vscode.Uri.file(path.join(os.homedir(), '.grok')),
       ],
     };
     webview.html = this.renderHtml(webview);
@@ -70,7 +76,7 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; img-src ${webview.cspSource} data: https:; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}';" />
+    content="default-src 'none'; img-src ${webview.cspSource} data: https:; media-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="${styleUri}" />
   <title>Grok Build</title>

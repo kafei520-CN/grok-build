@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type GrokSettings } from '../types';
+import { DEFAULT_SETTINGS, type GrokSettings, type WebviewToHost } from '../types';
 import { post, tr, ui } from './app';
 import { iconButton } from './dom';
 import { iconBack, iconClose, iconStar } from './icons';
@@ -11,6 +11,7 @@ import { extNavRow, mountExtBody } from './settingsExt';
 import { memoryNavRow, mountMemoryBody } from './settingsMemory';
 import { mountWorktreesBody, worktreesNavRow } from './settingsWorktrees';
 import { mountThemeBody, themeNavRow } from './settingsTheme';
+import { mountThemePreview } from './settingsThemePreview';
 
 let paintedKey: string | undefined;
 
@@ -40,7 +41,7 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.marketplace ?? []).map((row) => row.id).join('|'),
     (ui.state.workflows ?? []).map((row) => row.id).join('|'),
     (ui.state.memoryFiles ?? []).map((row) => row.id).join('|'),
-    `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}`,
+    `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}|${ui.state.theme?.wallpaper ?? ''}|${ui.state.theme?.wallpaperUrl ?? ''}|${ui.state.theme?.surface ?? ''}`,
   ].join(':');
   if (!existing || paintedKey !== key) {
     existing?.remove();
@@ -54,6 +55,12 @@ export function patchSettings(parent: HTMLElement): void {
 function mountSettings(): HTMLElement {
   const el = document.createElement('section');
   el.id = 'grok-settings';
+  const page = ui.state.settingsPage ?? 'main';
+  if (page === 'theme-preview') {
+    el.className = 'settings wp-editor';
+    el.append(mountThemePreview());
+    return el;
+  }
   el.className = 'settings';
   const head = document.createElement('header');
   head.className = 'settings-head';
@@ -63,7 +70,6 @@ function mountSettings(): HTMLElement {
   mark.className = 'mark';
   mark.innerHTML = iconStar();
   const title = document.createElement('span');
-  const page = ui.state.settingsPage ?? 'main';
   title.textContent = settingsTitle(page);
   brand.append(mark, title);
   const tools = document.createElement('div');
@@ -80,32 +86,7 @@ function mountSettings(): HTMLElement {
     page === 'extensions' ||
     page === 'memory'
   ) {
-    tools.append(
-      iconButton(tr('settingsRulesBack'), iconBack(), () =>
-        post({
-          type:
-            page === 'skills'
-              ? 'closeSkills'
-              : page === 'api-form'
-                ? 'closeApiForm'
-                : page === 'apis'
-                ? 'closeApis'
-                : page === 'theme'
-                  ? 'closeTheme'
-                  : page === 'mcps'
-                    ? 'closeMcps'
-                    : page === 'agents'
-                      ? 'closeAgents'
-                      : page === 'worktrees'
-                        ? 'closeWorktrees'
-                        : page === 'extensions'
-                          ? 'closeExt'
-                          : page === 'memory'
-                            ? 'closeMemory'
-                            : 'closeRules',
-        }),
-      ),
-    );
+    tools.append(iconButton(tr('settingsRulesBack'), iconBack(), () => post(settingsBackMessage(page))));
   }
   tools.append(iconButton(tr('settingsClose'), iconClose(), () => post({ type: 'closeSettings' })));
   head.append(brand, tools);
@@ -176,6 +157,18 @@ function mountSettings(): HTMLElement {
         () => Boolean(ui.state.timestamps),
         () => post({ type: 'toggleFlag', flag: 'timestamps' }),
       ),
+      toggleRow(
+        'notifySound',
+        tr('settingsNotify'),
+        tr('settingsNotifyHint'),
+        () => current().notifySound !== false,
+        () =>
+          post({
+            type: 'updateSetting',
+            key: 'notifySound',
+            value: !(ui.state.settings?.notifySound !== false),
+          }),
+      ),
     ]),
     section(tr('settingsAgent'), [
       permissionRow(),
@@ -238,6 +231,35 @@ function mountSettings(): HTMLElement {
   el.append(head, body);
   syncSettings(el);
   return el;
+}
+
+export function settingsBackMessage(page: string): WebviewToHost {
+  switch (page) {
+    case 'skills':
+      return { type: 'closeSkills' };
+    case 'api-form':
+      return { type: 'closeApiForm' };
+    case 'apis':
+      return { type: 'closeApis' };
+    case 'theme':
+      return { type: 'closeTheme' };
+    case 'theme-preview':
+      return { type: 'closeThemePreview' };
+    case 'mcps':
+      return { type: 'closeMcps' };
+    case 'agents':
+      return { type: 'closeAgents' };
+    case 'worktrees':
+      return { type: 'closeWorktrees' };
+    case 'extensions':
+      return { type: 'closeExt' };
+    case 'memory':
+      return { type: 'closeMemory' };
+    case 'rules':
+      return { type: 'closeRules' };
+    default:
+      return { type: 'closeSettings' };
+  }
 }
 
 function settingsTitle(page: string): string {
@@ -457,6 +479,7 @@ function syncSettings(root: HTMLElement): void {
   syncSwitch(root, 'compactMode', Boolean(ui.state.compactMode));
   syncSwitch(root, 'multiline', Boolean(ui.state.multiline));
   syncSwitch(root, 'timestamps', Boolean(ui.state.timestamps));
+  syncSwitch(root, 'notifySound', settings.notifySound !== false);
   syncSwitch(root, 'alwaysApprove', settings.alwaysApprove);
   syncSwitch(root, 'includeSelectionOnSend', settings.includeSelectionOnSend);
   syncSwitch(root, 'preferWorkspaceBinary', settings.preferWorkspaceBinary);

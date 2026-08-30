@@ -30,6 +30,7 @@
   "config.permissionMode.auto": "自动批准“允许一次”，不再弹出。",
   "config.includeSelectionOnSend": "编辑器有选区时，将选区附加到下一条提示。",
   "config.alwaysApprove": "新建或加载会话时跳过工具确认，不必重启 Agent。",
+  "config.notifySound": "任务完成或意外中断时播放提示音。",
   "config.locale": "Grok 侧边栏界面语言。auto 跟随 VS Code 显示语言。",
   "config.locale.auto": "跟随 VS Code 显示语言",
   "config.locale.en": "English",

@@ -5,7 +5,14 @@ import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
 object GrokHtml {
-    fun writeChatPage(): File = writePage("chat", "Grok Build", "chat.css", "webview.js", SharedAssets.webviewJs(), SharedAssets.chatCss())
+    fun writeChatPage(): File {
+        val page = writePage("chat", "Grok Build", "chat.css", "webview.js", SharedAssets.webviewJs(), SharedAssets.chatCss())
+        try {
+            copy(SharedAssets.grokSymbol(), File(page.parentFile, "grok-symbol.png"))
+        } catch (_: Throwable) {
+        }
+        return page
+    }
 
     fun writeDiffPage(): File = writePage("diff", "Grok Diff", "diff.css", "diff.js", SharedAssets.diffJs(), SharedAssets.diffCss())
 
@@ -44,7 +51,7 @@ object GrokHtml {
           <meta charset="UTF-8" />
           <meta name="color-scheme" content="dark light" />
           <meta http-equiv="Content-Security-Policy"
-            content="default-src 'none'; img-src data: https: file:; style-src 'unsafe-inline' file:; script-src 'unsafe-inline' file:; connect-src file:; font-src file: data:;" />
+            content="default-src 'none'; img-src data: https: file:; media-src file: blob: 'self'; style-src 'unsafe-inline' file:; script-src 'unsafe-inline' file:; connect-src file:; font-src file: data:;" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <link rel="stylesheet" href="$css" />
           ${GrokTheme.styleTag()}

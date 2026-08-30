@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -16,8 +17,13 @@ import { spawnProcessTerminal } from './acpTerminal';
 import type { Platform } from './platform';
 
 let findFilesCts: vscode.CancellationTokenSource | undefined;
+let chatWebview: vscode.Webview | undefined;
 
 let channel: vscode.OutputChannel | undefined;
+
+export function bindChatWebview(webview: vscode.Webview): void {
+  chatWebview = webview;
+}
 
 function logChannel(): vscode.OutputChannel {
   if (!channel) {
@@ -260,6 +266,23 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
           onRevert: opts.onRevert,
         },
       );
+    },
+    mediaFile(name) {
+      const direct = path.join(context.extensionPath, 'media', name);
+      if (fs.existsSync(direct)) {
+        return direct;
+      }
+      if (name === 'grok-symbol.png') {
+        const fallback = path.join(context.extensionPath, 'resources', 'icon.png');
+        if (fs.existsSync(fallback)) {
+          return fallback;
+        }
+      }
+      return undefined;
+    },
+    toResourceUrl(filePath) {
+      const uri = vscode.Uri.file(filePath);
+      return (chatWebview ?? undefined)?.asWebviewUri(uri).toString() ?? uri.toString();
     },
     onTrustChange(cb) {
       return vscode.workspace.onDidGrantWorkspaceTrust(cb);

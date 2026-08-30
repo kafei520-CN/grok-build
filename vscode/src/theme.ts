@@ -1,4 +1,15 @@
 import type { ThemeColors } from './types';
+import {
+  clampGlassBlur,
+  clampGlassOpacity,
+  clampWallpaperAxis,
+  clampWallpaperOpacity,
+  clampWallpaperScale,
+  DEFAULT_GLASS_BLUR,
+  DEFAULT_GLASS_OPACITY,
+  surfaceKind,
+  wallpaperKind,
+} from './wallpaper';
 
 export const DEFAULT_THEME: ThemeColors = {
   primary: '#b9d4ff',
@@ -56,10 +67,32 @@ export function contrastFg(background: string): string {
 export function normalizeTheme(raw: unknown): ThemeColors {
   const value = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const background = parseHex(value.background);
+  const wallpaper = wallpaperKind(value.wallpaper);
+  const wallpaperPath =
+    typeof value.wallpaperPath === 'string' && value.wallpaperPath.trim()
+      ? value.wallpaperPath.trim()
+      : undefined;
+  const customPath = wallpaper === 'custom' ? wallpaperPath : undefined;
+  const kind = wallpaper === 'custom' && !customPath ? undefined : wallpaper;
+  const surface = surfaceKind(value.surface);
+  const manual = kind && value.wallpaperScale != null;
   return {
     primary: parseHex(value.primary) ?? DEFAULT_THEME.primary,
     secondary: parseHex(value.secondary) ?? DEFAULT_THEME.secondary,
     ...(background ? { background } : {}),
+    ...(kind ? { wallpaper: kind } : {}),
+    ...(kind ? { wallpaperOpacity: clampWallpaperOpacity(value.wallpaperOpacity) } : {}),
+    ...(customPath ? { wallpaperPath: customPath } : {}),
+    ...(manual ? { wallpaperScale: clampWallpaperScale(value.wallpaperScale) } : {}),
+    ...(manual ? { wallpaperX: clampWallpaperAxis(value.wallpaperX) } : {}),
+    ...(manual ? { wallpaperY: clampWallpaperAxis(value.wallpaperY) } : {}),
+    ...(surface ? { surface } : {}),
+    ...(surface === 'glass' || value.glassOpacity != null
+      ? { glassOpacity: clampGlassOpacity(value.glassOpacity) }
+      : {}),
+    ...(surface === 'glass' || value.glassBlur != null
+      ? { glassBlur: clampGlassBlur(value.glassBlur) }
+      : {}),
   };
 }
 
@@ -94,6 +127,8 @@ export function applyThemeTo(
   style.setProperty('--ice', `color-mix(in srgb, ${theme.primary} 72%, var(--fg))`);
   style.setProperty('--ice-dim', 'color-mix(in srgb, var(--ice) 28%, transparent)');
   style.setProperty('--ok', theme.secondary);
+  style.setProperty('--glass-fill', `${theme.glassOpacity ?? DEFAULT_GLASS_OPACITY}%`);
+  style.setProperty('--glass-blur', `${theme.glassBlur ?? DEFAULT_GLASS_BLUR}px`);
 }
 
 function toHex(r: number, g: number, b: number): string | undefined {

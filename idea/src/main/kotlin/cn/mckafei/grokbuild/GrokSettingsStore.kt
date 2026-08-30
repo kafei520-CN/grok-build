@@ -14,6 +14,7 @@ object GrokSettingsStore {
         var includeSelectionOnSend: Boolean = true,
         var alwaysApprove: Boolean = false,
         var locale: String = "auto",
+        var notifySound: Boolean = true,
     )
 
     fun file(): File = File(System.getProperty("user.home"), ".grok/idea-settings.json")
@@ -32,6 +33,7 @@ object GrokSettingsStore {
             includeSelectionOnSend = bool(raw, "includeSelectionOnSend", true),
             alwaysApprove = bool(raw, "alwaysApprove", false),
             locale = str(raw, "locale", "auto"),
+            notifySound = bool(raw, "notifySound", true),
         )
     }
 
@@ -46,6 +48,7 @@ object GrokSettingsStore {
         obj.addProperty("includeSelectionOnSend", snapshot.includeSelectionOnSend)
         obj.addProperty("alwaysApprove", snapshot.alwaysApprove)
         obj.addProperty("locale", snapshot.locale)
+        obj.addProperty("notifySound", snapshot.notifySound)
         val target = file()
         val tmp = File(target.path + ".tmp")
         tmp.writeText(obj.toString() + "\n", Charsets.UTF_8)

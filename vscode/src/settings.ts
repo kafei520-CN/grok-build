@@ -22,6 +22,7 @@ export function readGrokSettings(): GrokSettings {
     ),
     alwaysApprove: p.getConfig('alwaysApprove', DEFAULT_SETTINGS.alwaysApprove),
     locale: locale === 'en' || locale === 'zh-CN' ? locale : 'auto',
+    notifySound: p.getConfig('notifySound', DEFAULT_SETTINGS.notifySound),
   };
 }
 
@@ -43,6 +44,7 @@ export function normalizeSetting(
     case 'preferWorkspaceBinary':
     case 'includeSelectionOnSend':
     case 'alwaysApprove':
+    case 'notifySound':
       return typeof value === 'boolean' ? value : undefined;
     case 'permissionMode':
       return value === 'auto' || value === 'ask' || value === 'acceptEdits' ? value : undefined;
