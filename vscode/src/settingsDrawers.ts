@@ -414,6 +414,15 @@ export function closeTheme(host: SettingsHost): void {
   host.emit();
 }
 
+export function openRemote(host: SettingsHost): void {
+  openSettingsPage(host, 'remote');
+}
+
+export function closeRemote(host: SettingsHost): void {
+  host.settingsPage = 'main';
+  host.emit();
+}
+
 export function openThemePreview(host: SettingsHost): void {
   if (!host.theme.wallpaper) {
     return;

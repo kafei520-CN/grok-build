@@ -60,7 +60,8 @@ export type SettingsPage =
   | 'agents'
   | 'worktrees'
   | 'extensions'
-  | 'memory';
+  | 'memory'
+  | 'remote';
 
 export interface ThemeColors {
   primary: string;
@@ -462,6 +463,27 @@ export interface ChatState {
   memoryFiles?: MemoryFile[];
   extTab?: 'plugins' | 'marketplace' | 'hooks' | 'workflows';
   theme?: ThemeColors;
+  remote?: RemoteAccessInfo;
+}
+
+export interface RemoteAccessInfo {
+  running: boolean;
+  port: number;
+  bind?: '0.0.0.0' | '127.0.0.1';
+  local?: boolean;
+  public?: boolean;
+  code: string;
+  localCode?: string;
+  publicUrl?: string;
+  urls: string[];
+  clients: number;
+  error?: string;
+  tunnel?: 'off' | 'connecting' | 'up' | 'error';
+  tunnelError?: string;
+  tunnelHost?: string;
+  tunnelUser?: string;
+  sshPort?: number;
+  forwardPort?: number;
 }
 
 export interface AuthMethodWire {
@@ -610,6 +632,30 @@ export type WebviewToHost =
   | { type: 'toggleApi'; id: string }
   | { type: 'openTheme' }
   | { type: 'closeTheme' }
+  | { type: 'openRemote' }
+  | { type: 'closeRemote' }
+  | {
+      type: 'startRemote';
+      port?: number;
+      local?: boolean;
+      public?: boolean;
+      host?: string;
+      user?: string;
+      sshPort?: number;
+      forwardPort?: number;
+      publicUrl?: string;
+    }
+  | { type: 'stopRemote' }
+  | { type: 'rotateRemoteCode' }
+  | { type: 'setRemotePublicUrl'; url: string }
+  | {
+      type: 'setRemoteTunnel';
+      host?: string;
+      user?: string;
+      sshPort?: number;
+      forwardPort?: number;
+      publicUrl?: string;
+    }
   | {
       type: 'setTheme';
       primary: string;

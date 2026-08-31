@@ -179,6 +179,7 @@ class Sidecar(
         cmd.environment["GROK_VERSION"] = SharedAssets.pluginVersion()
         cmd.environment["GROK_LANG"] = Locale.getDefault().toLanguageTag()
         cmd.environment["GROK_IDE"] = "idea"
+        cmd.environment["GROK_REMOTE_ASSETS"] = GrokHtml.writeChatPage().parentFile.absolutePath
         cmd.environment["NODE_NO_WARNINGS"] = "1"
         val pathKey = cmd.environment.keys.firstOrNull { it.equals("PATH", ignoreCase = true) }
             ?: if (SystemInfo.isWindows) "Path" else "PATH"

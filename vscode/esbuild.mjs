@@ -100,6 +100,8 @@ const tests = {
     'src/dispatch.test.ts',
     'src/reconnect.test.ts',
     'src/notify.test.ts',
+    'src/remoteGateway.test.ts',
+    'src/remoteTunnel.test.ts',
   ],
   outdir: 'dist/test',
   format: 'cjs',

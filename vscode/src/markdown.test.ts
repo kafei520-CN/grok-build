@@ -18,6 +18,26 @@ describe('markdown', () => {
     assert.match(html, /<p>after<\/p>/);
   });
 
+  it('opens GitHub start:end:path fences and does not swallow later headings', () => {
+    const html = renderMarkdown(
+      [
+        '```java',
+        'int x = 1;',
+        '```54:68:src/main/java/Foo.java',
+        'if (ok) {',
+        '  return;',
+        '}',
+        '```',
+        '',
+        '### 2. 表没有 `dimension_id`',
+      ].join('\n'),
+    );
+    assert.match(html, /data-lang="java"/);
+    assert.match(html, /data-lang="Foo.java"/);
+    assert.match(html, /<h3>2. 表没有 <code>dimension_id<\/code><\/h3>/);
+    assert.doesNotMatch(html, /### 2\./);
+  });
+
   it('renders headings, lists, quotes, and breaks', () => {
     const html = renderMarkdown(
       ['# Title', '', '- one', '- two', '', '> quoted **x**', '', 'hello', 'world'].join('\n'),
@@ -57,5 +77,29 @@ describe('markdown', () => {
   it('takes the basename of mixed path styles', () => {
     assert.equal(fileName('src\\foo\\bar.ts'), 'bar.ts');
     assert.equal(fileName('/tmp/a.txt'), 'a.txt');
+  });
+
+  it('renders a long GFM table and heading instead of leaving pipes', () => {
+    const html = renderMarkdown(
+      [
+        '约定保持：**所有 API 只允许服务端主线程调用**，网络包统一 `enqueueWork`。',
+        '',
+        '---',
+        '',
+        '## 建议改动顺序（不改寻路语义）',
+        '',
+        '| 优先级 | 改什么 | 原理 |',
+        '|--------|--------|------|',
+        '| 高 | 所有摘 `pending` 的路径都 cancel | 取消的 Future 必须真正停下工人 |',
+        '| 中 | 限制 in-flight ≤ 工人数x2 | 无界队列会堆内存 |',
+      ].join('\n'),
+    );
+    assert.match(html, /<hr \/>/);
+    assert.match(html, /<h2>建议改动顺序（不改寻路语义）<\/h2>/);
+    assert.match(html, /<table>/);
+    assert.match(html, /<th style="text-align:left">优先级<\/th>/);
+    assert.match(html, /<code>pending<\/code>/);
+    assert.match(html, /<code>enqueueWork<\/code>/);
+    assert.doesNotMatch(html, /\|--------\|/);
   });
 });

@@ -12,6 +12,7 @@ import { memoryNavRow, mountMemoryBody } from './settingsMemory';
 import { mountWorktreesBody, worktreesNavRow } from './settingsWorktrees';
 import { mountThemeBody, themeNavRow } from './settingsTheme';
 import { mountThemePreview } from './settingsThemePreview';
+import { mountRemoteBody, remoteNavRow } from './settingsRemote';
 
 let paintedKey: string | undefined;
 
@@ -42,6 +43,7 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.workflows ?? []).map((row) => row.id).join('|'),
     (ui.state.memoryFiles ?? []).map((row) => row.id).join('|'),
     `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}|${ui.state.theme?.wallpaper ?? ''}|${ui.state.theme?.wallpaperUrl ?? ''}|${ui.state.theme?.surface ?? ''}`,
+    `${ui.state.remote?.running ? '1' : '0'}|${ui.state.remote?.local ? '1' : '0'}|${ui.state.remote?.public ? '1' : '0'}|${ui.state.remote?.port ?? ''}|${ui.state.remote?.code ?? ''}|${ui.state.remote?.publicUrl ?? ''}|${ui.state.remote?.tunnel ?? ''}|${ui.state.remote?.tunnelError ?? ''}|${ui.state.remote?.tunnelHost ?? ''}|${ui.state.remote?.forwardPort ?? ''}|${ui.state.remote?.clients ?? 0}|${ui.state.remote?.error ?? ''}`,
   ].join(':');
   if (!existing || paintedKey !== key) {
     existing?.remove();
@@ -84,7 +86,8 @@ function mountSettings(): HTMLElement {
     page === 'agents' ||
     page === 'worktrees' ||
     page === 'extensions' ||
-    page === 'memory'
+    page === 'memory' ||
+    page === 'remote'
   ) {
     tools.append(iconButton(tr('settingsRulesBack'), iconBack(), () => post(settingsBackMessage(page))));
   }
@@ -130,11 +133,16 @@ function mountSettings(): HTMLElement {
     el.append(head, mountMemoryBody());
     return el;
   }
+  if (page === 'remote') {
+    el.append(head, mountRemoteBody());
+    return el;
+  }
   const body = document.createElement('div');
   body.className = 'settings-body';
   body.append(
     section(tr('settingsUi'), [
       themeNavRow(),
+      remoteNavRow(),
       localeRow(),
       toggleRow(
         'compactMode',
@@ -243,6 +251,8 @@ export function settingsBackMessage(page: string): WebviewToHost {
       return { type: 'closeApis' };
     case 'theme':
       return { type: 'closeTheme' };
+    case 'remote':
+      return { type: 'closeRemote' };
     case 'theme-preview':
       return { type: 'closeThemePreview' };
     case 'mcps':
@@ -277,6 +287,9 @@ function settingsTitle(page: string): string {
   }
   if (page === 'theme') {
     return tr('settingsTheme');
+  }
+  if (page === 'remote') {
+    return tr('settingsRemote');
   }
   if (page === 'mcps') {
     return tr('settingsMcps');

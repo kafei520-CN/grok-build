@@ -31,6 +31,9 @@ import { fileName, renderMarkdown } from './markdown';
 
 type Turn = { user?: ChatMessage; assistant?: ChatMessage };
 
+const STREAM_MD_MS = 80;
+const pendingMarkdown = new WeakMap<HTMLElement, { src: string; timer: ReturnType<typeof setTimeout> }>();
+
 export function renderBody(): HTMLElement {
   const el = document.createElement('main');
   el.className = 'body';
@@ -247,9 +250,7 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
         col.prepend(answer);
       }
     }
-    if (answer.dataset.len !== String(assistant.text.length)) {
-      setMarkdown(answer, assistant.text, Boolean(assistant.streaming));
-    }
+    setMarkdown(answer, assistant.text, Boolean(assistant.streaming));
     col.querySelector('.pulse')?.remove();
   }
   patchErrorCard(col, assistant);
@@ -313,16 +314,45 @@ function patchWorkBody(body: HTMLElement | null, message: ChatMessage): void {
 }
 
 function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
-  const len = String(src.length);
-  if (el.dataset.len === len) {
+  const flush = (text: string, mode: 's' | 'd'): void => {
+    const len = String(text.length);
+    if (el.dataset.len === len && el.dataset.md === mode) {
+      return;
+    }
+    el.dataset.len = len;
+    el.dataset.md = mode;
+    el.innerHTML = renderMarkdown(text);
+  };
+  const cancel = (): void => {
+    const hold = pendingMarkdown.get(el);
+    if (hold) {
+      clearTimeout(hold.timer);
+      pendingMarkdown.delete(el);
+    }
+  };
+  if (!streaming) {
+    cancel();
+    flush(src, 'd');
     return;
   }
-  el.dataset.len = len;
-  if (streaming) {
-    el.textContent = src;
+  const hold = pendingMarkdown.get(el);
+  if (hold) {
+    hold.src = src;
     return;
   }
-  el.innerHTML = renderMarkdown(src);
+  if (!el.dataset.len) {
+    flush(src, 's');
+  }
+  pendingMarkdown.set(el, {
+    src,
+    timer: setTimeout(() => {
+      const next = pendingMarkdown.get(el);
+      pendingMarkdown.delete(el);
+      if (next) {
+        flush(next.src, 's');
+      }
+    }, STREAM_MD_MS),
+  });
 }
 
 function patchAsk(body: HTMLElement): void {
@@ -664,6 +694,7 @@ function assistantColumn(message: ChatMessage): HTMLElement {
     const body = document.createElement('div');
     body.className = 'md answer';
     body.dataset.len = String(message.text.length);
+    body.dataset.md = message.streaming ? 's' : 'd';
     body.innerHTML = renderMarkdown(message.text);
     el.append(body);
   } else if (message.error?.retrying) {

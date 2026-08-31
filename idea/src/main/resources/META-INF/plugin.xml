@@ -12,7 +12,14 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.10: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.17: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.17 — Public remote is a single on/off switch that uses the built-in relay. The pairing page no longer tells HTTP users to drop https.</p>
+<p>0.2.16 — One plugin allows one browser. The default VPS can relay many plugins at once by assigning each a free public port. Pairing codes cannot be stacked.</p>
+<p>0.2.15 — Remote access splits LAN and public. Public mode dials your VPS with an SSH reverse tunnel and issues one pairing code per person.</p>
+<p>0.2.14 — iPad/Safari LAN remote: the pairing token is put on the WebSocket URL so the session can open without cookies.</p>
+<p>0.2.13 — LAN remote access: a pairing-code page in Settings starts an HTTP/WebSocket server so a browser can open the same chat.</p>
+<p>0.2.12 — Long streams throttle Markdown paints so the IDE stays responsive. GitHub start:end:path fences no longer swallow later headings.</p>
+<p>0.2.11 — Long streaming replies render Markdown as HTML instead of dumping raw pipes and hashes.</p>
 <p>0.2.10 — Model and effort dropdowns sit on glass layer 4 and open above the composer.</p>
 <p>0.2.9 — Markdown tables, inline code, the edits bar, and file chips are frosted glass like the rest of the chrome.</p>
 <p>0.2.8 — Glass chrome gets a 1px white edge, top highlight, and drop shadow. Component blur is a separate slider from wallpaper blur.</p>

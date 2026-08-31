@@ -34,6 +34,7 @@ import {
 } from './sessionUpdates';
 import { FALLBACK_COMMANDS, classifySlash, modeLabel, promptModeMeta, type HostAction } from './slash';
 import { bindPlatform, plat, type Platform } from './platform';
+import { dispatchUi } from './dispatch';
 
 import { gitProbePaths } from './fork';
 import { runSlashAction, type SlashRuntime } from './slashHost';
@@ -88,6 +89,26 @@ import { disposeAllTerminals } from './acpTerminal';
 import { AGENT_RECONNECT_MAX, reconnectDelayMs } from './reconnect';
 import { workspaceStartupHints } from './startup';
 import { DEFAULT_THEME, normalizeTheme } from './theme';
+import {
+  DEFAULT_REMOTE_PORT,
+  RemoteGateway,
+  clampRemotePort,
+  normalizePublicUrl,
+  remoteBindHost,
+  resolveRemoteAssets,
+} from './remoteGateway';
+import {
+  advertisedPublicUrl,
+  clampSshPort,
+  DEFAULT_FORWARD_PORT,
+  DEFAULT_PUBLIC_USER,
+  DEFAULT_SSH_PORT,
+  ReverseTunnel,
+  resolveForwardPort,
+  resolvePublicHost,
+  sanitizeTunnelUser,
+} from './remoteTunnel';
+import type { RemoteAccessInfo } from './types';
 import type { NotifyCue } from './notify';
 
 export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
@@ -121,6 +142,17 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   memoryFiles: MemoryFile[] = [];
   extTab: 'plugins' | 'marketplace' | 'hooks' | 'workflows' = 'plugins';
   theme: ThemeColors = DEFAULT_THEME;
+  private remote?: RemoteGateway;
+  private remoteWatch: Array<{ dispose(): void }> = [];
+  private remoteLocal = false;
+  private remotePublic = false;
+  private remotePort = DEFAULT_REMOTE_PORT;
+  private remotePublicUrl = '';
+  private remoteHost = '';
+  private remoteUser = DEFAULT_PUBLIC_USER;
+  private remoteSshPort = DEFAULT_SSH_PORT;
+  private remoteForwardPort = DEFAULT_FORWARD_PORT;
+  private readonly tunnel = new ReverseTunnel();
   history?: string[];
   drawer?: DrawerId;
   drawerTab?: string;
@@ -182,6 +214,15 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const profile = plat().getState('ui.agentProfile', '');
     this.agentProfile = typeof profile === 'string' && profile.trim() ? profile.trim() : undefined;
     this.skipInteractiveLogin = Boolean(plat().getState('ui.skipLogin', false));
+    this.remotePort = clampRemotePort(plat().getState('ui.remotePort', DEFAULT_REMOTE_PORT));
+    this.remoteHost = resolvePublicHost(plat().getState('ui.remoteHost', ''));
+    this.remoteUser = sanitizeTunnelUser(plat().getState('ui.remoteSshUser', DEFAULT_PUBLIC_USER));
+    this.remoteSshPort = clampSshPort(plat().getState('ui.remoteSshPort', DEFAULT_SSH_PORT));
+    this.remoteForwardPort = resolveForwardPort(plat().getState('ui.remoteForwardPort', DEFAULT_FORWARD_PORT));
+    const savedUrl = normalizePublicUrl(plat().getState('ui.remotePublicUrl', ''));
+    this.remotePublicUrl =
+      savedUrl === advertisedPublicUrl(this.remoteHost, 8787) ? '' : savedUrl;
+    this.disposables.push(this.tunnel.onChange(() => this.emit()));
     this.journal = new EditJournal({
       messages: () => this.messages,
       replaying: () => this.replaying,
@@ -219,6 +260,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.clearReconnectTimer();
     this.reconnectFails = 0;
     this.dropAgent();
+    void this.stopRemoteAccess();
     for (const d of this.disposables) {
       d.dispose();
     }
@@ -297,6 +339,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       memoryFiles: this.memoryFiles,
       extTab: this.extTab,
       theme: drawers.themeForUi(this.theme),
+      remote: this.remoteInfo(),
     };
   }
 
@@ -1159,6 +1202,211 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   closeApiForm(): void { drawers.closeApiForm(this); }
   openTheme(): void { drawers.openTheme(this); }
   closeTheme(): void { drawers.closeTheme(this); }
+  openRemote(): void { drawers.openRemote(this); }
+  closeRemote(): void { drawers.closeRemote(this); }
+  async startRemoteAccess(
+    port?: number,
+    flags?: {
+      local?: boolean;
+      public?: boolean;
+      host?: string;
+      user?: string;
+      sshPort?: number;
+      forwardPort?: number;
+      publicUrl?: string;
+    },
+  ): Promise<void> {
+    if (port !== undefined) {
+      this.remotePort = clampRemotePort(port);
+      void plat().setState('ui.remotePort', this.remotePort);
+    }
+    this.applyTunnelFields(flags);
+    if (!flags || (flags.local === undefined && flags.public === undefined)) {
+      this.remoteLocal = true;
+      this.remotePublic = false;
+    } else {
+      if (flags.local !== undefined) {
+        this.remoteLocal = flags.local;
+      }
+      if (flags.public !== undefined) {
+        this.remotePublic = flags.public;
+      }
+    }
+    if (!this.remoteLocal && !this.remotePublic) {
+      await this.stopRemoteAccess();
+      return;
+    }
+    if (!this.remote) {
+      const gateway = new RemoteGateway(resolveRemoteAssets(__filename), {
+        onClientMessage: (message) => {
+          void dispatchUi(this, message);
+        },
+        snapshot: () => this.snapshot(),
+        onClients: () => this.emit(),
+      });
+      this.remote = gateway;
+      this.remoteWatch = [
+        this.onDidChange((state) => gateway.broadcast({ type: 'state', state })),
+        this.onDidStream((tail) => gateway.broadcast(tail)),
+      ];
+    }
+    try {
+      await this.remote.apply({
+        port: this.remotePort,
+        local: this.remoteLocal,
+        public: this.remotePublic,
+        publicUrl: this.effectivePublicUrl(),
+      });
+    } catch (error) {
+      this.syncTunnel();
+      this.emit();
+      logWarn(`remote listen: ${error instanceof Error ? error.message : error}`);
+      return;
+    }
+    this.syncTunnel();
+    logInfo(`remote access on ${this.remote.info().bind}:${this.remote.info().port}`);
+    this.emit();
+  }
+  async stopRemoteAccess(): Promise<void> {
+    this.remoteLocal = false;
+    this.remotePublic = false;
+    this.tunnel.stop();
+    for (const d of this.remoteWatch.splice(0)) {
+      d.dispose();
+    }
+    const gw = this.remote;
+    this.remote = undefined;
+    if (gw) {
+      await gw.stop();
+    }
+    this.emit();
+  }
+  async setRemotePublicUrl(url: string): Promise<void> {
+    this.remotePublicUrl = normalizePublicUrl(url);
+    void plat().setState('ui.remotePublicUrl', this.remotePublicUrl);
+    if (this.remote && (this.remoteLocal || this.remotePublic)) {
+      await this.remote.apply({
+        port: this.remotePort,
+        local: this.remoteLocal,
+        public: this.remotePublic,
+        publicUrl: this.effectivePublicUrl(),
+      });
+    }
+    this.emit();
+  }
+  async setRemoteTunnel(fields: {
+    host?: string;
+    user?: string;
+    sshPort?: number;
+    forwardPort?: number;
+    publicUrl?: string;
+  }): Promise<void> {
+    this.applyTunnelFields(fields);
+    if (this.remote && (this.remoteLocal || this.remotePublic)) {
+      await this.remote.apply({
+        port: this.remotePort,
+        local: this.remoteLocal,
+        public: this.remotePublic,
+        publicUrl: this.effectivePublicUrl(),
+      });
+    }
+    this.syncTunnel();
+    this.emit();
+  }
+  private applyTunnelFields(fields?: {
+    host?: string;
+    user?: string;
+    sshPort?: number;
+    forwardPort?: number;
+    publicUrl?: string;
+  }): void {
+    if (!fields) {
+      return;
+    }
+    if (fields.host !== undefined) {
+      this.remoteHost = resolvePublicHost(fields.host);
+      void plat().setState('ui.remoteHost', this.remoteHost);
+    }
+    if (fields.user !== undefined) {
+      this.remoteUser = sanitizeTunnelUser(fields.user);
+      void plat().setState('ui.remoteSshUser', this.remoteUser);
+    }
+    if (fields.sshPort !== undefined && Number(fields.sshPort) > 0) {
+      this.remoteSshPort = clampSshPort(fields.sshPort);
+      void plat().setState('ui.remoteSshPort', this.remoteSshPort);
+    }
+    if (fields.forwardPort !== undefined) {
+      this.remoteForwardPort = resolveForwardPort(fields.forwardPort);
+      void plat().setState('ui.remoteForwardPort', this.remoteForwardPort);
+    }
+    if (fields.publicUrl !== undefined) {
+      this.remotePublicUrl = normalizePublicUrl(fields.publicUrl);
+      void plat().setState('ui.remotePublicUrl', this.remotePublicUrl);
+    }
+  }
+  private effectivePublicUrl(): string {
+    const tun = this.tunnel.info();
+    if (tun.state === 'up' && tun.remotePort > 0) {
+      return advertisedPublicUrl(tun.host || this.remoteHost, tun.remotePort);
+    }
+    return this.remotePublicUrl;
+  }
+  private syncTunnel(): void {
+    if (!this.remotePublic || !this.remoteHost) {
+      this.tunnel.stop();
+      return;
+    }
+    this.tunnel.start({
+      host: this.remoteHost,
+      user: this.remoteUser,
+      sshPort: this.remoteSshPort,
+      remotePort: this.remoteForwardPort,
+      localPort: this.remote?.info().port || this.remotePort,
+    });
+  }
+  rotateRemoteCode(): void {
+    this.remote?.rotateCode();
+    this.emit();
+  }
+  private remoteInfo(): RemoteAccessInfo {
+    const live = this.remote?.info();
+    const tun = this.tunnel.info();
+    const tunnel = this.remotePublic
+      ? this.remoteHost
+        ? tun.state
+        : 'error'
+      : 'off';
+    const tunnelError = this.remotePublic && !this.remoteHost ? 'missing' : tun.error;
+    const extra = {
+      tunnel,
+      tunnelError,
+      tunnelHost: this.remoteHost,
+      tunnelUser: this.remoteUser,
+      sshPort: this.remoteSshPort,
+      forwardPort: this.remoteForwardPort,
+    };
+    if (live?.running) {
+      const publicUrl = this.effectivePublicUrl();
+      const urls = live.urls.filter((url) => url !== live.publicUrl);
+      if (this.remotePublic && publicUrl) {
+        urls.push(publicUrl);
+      }
+      return { ...live, publicUrl, urls: [...new Set(urls)], ...extra };
+    }
+    return {
+      running: false,
+      port: this.remotePort,
+      bind: remoteBindHost(this.remoteLocal),
+      local: false,
+      public: false,
+      code: '',
+      publicUrl: this.effectivePublicUrl(),
+      urls: [],
+      clients: 0,
+      error: live?.error,
+      ...extra,
+    };
+  }
   openThemePreview(): void { drawers.openThemePreview(this); }
   closeThemePreview(): void { drawers.closeThemePreview(this); }
   openMcps(): void { drawers.openMcps(this); }

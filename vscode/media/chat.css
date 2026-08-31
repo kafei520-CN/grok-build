@@ -2549,6 +2549,13 @@ kbd {
   font-weight: 600;
 }
 
+.remote-code {
+  margin-top: 6px;
+  font-size: 22px;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-hint {
   margin-top: 3px;
   font-size: 11px;

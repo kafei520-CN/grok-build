@@ -54,4 +54,38 @@ describe('dispatchUi', () => {
     await dispatchUi(controller, { type: 'closeThemePreview' });
     assert.deepEqual(seen, ['open', 'close']);
   });
+
+  it('routes remote access start and pair rotation', async () => {
+    const seen: string[] = [];
+    const controller = {
+      openRemote() {
+        seen.push('open');
+      },
+      async startRemoteAccess(port?: number) {
+        seen.push(`start:${port ?? ''}`);
+      },
+      rotateRemoteCode() {
+        seen.push('rotate');
+      },
+    } as unknown as GrokController;
+    await dispatchUi(controller, { type: 'openRemote' });
+    await dispatchUi(controller, { type: 'startRemote', port: 8787 });
+    await dispatchUi(controller, { type: 'rotateRemoteCode' });
+    assert.deepEqual(seen, ['open', 'start:8787', 'rotate']);
+  });
+
+  it('routes public remote seats and advertised url', async () => {
+    const seen: string[] = [];
+    const controller = {
+      async setRemotePublicUrl(url: string) {
+        seen.push(`url:${url}`);
+      },
+      async setRemoteTunnel(fields: { host?: string }) {
+        seen.push(`tunnel:${fields.host ?? ''}`);
+      },
+    } as unknown as GrokController;
+    await dispatchUi(controller, { type: 'setRemotePublicUrl', url: 'http://vps:8787' });
+    await dispatchUi(controller, { type: 'setRemoteTunnel', host: '1.2.3.4', user: 'root' });
+    assert.deepEqual(seen, ['url:http://vps:8787', 'tunnel:1.2.3.4']);
+  });
 });

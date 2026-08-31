@@ -191,6 +191,41 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'closeTheme':
       controller.closeTheme();
       return;
+    case 'openRemote':
+      controller.openRemote();
+      return;
+    case 'closeRemote':
+      controller.closeRemote();
+      return;
+    case 'startRemote':
+      await controller.startRemoteAccess(message.port, {
+        local: message.local,
+        public: message.public,
+        host: message.host,
+        user: message.user,
+        sshPort: message.sshPort,
+        forwardPort: message.forwardPort,
+        publicUrl: message.publicUrl,
+      });
+      return;
+    case 'stopRemote':
+      await controller.stopRemoteAccess();
+      return;
+    case 'rotateRemoteCode':
+      controller.rotateRemoteCode();
+      return;
+    case 'setRemotePublicUrl':
+      await controller.setRemotePublicUrl(message.url);
+      return;
+    case 'setRemoteTunnel':
+      await controller.setRemoteTunnel({
+        host: message.host,
+        user: message.user,
+        sshPort: message.sshPort,
+        forwardPort: message.forwardPort,
+        publicUrl: message.publicUrl,
+      });
+      return;
     case 'setTheme':
       controller.setTheme(message.primary, message.secondary, message.background, {
         wallpaper: message.wallpaper,

@@ -30,10 +30,14 @@ function renderBlocks(lines: string[]): string[] {
       const body: string[] = [];
       i += 1;
       while (i < lines.length && !fenceClose(lines[i], fence.marker)) {
+        const nested = fenceOpen(lines[i]);
+        if (nested?.info) {
+          break;
+        }
         body.push(lines[i]);
         i += 1;
       }
-      if (i < lines.length) {
+      if (i < lines.length && fenceClose(lines[i], fence.marker)) {
         i += 1;
       }
       const lang = fence.lang ? ` data-lang="${escapeHtml(fence.lang)}"` : '';
@@ -84,13 +88,27 @@ function renderBlocks(lines: string[]): string[] {
   return out;
 }
 
-function fenceOpen(line: string): { marker: string; lang: string } | undefined {
-  const match = line.match(/^ {0,3}(```|~~~)(\w*)\s*$/);
-  return match ? { marker: match[1], lang: match[2] } : undefined;
+function fenceOpen(line: string): { marker: string; lang: string; info: string } | undefined {
+  const match = line.match(/^ {0,3}(```+|~~~+)(.*)$/);
+  if (!match) {
+    return undefined;
+  }
+  const info = match[2].trim();
+  return { marker: match[1].slice(0, 3), lang: fenceLang(info), info };
+}
+
+function fenceLang(info: string): string {
+  const github = /^(\d+):(\d+):(.+)$/.exec(info);
+  if (github) {
+    return fileName(github[3]);
+  }
+  const token = info.split(/\s+/)[0] ?? '';
+  return /^[\w.+#-]+$/.test(token) ? token : '';
 }
 
 function fenceClose(line: string, marker: string): boolean {
-  return new RegExp(`^ {0,3}${marker}\\s*$`).test(line);
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
+  return Boolean(match && match[1][0] === marker[0] && match[1].length >= marker.length);
 }
 
 function isHr(line: string): boolean {
