@@ -29,6 +29,17 @@ describe('dispatchUi', () => {
     assert.deepEqual(seen, [['file:///C:/work/a.ts']]);
   });
 
+  it('routes skipLogin so the start screen is not required', async () => {
+    const seen: string[] = [];
+    const controller = {
+      async skipLogin() {
+        seen.push('skip');
+      },
+    } as unknown as GrokController;
+    await dispatchUi(controller, { type: 'skipLogin' });
+    assert.deepEqual(seen, ['skip']);
+  });
+
   it('routes wallpaper preview open and close', async () => {
     const seen: string[] = [];
     const controller = {

@@ -260,6 +260,9 @@ function persistPreview(theme: ThemeColors): void {
     surface: base.surface ?? '',
     glassOpacity: base.glassOpacity,
     glassBlur: base.glassBlur,
+    chromeBlur: base.chromeBlur,
+    chromeGlass: base.chromeGlass === true,
+    chromeGlassOpacity: base.chromeGlassOpacity,
   });
 }
 

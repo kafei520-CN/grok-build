@@ -81,8 +81,14 @@ export interface ThemeColors {
   surface?: 'glass' | 'solid';
   /** 0–100 mix of --bg into the frosted panel. */
   glassOpacity?: number;
-  /** Frost blur in px, 0–40. */
+  /** Wallpaper blur in px, 0–40. */
   glassBlur?: number;
+  /** Component frost blur in px, 0–40. Independent of wallpaper blur. */
+  chromeBlur?: number;
+  /** Frost cards and buttons as well as the main plate. */
+  chromeGlass?: boolean;
+  /** 0–100 mix of --bg into frosted cards/buttons. */
+  chromeGlassOpacity?: number;
 }
 
 export type ApiBackend = 'chat_completions' | 'responses' | 'messages';
@@ -544,6 +550,7 @@ export interface StreamTail {
 export type WebviewToHost =
   | { type: 'ready' }
   | { type: 'login' }
+  | { type: 'skipLogin' }
   | { type: 'openLoginUrl' }
   | { type: 'submitAuthCode'; code: string }
   | { type: 'cancelLogin' }
@@ -616,6 +623,9 @@ export type WebviewToHost =
       surface?: 'glass' | 'solid' | '';
       glassOpacity?: number;
       glassBlur?: number;
+      chromeBlur?: number;
+      chromeGlass?: boolean;
+      chromeGlassOpacity?: number;
     }
   | { type: 'pickThemeWallpaper' }
   | { type: 'openThemePreview' }

@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  clampChromeBlur,
+  clampChromeGlassOpacity,
+  chromeLayerBlur,
+  glassLayerBlur,
   clampGlassBlur,
+  DEFAULT_CHROME_BLUR,
   clampGlassOpacity,
   clampWallpaperOpacity,
+  DEFAULT_CHROME_GLASS_OPACITY,
   DEFAULT_GLASS_BLUR,
   DEFAULT_GLASS_OPACITY,
   DEFAULT_WALLPAPER_OPACITY,
@@ -54,6 +60,28 @@ describe('wallpaper fields', () => {
     assert.equal(clampGlassBlur(-2), 0);
     assert.equal(clampGlassBlur(99), 40);
     assert.equal(clampGlassBlur('x'), DEFAULT_GLASS_BLUR);
+    assert.equal(clampChromeGlassOpacity(88), 88);
+    assert.equal(clampChromeGlassOpacity(-4), 0);
+    assert.equal(clampChromeGlassOpacity(200), 100);
+    assert.equal(clampChromeGlassOpacity('x'), DEFAULT_CHROME_GLASS_OPACITY);
+    assert.equal(glassLayerBlur(18, 1), 18);
+    assert.equal(glassLayerBlur(18, 2), 23);
+    assert.equal(glassLayerBlur(18, 3), 26);
+    assert.equal(glassLayerBlur(18, 4), 30);
+    assert.equal(glassLayerBlur(18, 5), 33);
+    assert.equal(glassLayerBlur(18, 6), 37);
+    assert.equal(glassLayerBlur(18, 7), 41);
+    assert.equal(glassLayerBlur(0, 2), 0);
+    assert.equal(glassLayerBlur(30, 7), 48);
+    assert.equal(clampChromeBlur(30), 30);
+    assert.equal(clampChromeBlur(-2), 0);
+    assert.equal(clampChromeBlur(99), 40);
+    assert.equal(clampChromeBlur('x'), DEFAULT_CHROME_BLUR);
+    assert.equal(chromeLayerBlur(18, 1), 23);
+    assert.equal(chromeLayerBlur(18, 2), 23);
+    assert.equal(chromeLayerBlur(18, 7), 41);
+    assert.equal(chromeLayerBlur(0, 2), 0);
+    assert.equal(chromeLayerBlur(30, 2), 38);
   });
 
   it('resolves icon and custom files', () => {

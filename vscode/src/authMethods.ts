@@ -28,6 +28,24 @@ export function selectEagerAuthMethod(
   methods: AuthMethodInfo[],
   defaultAuthMethodId?: string,
 ): string | undefined {
+  return pickAuthMethod(methods, defaultAuthMethodId);
+}
+
+/** Same as eager pick, but never grok.com / OIDC — used when the user skips sign-in. */
+export function selectNonInteractiveAuthMethod(
+  methods: AuthMethodInfo[],
+  defaultAuthMethodId?: string,
+): string | undefined {
+  return pickAuthMethod(
+    methods.filter((method) => !isInteractiveAuthMethod(method.id)),
+    defaultAuthMethodId,
+  );
+}
+
+function pickAuthMethod(
+  methods: AuthMethodInfo[],
+  defaultAuthMethodId?: string,
+): string | undefined {
   if (
     defaultAuthMethodId &&
     methods.some((method) => method.id === defaultAuthMethodId)

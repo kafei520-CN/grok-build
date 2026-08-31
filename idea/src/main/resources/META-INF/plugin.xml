@@ -12,7 +12,16 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.0: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.9: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.9 — Markdown tables, inline code, the edits bar, and file chips are frosted glass like the rest of the chrome.</p>
+<p>0.2.8 — Glass chrome gets a 1px white edge, top highlight, and drop shadow. Component blur is a separate slider from wallpaper blur.</p>
+<p>0.2.7 — The blur slider only changes the wallpaper. Bubbles, cards, and menus always frost what is behind them.</p>
+<p>0.2.6 — Wallpaper stays sharp and is only adjusted in settings. Every chrome piece frosts a clipped copy of the wallpaper; higher layers blur more.</p>
+<p>0.2.5 — Hierarchical frost actually blurs: wallpaper is filtered on the plate; bubbles and menus add stronger backdrop-filter on top.</p>
+<p>0.2.4 — Frost is blur-only: no tinted overlay. Layered backdrop-filter from plate through inner menus.</p>
+<p>0.2.3 — Seven-layer frost: wallpaper, plate, bubbles, header buttons, more-menu, drawers/settings, then inner menus.</p>
+<p>0.2.2 — Frosted glass on every bubble, card, and chip: each piece blurs only its own rectangle.</p>
+<p>0.2.1 — Login can be skipped. Optional frosted glass on cards and buttons.</p>
 <p>0.2.0 — Louder notification chime. Wallpaper preview, video wallpaper, and turn-complete sounds.</p>
 <p>0.1.114 — Wallpaper preview restores pan and zoom as soon as it opens, without nudging the slider.</p>
 <p>0.1.113 — Notification chime is louder.</p>

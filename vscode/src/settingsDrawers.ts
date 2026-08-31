@@ -946,6 +946,9 @@ export function setTheme(
     surface?: 'glass' | 'solid' | '';
     glassOpacity?: number;
     glassBlur?: number;
+    chromeBlur?: number;
+    chromeGlass?: boolean;
+    chromeGlassOpacity?: number;
   },
 ): void {
   const next = normalizeTheme({
@@ -961,6 +964,10 @@ export function setTheme(
     surface: patch?.surface === '' ? undefined : (patch?.surface ?? host.theme.surface),
     glassOpacity: patch && 'glassOpacity' in patch ? patch.glassOpacity : host.theme.glassOpacity,
     glassBlur: patch && 'glassBlur' in patch ? patch.glassBlur : host.theme.glassBlur,
+    chromeBlur: patch && 'chromeBlur' in patch ? patch.chromeBlur : host.theme.chromeBlur,
+    chromeGlass: patch && 'chromeGlass' in patch ? patch.chromeGlass : host.theme.chromeGlass,
+    chromeGlassOpacity:
+      patch && 'chromeGlassOpacity' in patch ? patch.chromeGlassOpacity : host.theme.chromeGlassOpacity,
   });
   if (
     next.primary === host.theme.primary &&
@@ -974,7 +981,10 @@ export function setTheme(
     (next.wallpaperY ?? 0) === (host.theme.wallpaperY ?? 0) &&
     (next.surface ?? '') === (host.theme.surface ?? '') &&
     (next.glassOpacity ?? 0) === (host.theme.glassOpacity ?? 0) &&
-    (next.glassBlur ?? 0) === (host.theme.glassBlur ?? 0)
+    (next.glassBlur ?? 0) === (host.theme.glassBlur ?? 0) &&
+    (next.chromeBlur ?? 0) === (host.theme.chromeBlur ?? 0) &&
+    Boolean(next.chromeGlass) === Boolean(host.theme.chromeGlass) &&
+    (next.chromeGlassOpacity ?? 0) === (host.theme.chromeGlassOpacity ?? 0)
   ) {
     return;
   }

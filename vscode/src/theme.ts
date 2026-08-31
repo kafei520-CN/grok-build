@@ -1,10 +1,15 @@
 import type { ThemeColors } from './types';
 import {
+  clampChromeBlur,
+  clampChromeGlassOpacity,
+  chromeLayerBlur,
   clampGlassBlur,
   clampGlassOpacity,
   clampWallpaperAxis,
   clampWallpaperOpacity,
   clampWallpaperScale,
+  DEFAULT_CHROME_BLUR,
+  DEFAULT_CHROME_GLASS_OPACITY,
   DEFAULT_GLASS_BLUR,
   DEFAULT_GLASS_OPACITY,
   surfaceKind,
@@ -93,6 +98,13 @@ export function normalizeTheme(raw: unknown): ThemeColors {
     ...(surface === 'glass' || value.glassBlur != null
       ? { glassBlur: clampGlassBlur(value.glassBlur) }
       : {}),
+    ...(surface === 'glass' || value.chromeBlur != null
+      ? { chromeBlur: clampChromeBlur(value.chromeBlur) }
+      : {}),
+    ...(value.chromeGlass === true ? { chromeGlass: true } : {}),
+    ...(value.chromeGlass === true || value.chromeGlassOpacity != null
+      ? { chromeGlassOpacity: clampChromeGlassOpacity(value.chromeGlassOpacity) }
+      : {}),
   };
 }
 
@@ -128,7 +140,16 @@ export function applyThemeTo(
   style.setProperty('--ice-dim', 'color-mix(in srgb, var(--ice) 28%, transparent)');
   style.setProperty('--ok', theme.secondary);
   style.setProperty('--glass-fill', `${theme.glassOpacity ?? DEFAULT_GLASS_OPACITY}%`);
-  style.setProperty('--glass-blur', `${theme.glassBlur ?? DEFAULT_GLASS_BLUR}px`);
+  const bgBlur = theme.glassBlur ?? DEFAULT_GLASS_BLUR;
+  const chromeBlur = theme.chromeBlur ?? DEFAULT_CHROME_BLUR;
+  style.setProperty('--glass-blur', `${bgBlur}px`);
+  style.setProperty('--glass-1-blur', `${bgBlur}px`);
+  style.setProperty('--glass-bg-pad', bgBlur > 0 ? '1.08' : '1');
+  for (let layer = 2; layer <= 7; layer += 1) {
+    style.setProperty(`--glass-${layer}-blur`, `${chromeLayerBlur(chromeBlur, layer)}px`);
+  }
+  const chromeFill = theme.chromeGlassOpacity ?? DEFAULT_CHROME_GLASS_OPACITY;
+  style.setProperty('--chrome-fill', `${chromeFill}%`);
 }
 
 function toHex(r: number, g: number, b: number): string | undefined {

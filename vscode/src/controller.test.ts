@@ -87,6 +87,27 @@ describe('controller agent lifecycle', () => {
     assert.equal(controller.snapshot().status, 'missingCli');
     controller.dispose();
   });
+
+  it('skipLogin remembers the choice and still starts', async () => {
+    const state = new Map<string, unknown>();
+    bindPlatform(
+      fakePlat({
+        pathEnv: () => '',
+        homeDir: () => path.join(process.cwd(), 'no-such-grok-home'),
+        workspaceFolders: () => [],
+        getState: (key, fallback) =>
+          state.has(key) ? (state.get(key) as typeof fallback) : fallback,
+        setState: async (key, value) => {
+          state.set(key, value);
+        },
+      }),
+    );
+    const controller = new GrokController();
+    await controller.skipLogin();
+    assert.equal(state.get('ui.skipLogin'), true);
+    assert.equal(controller.snapshot().status, 'missingCli');
+    controller.dispose();
+  });
 });
 
 describe('controller reverse requests', () => {

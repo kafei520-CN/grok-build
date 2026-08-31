@@ -25,6 +25,11 @@ export function syncSurface(
     delete root.dataset.surface;
     document.getElementById('grok-frost')?.remove();
   }
+  if (theme?.surface === 'glass' && theme.chromeGlass) {
+    root.dataset.chromeGlass = 'on';
+  } else {
+    delete root.dataset.chromeGlass;
+  }
   if (overlay) {
     root.dataset.overlay = overlay;
     root.classList.add('overlay');
@@ -44,12 +49,18 @@ export function chromeKeepers(): HTMLElement[] {
 
 export function syncWallpaper(root: HTMLElement, theme: ThemeColors | undefined): void {
   const url = theme?.wallpaperUrl;
+  if (url) {
+    root.dataset.wpKind = wallpaperMediaKind(theme?.wallpaperPath ?? url);
+  } else {
+    delete root.dataset.wpKind;
+  }
   let el = document.getElementById('grok-wallpaper');
   if (!url) {
     if (el) {
       releaseWallpaperLayer(el);
       el.remove();
     }
+    clearWpVars();
     return;
   }
   if (!(el instanceof HTMLElement)) {
@@ -132,7 +143,37 @@ function placeWallpaperLayer(layer: HTMLElement, theme: ThemeColors | undefined,
   if (!media || !known || !(box.w > 0 && box.h > 0)) {
     return;
   }
-  placeWallpaperMedia(media, wallpaperPlacement(theme ?? { primary: '', secondary: '' }, known.w, known.h, box.w, box.h));
+  const placed = wallpaperPlacement(theme ?? { primary: '', secondary: '' }, known.w, known.h, box.w, box.h);
+  placeWallpaperMedia(media, placed);
+  writeWpVars(layer, theme, placed);
+}
+
+function writeWpVars(
+  layer: HTMLElement,
+  theme: ThemeColors | undefined,
+  placed: { w: number; h: number; x: number; y: number },
+): void {
+  const url = theme?.wallpaperUrl;
+  const style = document.documentElement.style;
+  if (theme?.surface !== 'glass' || !url) {
+    clearWpVars();
+    return;
+  }
+  const rect = layer.getBoundingClientRect();
+  style.setProperty('--wp-url', `url(${JSON.stringify(url)})`);
+  style.setProperty('--wp-left', `${Math.round(rect.left + placed.x)}px`);
+  style.setProperty('--wp-top', `${Math.round(rect.top + placed.y)}px`);
+  style.setProperty('--wp-w', `${Math.round(placed.w)}px`);
+  style.setProperty('--wp-h', `${Math.round(placed.h)}px`);
+}
+
+function clearWpVars(): void {
+  const style = document.documentElement.style;
+  style.removeProperty('--wp-url');
+  style.removeProperty('--wp-left');
+  style.removeProperty('--wp-top');
+  style.removeProperty('--wp-w');
+  style.removeProperty('--wp-h');
 }
 
 function watchFit(layer: HTMLElement): void {
@@ -219,6 +260,7 @@ function releaseWallpaperLayer(layer: HTMLElement): void {
   watchers.delete(layer);
   natural.delete(layer);
   liveTheme.delete(layer);
+  clearWpVars();
   delete layer.dataset.url;
   delete layer.dataset.nw;
   delete layer.dataset.nh;

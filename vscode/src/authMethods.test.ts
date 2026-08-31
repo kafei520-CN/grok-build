@@ -4,6 +4,7 @@ import {
   findInteractiveAuthMethod,
   needsInteractiveLogin,
   selectEagerAuthMethod,
+  selectNonInteractiveAuthMethod,
 } from './authMethods';
 
 describe('authMethods', () => {
@@ -33,5 +34,19 @@ describe('authMethods', () => {
   it('falls back to the first method', () => {
     const methods = [{ id: 'xai.api_key', name: 'API key' }];
     assert.equal(selectEagerAuthMethod(methods), 'xai.api_key');
+  });
+
+  it('skip login prefers cached token over grok.com', () => {
+    const methods = [
+      { id: 'grok.com', name: 'Grok' },
+      { id: 'cached_token', name: 'cached_token' },
+      { id: 'xai.api_key', name: 'API key' },
+    ];
+    assert.equal(selectNonInteractiveAuthMethod(methods), 'cached_token');
+  });
+
+  it('skip login has no method when only the browser is advertised', () => {
+    const methods = [{ id: 'grok.com', name: 'Grok' }];
+    assert.equal(selectNonInteractiveAuthMethod(methods), undefined);
   });
 });

@@ -16,6 +16,13 @@
   --r: 12px;
   --r-lg: 16px;
   --shadow: 0 10px 28px color-mix(in srgb, #000 22%, transparent);
+  --glass-edge: rgb(255 255 255 / 22%);
+  --glass-border: 1px solid var(--glass-edge);
+  --glass-sheen: inset 0 1px 0 rgb(255 255 255 / 42%);
+  --glass-shadow: var(--glass-sheen), 0 18px 28px rgb(0 0 0 / 28%);
+  --glass-shadow-sm: var(--glass-sheen), 0 8px 14px rgb(0 0 0 / 18%);
+  /* Tiny film so Chromium still runs backdrop-filter; not a tinted overlay. */
+  --glass-film: rgb(255 255 255 / 2%);
 }
 
 html,
@@ -57,6 +64,19 @@ body {
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;
+}
+
+#app[data-surface='glass'] #grok-wallpaper {
+  transform: scale(var(--glass-bg-pad, 1));
+}
+#app[data-surface='glass'] #grok-wallpaper .grok-wp-media {
+  filter: blur(var(--glass-1-blur, 0px));
+}
+#app:has(.wp-editor) #grok-wallpaper {
+  transform: none;
+}
+#app:has(.wp-editor) #grok-wallpaper .grok-wp-media {
+  filter: none;
 }
 
 .grok-wp-media {
@@ -2227,8 +2247,8 @@ textarea:focus-visible {
   inset: 0;
   pointer-events: auto;
   background: color-mix(in srgb, var(--bg) 18%, transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.15);
-  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.15);
+  -webkit-backdrop-filter: blur(var(--glass-5-blur, 15px)) saturate(1.15);
+  backdrop-filter: blur(var(--glass-5-blur, 15px)) saturate(1.15);
 }
 
 .drawer {
@@ -2245,8 +2265,8 @@ textarea:focus-visible {
   border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
   box-shadow: var(--shadow);
   background: color-mix(in srgb, var(--bg) 42%, transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
-  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--glass-5-blur, 15px)) saturate(1.2);
+  backdrop-filter: blur(var(--glass-5-blur, 15px)) saturate(1.2);
 }
 
 .drawer-head {
@@ -2453,8 +2473,8 @@ kbd {
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
   background: color-mix(in srgb, var(--bg) 40%, transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
-  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
+  -webkit-backdrop-filter: blur(var(--glass-5-blur, 15px)) saturate(1.2);
+  backdrop-filter: blur(var(--glass-5-blur, 15px)) saturate(1.2);
 }
 
 .settings.wp-editor {
@@ -2952,6 +2972,11 @@ kbd {
   background: var(--bg);
 }
 
+.switch:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .dash-dispatch {
   display: flex;
   gap: 6px;
@@ -3052,6 +3077,9 @@ kbd {
 #grok-veil {
   position: absolute;
   pointer-events: none;
+}
+
+#grok-veil {
   transform: translateZ(0);
 }
 
@@ -3069,9 +3097,9 @@ kbd {
 }
 
 #app[data-surface='glass'] #grok-frost {
-  background: color-mix(in srgb, var(--bg) var(--glass-fill, 46%), transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
-  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.2);
+  background: transparent;
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
 }
 
 #app[data-surface='solid'] #grok-frost {
@@ -3082,9 +3110,9 @@ kbd {
   display: none;
   inset: 0;
   z-index: 6;
-  background: color-mix(in srgb, var(--bg) 16%, transparent);
-  -webkit-backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.15);
-  backdrop-filter: blur(var(--glass-blur, 18px)) saturate(1.15);
+  background: var(--glass-film);
+  -webkit-backdrop-filter: blur(var(--glass-5-blur, 33px));
+  backdrop-filter: blur(var(--glass-5-blur, 33px));
 }
 
 #app[data-overlay] #grok-veil,
@@ -3120,6 +3148,308 @@ kbd {
 
 #app[data-surface='glass'] .composer-card {
   background: color-mix(in srgb, var(--elev) 62%, transparent);
+}
+
+#app[data-surface='glass'] .card,
+#app[data-surface='glass'] .composer-card,
+#app[data-surface='glass'] .starter,
+#app[data-surface='glass'] .recent-card,
+#app[data-surface='glass'] .permission,
+#app[data-surface='glass'] .ask-card,
+#app[data-surface='glass'] .msg.user .bubble,
+#app[data-surface='glass'] .msg.assistant > .md.answer,
+#app[data-surface='glass'] .tool-row,
+#app[data-surface='glass'] .work-body,
+#app[data-surface='glass'] .work > summary,
+#app[data-surface='glass'] .steps-card,
+#app[data-surface='glass'] .chip,
+#app[data-surface='glass'] .attach-tile,
+#app[data-surface='glass'] .live-edits,
+#app[data-surface='glass'] .md pre.code,
+#app[data-surface='glass'] .gallery .thumb,
+#app[data-surface='glass'] .turn-error,
+#app[data-surface='glass'] .turn-meta,
+#app[data-surface='glass'] .changes-line {
+  --glass-pane-blur: var(--glass-2-blur, 23px);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--glass-film);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-2-blur, 23px));
+  backdrop-filter: blur(var(--glass-2-blur, 23px));
+}
+
+#app[data-surface='glass'] .msg.assistant > .md.answer {
+  padding: 10px 14px;
+  border-radius: 16px 16px 16px 5px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+#app[data-surface='glass'] .topbar .icon-btn,
+#app[data-surface='glass'] .card .btn:not(.primary),
+#app[data-surface='glass'] .composer-card .btn:not(.primary),
+#app[data-surface='glass'] .composer-card .icon-btn,
+#app[data-surface='glass'] .composer-card .seg,
+#app[data-surface='glass'] .permission .btn:not(.primary),
+#app[data-surface='glass'] .ask-card .btn:not(.primary),
+#app[data-surface='glass'] .ask-card .icon-btn,
+#app[data-surface='glass'] .user-actions .icon-btn,
+#app[data-surface='glass'] .work-body .tool-row,
+#app[data-surface='glass'] .steps-card .step-row,
+#app[data-surface='glass'] .msg.assistant .md pre.code,
+#app[data-surface='glass'] .msg.user .bubble .md pre.code,
+#app[data-surface='glass'] .md th,
+#app[data-surface='glass'] .md td,
+#app[data-surface='glass'] .md :not(pre) > code,
+#app[data-surface='glass'] .change-chip,
+#app[data-surface='glass'] .live-edits-review {
+  --glass-pane-blur: var(--glass-3-blur, 26px);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--glass-film);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow-sm);
+  -webkit-backdrop-filter: blur(var(--glass-3-blur, 26px));
+  backdrop-filter: blur(var(--glass-3-blur, 26px));
+}
+
+#app[data-surface='glass'] .changes-line {
+  width: fit-content;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 12px;
+}
+
+#app[data-surface='glass'] .md table {
+  border-collapse: separate;
+  border-spacing: 4px;
+  background: transparent;
+}
+
+#app[data-surface='glass'] .md th,
+#app[data-surface='glass'] .md td {
+  background: var(--glass-film);
+  border-radius: 8px;
+}
+
+#app[data-surface='glass'] .md tbody tr:nth-child(even) td {
+  background: var(--glass-film);
+}
+
+#app[data-surface='glass'] .md :not(pre) > code {
+  display: inline-block;
+  border-radius: 6px;
+}
+
+#app[data-surface='glass'] .md pre.code code {
+  background: none;
+  border: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  overflow: visible;
+  isolation: auto;
+  position: static;
+}
+
+#app[data-surface='glass'] .change-chip {
+  border-radius: 999px;
+}
+
+#app[data-surface='glass'] .more-menu {
+  --glass-pane-blur: var(--glass-4-blur, 30px);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--glass-film);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-4-blur, 30px));
+  backdrop-filter: blur(var(--glass-4-blur, 30px));
+}
+
+#app[data-surface='glass'] .more-menu button {
+  background: none;
+  border: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+#app[data-surface='glass'] .settings,
+#app[data-surface='glass'] .drawer {
+  --glass-pane-blur: var(--glass-5-blur, 33px);
+  isolation: isolate;
+  background: var(--glass-film);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-5-blur, 33px));
+  backdrop-filter: blur(var(--glass-5-blur, 33px));
+}
+
+#app[data-surface='glass'] #grok-veil,
+#app[data-surface='glass'] .drawer-scrim {
+  --glass-pane-blur: var(--glass-5-blur, 33px);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--glass-film);
+  -webkit-backdrop-filter: blur(var(--glass-5-blur, 33px));
+  backdrop-filter: blur(var(--glass-5-blur, 33px));
+}
+
+#app[data-surface='glass'] .settings-card,
+#app[data-surface='glass'] .drawer .dash-card,
+#app[data-surface='glass'] .settings .seg,
+#app[data-surface='glass'] .settings .btn:not(.primary),
+#app[data-surface='glass'] .drawer .btn:not(.primary),
+#app[data-surface='glass'] .drawer .seg {
+  --glass-pane-blur: var(--glass-6-blur, 37px);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--glass-film);
+  border: var(--glass-border);
+  box-shadow: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(var(--glass-6-blur, 37px));
+  backdrop-filter: blur(var(--glass-6-blur, 37px));
+}
+
+#app[data-surface='glass'] .picker-menu,
+#app[data-surface='glass'] .menu {
+  --glass-pane-blur: var(--glass-7-blur, 41px);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--glass-film);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(var(--glass-7-blur, 41px));
+  backdrop-filter: blur(var(--glass-7-blur, 41px));
+}
+
+#app[data-surface='glass'] .picker-menu button,
+#app[data-surface='glass'] .menu button,
+#app[data-surface='glass'] .settings-card .btn:not(.primary),
+#app[data-surface='glass'] .settings-card .seg,
+#app[data-surface='glass'] .settings .icon-btn,
+#app[data-surface='glass'] .drawer .icon-btn {
+  --glass-pane-blur: var(--glass-7-blur, 41px);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--glass-film);
+  border: var(--glass-border);
+  box-shadow: var(--glass-sheen);
+  -webkit-backdrop-filter: blur(var(--glass-7-blur, 41px));
+  backdrop-filter: blur(var(--glass-7-blur, 41px));
+}
+
+#app[data-surface='glass'][data-wp-kind='image'] #grok-veil::before,
+#app[data-surface='glass'][data-wp-kind='image'] .drawer-scrim::before,
+#app[data-surface='glass'][data-wp-kind='image'] .settings::before,
+#app[data-surface='glass'][data-wp-kind='image'] .drawer::before,
+#app[data-surface='glass'][data-wp-kind='image'] .card::before,
+#app[data-surface='glass'][data-wp-kind='image'] .composer-card::before,
+#app[data-surface='glass'][data-wp-kind='image'] .starter::before,
+#app[data-surface='glass'][data-wp-kind='image'] .recent-card::before,
+#app[data-surface='glass'][data-wp-kind='image'] .permission::before,
+#app[data-surface='glass'][data-wp-kind='image'] .ask-card::before,
+#app[data-surface='glass'][data-wp-kind='image'] .msg.user .bubble::before,
+#app[data-surface='glass'][data-wp-kind='image'] .msg.assistant > .md.answer::before,
+#app[data-surface='glass'][data-wp-kind='image'] .tool-row::before,
+#app[data-surface='glass'][data-wp-kind='image'] .work-body::before,
+#app[data-surface='glass'][data-wp-kind='image'] .work > summary::before,
+#app[data-surface='glass'][data-wp-kind='image'] .steps-card::before,
+#app[data-surface='glass'][data-wp-kind='image'] .chip::before,
+#app[data-surface='glass'][data-wp-kind='image'] .live-edits::before,
+#app[data-surface='glass'][data-wp-kind='image'] .attach-tile::before,
+#app[data-surface='glass'][data-wp-kind='image'] .turn-meta::before,
+#app[data-surface='glass'][data-wp-kind='image'] .changes-line::before,
+#app[data-surface='glass'][data-wp-kind='image'] .md th::before,
+#app[data-surface='glass'][data-wp-kind='image'] .md td::before,
+#app[data-surface='glass'][data-wp-kind='image'] .md :not(pre) > code::before,
+#app[data-surface='glass'][data-wp-kind='image'] .change-chip::before,
+#app[data-surface='glass'][data-wp-kind='image'] .live-edits-review::before,
+#app[data-surface='glass'][data-wp-kind='image'] .md pre.code::before,
+#app[data-surface='glass'][data-wp-kind='image'] .turn-error::before,
+#app[data-surface='glass'][data-wp-kind='image'] .topbar .icon-btn::before,
+#app[data-surface='glass'][data-wp-kind='image'] .more-menu::before,
+#app[data-surface='glass'][data-wp-kind='image'] .settings-card::before,
+#app[data-surface='glass'][data-wp-kind='image'] .drawer .dash-card::before,
+#app[data-surface='glass'][data-wp-kind='image'] .picker-menu::before,
+#app[data-surface='glass'][data-wp-kind='image'] .menu::before {
+  content: '';
+  position: absolute;
+  inset: -48px;
+  background-image: var(--wp-url);
+  background-repeat: no-repeat;
+  background-size: var(--wp-w, 100%) var(--wp-h, 100%);
+  background-position: var(--wp-left, 0) var(--wp-top, 0);
+  background-attachment: fixed;
+  filter: blur(var(--glass-pane-blur, 23px));
+  pointer-events: none;
+  z-index: -1;
+}
+
+#app[data-surface='glass'][data-wp-kind='image'] #grok-veil,
+#app[data-surface='glass'][data-wp-kind='image'] .drawer-scrim,
+#app[data-surface='glass'][data-wp-kind='image'] .settings,
+#app[data-surface='glass'][data-wp-kind='image'] .drawer,
+#app[data-surface='glass'][data-wp-kind='image'] .card,
+#app[data-surface='glass'][data-wp-kind='image'] .composer-card,
+#app[data-surface='glass'][data-wp-kind='image'] .starter,
+#app[data-surface='glass'][data-wp-kind='image'] .recent-card,
+#app[data-surface='glass'][data-wp-kind='image'] .permission,
+#app[data-surface='glass'][data-wp-kind='image'] .ask-card,
+#app[data-surface='glass'][data-wp-kind='image'] .msg.user .bubble,
+#app[data-surface='glass'][data-wp-kind='image'] .msg.assistant > .md.answer,
+#app[data-surface='glass'][data-wp-kind='image'] .tool-row,
+#app[data-surface='glass'][data-wp-kind='image'] .work-body,
+#app[data-surface='glass'][data-wp-kind='image'] .work > summary,
+#app[data-surface='glass'][data-wp-kind='image'] .steps-card,
+#app[data-surface='glass'][data-wp-kind='image'] .chip,
+#app[data-surface='glass'][data-wp-kind='image'] .live-edits,
+#app[data-surface='glass'][data-wp-kind='image'] .attach-tile,
+#app[data-surface='glass'][data-wp-kind='image'] .turn-meta,
+#app[data-surface='glass'][data-wp-kind='image'] .changes-line,
+#app[data-surface='glass'][data-wp-kind='image'] .md th,
+#app[data-surface='glass'][data-wp-kind='image'] .md td,
+#app[data-surface='glass'][data-wp-kind='image'] .md :not(pre) > code,
+#app[data-surface='glass'][data-wp-kind='image'] .change-chip,
+#app[data-surface='glass'][data-wp-kind='image'] .live-edits-review,
+#app[data-surface='glass'][data-wp-kind='image'] .md pre.code,
+#app[data-surface='glass'][data-wp-kind='image'] .turn-error,
+#app[data-surface='glass'][data-wp-kind='image'] .topbar .icon-btn,
+#app[data-surface='glass'][data-wp-kind='image'] .more-menu,
+#app[data-surface='glass'][data-wp-kind='image'] .settings-card,
+#app[data-surface='glass'][data-wp-kind='image'] .drawer .dash-card,
+#app[data-surface='glass'][data-wp-kind='image'] .picker-menu,
+#app[data-surface='glass'][data-wp-kind='image'] .menu {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+#app[data-surface='glass'] .starter:hover,
+#app[data-surface='glass'] .recent-card:hover,
+#app[data-surface='glass'] .recent-card.active,
+#app[data-surface='glass'] .btn:not(.primary):hover,
+#app[data-surface='glass'] .icon-btn:hover,
+#app[data-surface='glass'] .icon-btn.open,
+#app[data-surface='glass'] .change-chip:hover,
+#app[data-surface='glass'] .live-edits-review:hover {
+  background: var(--glass-film);
+  border-color: rgb(255 255 255 / 38%);
+}
+
+#app[data-surface='glass'] .btn.primary {
+  background: var(--fg);
+  color: var(--bg);
+  border-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 #app[data-surface='glass'] .settings,

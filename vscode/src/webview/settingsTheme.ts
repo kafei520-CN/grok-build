@@ -10,6 +10,8 @@ import {
 } from '../theme';
 import type { ThemeColors } from '../types';
 import {
+  DEFAULT_CHROME_BLUR,
+  DEFAULT_CHROME_GLASS_OPACITY,
   DEFAULT_GLASS_BLUR,
   DEFAULT_GLASS_OPACITY,
   DEFAULT_WALLPAPER_OPACITY,
@@ -243,22 +245,6 @@ function surfaceCard(initial: ThemeColors): HTMLElement {
     hint,
     row,
     sliderRow(
-      'glass',
-      tr('themeGlassOpacity'),
-      0,
-      100,
-      initial.glassOpacity ?? DEFAULT_GLASS_OPACITY,
-      current !== 'glass',
-      (n, persist) => {
-        live = { ...live, glassOpacity: n };
-        if (persist) {
-          commit(live, true);
-        } else {
-          applyLive();
-        }
-      },
-    ),
-    sliderRow(
       'blur',
       tr('themeGlassBlur'),
       0,
@@ -275,8 +261,63 @@ function surfaceCard(initial: ThemeColors): HTMLElement {
       },
       'px',
     ),
+    sliderRow(
+      'chrome-blur',
+      tr('themeChromeBlur'),
+      0,
+      40,
+      initial.chromeBlur ?? DEFAULT_CHROME_BLUR,
+      current !== 'glass',
+      (n, persist) => {
+        live = { ...live, chromeBlur: n };
+        if (persist) {
+          commit(live, true);
+        } else {
+          applyLive();
+        }
+      },
+      'px',
+    ),
   );
   return card;
+}
+
+function chromeSwitchRow(initial: ThemeColors, disabled: boolean): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'settings-row';
+  row.dataset.key = 'chromeGlass';
+  const copy = document.createElement('div');
+  copy.className = 'settings-copy';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('themeChromeGlass');
+  const help = document.createElement('div');
+  help.className = 'settings-hint';
+  help.textContent = tr('themeChromeGlassHint');
+  copy.append(name, help);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = initial.chromeGlass ? 'switch on' : 'switch';
+  btn.setAttribute('role', 'switch');
+  btn.setAttribute('aria-checked', initial.chromeGlass ? 'true' : 'false');
+  btn.disabled = disabled;
+  const knob = document.createElement('span');
+  knob.className = 'knob';
+  btn.append(knob);
+  btn.addEventListener('click', () => {
+    if (live.surface !== 'glass') {
+      return;
+    }
+    const next = { ...live };
+    if (next.chromeGlass) {
+      delete next.chromeGlass;
+    } else {
+      next.chromeGlass = true;
+    }
+    commit(next, true);
+  });
+  row.append(copy, btn);
+  return row;
 }
 
 function wallpaperCard(initial: ThemeColors): HTMLElement {
@@ -468,6 +509,7 @@ function commit(theme: ThemeColors, persist: boolean): void {
   for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-surface]')) {
     btn.classList.toggle('on', (btn.dataset.surface || 'flat') === (live.surface ?? 'flat'));
   }
+  syncGlassControls();
   primaryInputs?.set(live.primary);
   secondaryInputs?.set(live.secondary);
   backgroundInputs?.set(live.background ?? computedBgHex());
@@ -486,7 +528,29 @@ function commit(theme: ThemeColors, persist: boolean): void {
       surface: live.surface ?? '',
       glassOpacity: live.glassOpacity ?? DEFAULT_GLASS_OPACITY,
       glassBlur: live.glassBlur ?? DEFAULT_GLASS_BLUR,
+      chromeBlur: live.chromeBlur ?? DEFAULT_CHROME_BLUR,
+      chromeGlass: live.chromeGlass === true,
+      chromeGlassOpacity: live.chromeGlassOpacity ?? DEFAULT_CHROME_GLASS_OPACITY,
     });
+  }
+}
+
+function syncGlassControls(): void {
+  const glass = live.surface === 'glass';
+  const chrome = Boolean(live.chromeGlass);
+  for (const key of ['blur', 'chrome-blur']) {
+    const slider = document.querySelector<HTMLInputElement>(
+      `.theme-opacity-row input[data-key="${key}"]`,
+    );
+    if (slider) {
+      slider.disabled = !glass;
+    }
+  }
+  const sw = document.querySelector<HTMLButtonElement>('[data-key="chromeGlass"] .switch');
+  if (sw) {
+    sw.disabled = !glass;
+    sw.classList.toggle('on', chrome);
+    sw.setAttribute('aria-checked', glass && chrome ? 'true' : 'false');
   }
 }
 

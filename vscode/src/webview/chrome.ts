@@ -252,10 +252,12 @@ export function loginCard(): HTMLElement {
   }
   const row = document.createElement('div');
   row.className = 'row';
+  const skip = button(tr('loginSkip'), () => post({ type: 'skipLogin' }));
   if (authenticating) {
     row.append(
       button(tr('loginReopen'), () => post({ type: 'openLoginUrl' }), true),
       button(tr('cancel'), () => post({ type: 'cancelLogin' })),
+      skip,
     );
   } else {
     row.append(
@@ -266,6 +268,7 @@ export function loginCard(): HTMLElement {
         () => post({ type: 'login' }),
         true,
       ),
+      skip,
     );
   }
   card.append(row);

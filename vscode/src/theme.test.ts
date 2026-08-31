@@ -46,10 +46,16 @@ describe('theme', () => {
       140,
     );
     assert.equal(normalizeTheme({ wallpaper: 'icon' }).wallpaperScale, undefined);
-    assert.equal(normalizeTheme({ surface: 'glass' }).glassOpacity, 46);
+    assert.equal(normalizeTheme({ surface: 'glass' }).glassOpacity, 68);
     assert.equal(normalizeTheme({ surface: 'glass', glassOpacity: 70 }).glassOpacity, 70);
     assert.equal(normalizeTheme({ surface: 'glass' }).glassBlur, 18);
     assert.equal(normalizeTheme({ surface: 'glass', glassBlur: 28 }).glassBlur, 28);
+    assert.equal(normalizeTheme({ surface: 'glass' }).chromeBlur, 18);
+    assert.equal(normalizeTheme({ surface: 'glass', chromeBlur: 30 }).chromeBlur, 30);
+    assert.equal(normalizeTheme({ surface: 'glass' }).chromeGlass, undefined);
+    assert.equal(normalizeTheme({ chromeGlass: true }).chromeGlass, true);
+    assert.equal(normalizeTheme({ chromeGlass: true }).chromeGlassOpacity, 72);
+    assert.equal(normalizeTheme({ chromeGlass: true, chromeGlassOpacity: 88 }).chromeGlassOpacity, 88);
   });
 
   it('matches presets including background', () => {
@@ -90,5 +96,34 @@ describe('theme', () => {
     );
     assert.equal(props.has('--bg'), false);
     assert.equal(props.get('--ok'), DEFAULT_THEME.secondary);
+    applyThemeTo(
+      {
+        setProperty: (name, value) => props.set(name, value),
+        removeProperty: (name) => {
+          props.delete(name);
+        },
+      },
+      { chromeGlass: true, chromeGlassOpacity: 40, glassBlur: 30 },
+    );
+    assert.equal(props.get('--chrome-fill'), '40%');
+    assert.equal(props.get('--glass-1-blur'), '30px');
+    assert.equal(props.get('--glass-bg-pad'), '1.08');
+    assert.equal(props.get('--glass-2-blur'), '23px');
+    assert.equal(props.get('--glass-3-blur'), '26px');
+    assert.equal(props.get('--glass-5-blur'), '33px');
+    assert.equal(props.get('--glass-7-blur'), '41px');
+    applyThemeTo(
+      {
+        setProperty: (name, value) => props.set(name, value),
+        removeProperty: (name) => {
+          props.delete(name);
+        },
+      },
+      { surface: 'glass', glassBlur: 0, chromeBlur: 30 },
+    );
+    assert.equal(props.get('--glass-1-blur'), '0px');
+    assert.equal(props.get('--glass-bg-pad'), '1');
+    assert.equal(props.get('--glass-2-blur'), '38px');
+    assert.equal(props.get('--glass-7-blur'), '48px');
   });
 });

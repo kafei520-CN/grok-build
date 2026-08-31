@@ -10,6 +10,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'login':
       await controller.login();
       return;
+    case 'skipLogin':
+      await controller.skipLogin();
+      return;
     case 'openLoginUrl':
       await controller.openLoginUrl();
       return;
@@ -198,6 +201,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
         surface: message.surface,
         glassOpacity: message.glassOpacity,
         glassBlur: message.glassBlur,
+        chromeBlur: message.chromeBlur,
+        chromeGlass: message.chromeGlass,
+        chromeGlassOpacity: message.chromeGlassOpacity,
       });
       return;
     case 'pickThemeWallpaper':

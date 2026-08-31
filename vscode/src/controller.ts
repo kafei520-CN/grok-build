@@ -3,6 +3,7 @@ import {
   findInteractiveAuthMethod,
   needsInteractiveLogin,
   selectEagerAuthMethod,
+  selectNonInteractiveAuthMethod,
 } from './authMethods';
 import { GrokAgent } from './agent';
 import {
@@ -161,6 +162,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private agentGen = 0;
   private sessionOp = 0;
   private hideSessionPreview = false;
+  private skipInteractiveLogin = false;
   dashSeq = 0;
   dashTimer?: ReturnType<typeof setTimeout>;
   taskSeq = 0;
@@ -179,6 +181,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.theme = normalizeTheme(plat().getState('ui.theme', DEFAULT_THEME));
     const profile = plat().getState('ui.agentProfile', '');
     this.agentProfile = typeof profile === 'string' && profile.trim() ? profile.trim() : undefined;
+    this.skipInteractiveLogin = Boolean(plat().getState('ui.skipLogin', false));
     this.journal = new EditJournal({
       messages: () => this.messages,
       replaying: () => this.replaying,
@@ -395,6 +398,26 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
         this.status = 'login';
         this.emit();
       }
+    }
+  }
+
+  async skipLogin(): Promise<void> {
+    this.skipInteractiveLogin = true;
+    void plat().setState('ui.skipLogin', true);
+    try {
+      await this.agent?.cancelAuth(this.authSeq);
+    } catch (error) {
+      logWarn(`cancel auth: ${error instanceof Error ? error.message : error}`);
+    }
+    const agent = this.agent;
+    if (!agent) {
+      await this.start();
+      return;
+    }
+    try {
+      await this.enterReady(agent, this.agentGen);
+    } catch (error) {
+      this.fail('Could not start without sign-in', error);
     }
   }
 
@@ -1186,6 +1209,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       surface?: 'glass' | 'solid' | '';
       glassOpacity?: number;
       glassBlur?: number;
+      chromeBlur?: number;
+      chromeGlass?: boolean;
+      chromeGlassOpacity?: number;
     },
   ): void {
     drawers.setTheme(this, primary, secondary, background, patch);
@@ -1438,38 +1464,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       logInfo(
         `initialize methods=${methods.map((m) => m.id).join(',')} default=${defaultId ?? ''}`,
       );
-      if (methods.length === 0 || needsInteractiveLogin(methods)) {
+      if ((methods.length === 0 || needsInteractiveLogin(methods)) && !this.skipInteractiveLogin) {
         const interactive = findInteractiveAuthMethod(methods);
         this.loginView = { label: interactive?.name ?? 'Grok' };
         this.setStatus('login');
         return;
       }
-      const methodId = selectEagerAuthMethod(methods, defaultId);
-      if (methodId) {
-        await spawned.authenticate(methodId);
-      }
-      if (epoch !== this.agentGen) {
-        return;
-      }
-      this.account = await spawned.authInfo().catch(() => undefined);
-      if (epoch !== this.agentGen) {
-        return;
-      }
-      this.commands = mergeCommands(spawned.availableCommands(), FALLBACK_COMMANDS);
-      void spawned.commandsList().then((cmds) => {
-        if (epoch !== this.agentGen) {
-          return;
-        }
-        this.commands = mergeCommands(cmds, FALLBACK_COMMANDS);
-        this.emit();
-      });
-      this.setStatus('ready');
-      void drawers.refreshApis(this);
-      setTimeout(() => {
-        if (epoch === this.agentGen) {
-          void this.refreshSessionsSilent();
-        }
-      }, 800);
+      await this.enterReady(spawned, epoch);
     } catch (error) {
       const stillThisAttempt = epoch === this.agentGen;
       if (this.agent === spawned) {
@@ -1607,6 +1608,49 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       extra.agentProfile = this.agentProfile;
     }
     return extra;
+  }
+
+  private async enterReady(agent: GrokAgent, epoch: number): Promise<void> {
+    const methods = agent.authMethods();
+    const defaultId = agent.defaultAuthMethodId();
+    const methodId = this.skipInteractiveLogin
+      ? selectNonInteractiveAuthMethod(methods, defaultId)
+      : selectEagerAuthMethod(methods, defaultId);
+    if (methodId) {
+      try {
+        await agent.authenticate(methodId);
+      } catch (error) {
+        if (!this.skipInteractiveLogin) {
+          throw error;
+        }
+        logWarn(
+          `skip login authenticate ${methodId}: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
+    if (epoch !== this.agentGen) {
+      return;
+    }
+    this.loginView = undefined;
+    this.account = await agent.authInfo().catch(() => undefined);
+    if (epoch !== this.agentGen) {
+      return;
+    }
+    this.commands = mergeCommands(agent.availableCommands(), FALLBACK_COMMANDS);
+    void agent.commandsList().then((cmds) => {
+      if (epoch !== this.agentGen) {
+        return;
+      }
+      this.commands = mergeCommands(cmds, FALLBACK_COMMANDS);
+      this.emit();
+    });
+    this.setStatus('ready');
+    void drawers.refreshApis(this);
+    setTimeout(() => {
+      if (epoch === this.agentGen) {
+        void this.refreshSessionsSilent();
+      }
+    }, 800);
   }
 
   private async createSession(agent: GrokAgent): Promise<void> {
