@@ -2086,7 +2086,7 @@ textarea:focus-visible {
   overflow: auto;
   border-radius: 12px;
   padding: 4px;
-  z-index: 8;
+  z-index: 30;
 }
 
 .picker.effort .picker-menu {
@@ -3148,6 +3148,7 @@ kbd {
 
 #app[data-surface='glass'] .composer-card {
   background: color-mix(in srgb, var(--elev) 62%, transparent);
+  overflow: visible;
 }
 
 #app[data-surface='glass'] .card,
@@ -3179,6 +3180,10 @@ kbd {
   box-shadow: var(--glass-shadow);
   -webkit-backdrop-filter: blur(var(--glass-2-blur, 23px));
   backdrop-filter: blur(var(--glass-2-blur, 23px));
+}
+
+#app[data-surface='glass'] .composer-card {
+  overflow: visible;
 }
 
 #app[data-surface='glass'] .msg.assistant > .md.answer {
@@ -3260,9 +3265,9 @@ kbd {
   border-radius: 999px;
 }
 
-#app[data-surface='glass'] .more-menu {
+#app[data-surface='glass'] .more-menu,
+#app[data-surface='glass'] .picker-menu {
   --glass-pane-blur: var(--glass-4-blur, 30px);
-  overflow: hidden;
   isolation: isolate;
   background: var(--glass-film);
   border: var(--glass-border);
@@ -3271,7 +3276,16 @@ kbd {
   backdrop-filter: blur(var(--glass-4-blur, 30px));
 }
 
-#app[data-surface='glass'] .more-menu button {
+#app[data-surface='glass'] .more-menu {
+  overflow: hidden;
+}
+
+#app[data-surface='glass'] .picker-menu {
+  overflow: auto;
+}
+
+#app[data-surface='glass'] .more-menu button,
+#app[data-surface='glass'] .picker-menu button {
   background: none;
   border: none;
   box-shadow: none;
@@ -3317,7 +3331,6 @@ kbd {
   backdrop-filter: blur(var(--glass-6-blur, 37px));
 }
 
-#app[data-surface='glass'] .picker-menu,
 #app[data-surface='glass'] .menu {
   --glass-pane-blur: var(--glass-7-blur, 41px);
   overflow: hidden;
@@ -3329,7 +3342,6 @@ kbd {
   backdrop-filter: blur(var(--glass-7-blur, 41px));
 }
 
-#app[data-surface='glass'] .picker-menu button,
 #app[data-surface='glass'] .menu button,
 #app[data-surface='glass'] .settings-card .btn:not(.primary),
 #app[data-surface='glass'] .settings-card .seg,
@@ -3391,6 +3403,10 @@ kbd {
   filter: blur(var(--glass-pane-blur, 23px));
   pointer-events: none;
   z-index: -1;
+}
+
+#app[data-surface='glass'][data-wp-kind='image'] .composer-card::before {
+  clip-path: inset(48px round var(--r-lg));
 }
 
 #app[data-surface='glass'][data-wp-kind='image'] #grok-veil,

@@ -12,7 +12,8 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.9: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.10: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.10 — Model and effort dropdowns sit on glass layer 4 and open above the composer.</p>
 <p>0.2.9 — Markdown tables, inline code, the edits bar, and file chips are frosted glass like the rest of the chrome.</p>
 <p>0.2.8 — Glass chrome gets a 1px white edge, top highlight, and drop shadow. Component blur is a separate slider from wallpaper blur.</p>
 <p>0.2.7 — The blur slider only changes the wallpaper. Bubbles, cards, and menus always frost what is behind them.</p>

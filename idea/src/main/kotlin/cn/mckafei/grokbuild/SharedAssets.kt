@@ -7,7 +7,7 @@ import java.io.File
 /** Shared WebView / sidecar assets: classpath first, vscode/dist when running from source. */
 object SharedAssets {
     const val PLUGIN_ID = "cn.mckafei.grok-build"
-    const val PLUGIN_VERSION = "0.2.9"
+    const val PLUGIN_VERSION = "0.2.10"
     const val TOOL_WINDOW_ID = "Grok Build"
     const val NOTIFICATION_GROUP = "Grok Build"
     const val STATUS_WIDGET_ID = "GrokBuildWidget"
