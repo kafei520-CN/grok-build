@@ -6,6 +6,7 @@ import {
   wallpaperMime,
   wallpaperPlacement,
 } from '../wallpaper';
+import { isRemoteWeb } from './app';
 
 const watchers = new WeakMap<HTMLElement, ResizeObserver>();
 const natural = new WeakMap<HTMLElement, { w: number; h: number }>();
@@ -18,14 +19,16 @@ export function syncSurface(
   theme: ThemeColors | undefined,
   overlay?: 'settings' | 'drawer',
 ): void {
-  if (theme?.surface === 'glass' || theme?.surface === 'solid') {
-    root.dataset.surface = theme.surface;
+  const remote = isRemoteWeb();
+  const surface = remote && theme?.surface === 'glass' ? 'solid' : theme?.surface;
+  if (surface === 'glass' || surface === 'solid') {
+    root.dataset.surface = surface;
     ensureLayer(root, 'grok-frost', ['grok-wallpaper']);
   } else {
     delete root.dataset.surface;
     document.getElementById('grok-frost')?.remove();
   }
-  if (theme?.surface === 'glass' && theme.chromeGlass) {
+  if (!remote && theme?.surface === 'glass' && theme.chromeGlass) {
     root.dataset.chromeGlass = 'on';
   } else {
     delete root.dataset.chromeGlass;
@@ -48,6 +51,16 @@ export function chromeKeepers(): HTMLElement[] {
 }
 
 export function syncWallpaper(root: HTMLElement, theme: ThemeColors | undefined): void {
+  if (isRemoteWeb()) {
+    const el = document.getElementById('grok-wallpaper');
+    if (el instanceof HTMLElement) {
+      releaseWallpaperLayer(el);
+      el.remove();
+    }
+    delete root.dataset.wpKind;
+    clearWpVars();
+    return;
+  }
   const url = theme?.wallpaperUrl;
   if (url) {
     root.dataset.wpKind = wallpaperMediaKind(theme?.wallpaperPath ?? url);

@@ -1,6 +1,6 @@
 import type { ChatState, StreamTail } from '../types';
 import { applyThemeTo } from '../theme';
-import { bindRender, isBooting, normalizeState, persistUi, post, root, ui } from './app';
+import { bindRender, isBooting, isRemoteWeb, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
 import { mountComposer, patchComposer } from './composer';
 import { removeSlot, replaceSlot } from './dom';
@@ -9,27 +9,116 @@ import { bindFileDrop, syncDropHint } from './drop';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
 import { chromeKeepers, overlayKind, syncSurface, syncWallpaper } from './wallpaper';
 import { playNotify } from './notify';
+import { hideRemoteOverlays, showRemoteDiff, showRemoteFile } from './remoteOverlay';
+import { reflowFloating } from './popover';
+import {
+  appendWorkspaceDiff,
+  applyWorkspaceFile,
+  applyWorkspaceGone,
+  applyWorkspaceIndex,
+  applyWorkspaceMoved,
+  applyWorkspaceSave,
+  hideWorkspace,
+  patchWorkspace,
+} from './workspace';
 
 bindRender(render);
 
-window.addEventListener(
-  'message',
-  (event: MessageEvent<{ type: string; state?: ChatState } & Partial<StreamTail>>) => {
-    if (event.data?.type === 'state' && event.data.state) {
-      ui.state = normalizeState(event.data.state);
-      persistUi();
-      const cue = ui.state.notify;
-      if (cue && ui.state.settings?.notifySound !== false) {
-        playNotify(cue);
-      }
-      render();
+type HostMsg = {
+  type: string;
+  state?: ChatState;
+  files?: unknown;
+  truncated?: boolean;
+  messages?: ChatState['messages'];
+  hydrate?: number;
+  prepend?: boolean;
+  reset?: boolean;
+  done?: boolean;
+} & Partial<StreamTail>;
+
+let hydrateGen = 0;
+
+function onHostMessage(data: HostMsg | null | undefined): void {
+  if (!data || typeof data !== 'object') {
+    return;
+  }
+  if (data.type === 'state' && data.state) {
+    if (typeof data.hydrate === 'number') {
+      hydrateGen = data.hydrate;
+    }
+    ui.state = normalizeState(data.state);
+    persistUi();
+    const cue = ui.state.notify;
+    if (cue && ui.state.settings?.notifySound !== false) {
+      playNotify(cue);
+    }
+    render();
+    return;
+  }
+  if (data.type === 'messages') {
+    if (typeof data.hydrate === 'number' && data.hydrate !== hydrateGen) {
       return;
     }
-    if (event.data?.type === 'tail' && event.data.message) {
-      applyTail(event.data as StreamTail);
+    const batch = Array.isArray(data.messages) ? data.messages : [];
+    if (data.reset) {
+      ui.state.messages = batch;
+    } else if (data.prepend) {
+      ui.state.messages = batch.concat(ui.state.messages);
+    } else {
+      ui.state.messages = ui.state.messages.concat(batch);
     }
-  },
-);
+    if (data.done || ui.state.messages.length > 0) {
+      ui.state.restoringSession = false;
+    }
+    render();
+    return;
+  }
+  if (data.type === 'tail' && data.message) {
+    applyTail(data as StreamTail);
+    return;
+  }
+  if (!isRemoteWeb()) {
+    return;
+  }
+  if (data.type === 'diff' && 'payload' in data) {
+    showRemoteDiff((data as { payload: Parameters<typeof showRemoteDiff>[0] }).payload);
+    return;
+  }
+  if (data.type === 'diffMore' && Array.isArray((data as { files?: unknown[] }).files)) {
+    appendWorkspaceDiff((data as { files: unknown[] }).files);
+    return;
+  }
+  if (data.type === 'filePreview') {
+    showRemoteFile(data as Parameters<typeof showRemoteFile>[0]);
+    return;
+  }
+  if (data.type === 'workspaceIndex') {
+    applyWorkspaceIndex(data as Parameters<typeof applyWorkspaceIndex>[0]);
+    return;
+  }
+  if (data.type === 'workspaceFile') {
+    applyWorkspaceFile(data as Parameters<typeof applyWorkspaceFile>[0]);
+    return;
+  }
+  if (data.type === 'workspaceSaveResult') {
+    applyWorkspaceSave(data as Parameters<typeof applyWorkspaceSave>[0]);
+    return;
+  }
+  if (data.type === 'workspaceMoved') {
+    applyWorkspaceMoved(data as Parameters<typeof applyWorkspaceMoved>[0]);
+    return;
+  }
+  if (data.type === 'workspaceGone') {
+    applyWorkspaceGone(data as Parameters<typeof applyWorkspaceGone>[0]);
+  }
+}
+
+window.addEventListener('message', (event: MessageEvent<HostMsg>) => {
+  onHostMessage(event.data);
+});
+(window as unknown as { __grokDeliver?: (data: unknown) => void }).__grokDeliver = (data) => {
+  onHostMessage(data as HostMsg);
+};
 
 function applyTail(tail: StreamTail): void {
   const messages = ui.state.messages;
@@ -80,6 +169,14 @@ function render(): void {
     if (composer) {
       composer.hidden = booting || Boolean(ui.state.settingsOpen);
     }
+    const workspaceOn =
+      isRemoteWeb() && ui.remoteView === 'workspace' && !booting && !ui.state.settingsOpen;
+    root.classList.toggle('ws-on', workspaceOn);
+    if (workspaceOn) {
+      patchWorkspace(root);
+    } else {
+      hideWorkspace();
+    }
     if (ui.state.drawer) {
       replaceSlot('grok-drawer', renderDrawer(), root);
     } else {
@@ -94,15 +191,21 @@ function render(): void {
     syncWallpaper(root, ui.state.theme);
     scrollTranscript();
     syncWorkClock();
+    reflowFloating();
   } catch (error) {
     root.textContent = `Grok UI error: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 
 function boot(): void {
+  (window as unknown as { __grokPrime?: () => void }).__grokPrime?.();
   post({ type: 'ready' });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') {
+      return;
+    }
+    if (hideRemoteOverlays()) {
+      event.preventDefault();
       return;
     }
     if (ui.lightboxSrc) {

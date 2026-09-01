@@ -12,7 +12,22 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.17: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.32: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.32 — Remote review opens each changed file as a workspace tab. The chat no longer jumps to the top: the transcript stays in place instead of being moved into the workspace shell.</p>
+<p>0.2.31 — Reviews use histogram anchors plus Myers on the gaps, computed on the host and clipped before the web page. Opening review no longer jumps the chat to the top.</p>
+<p>0.2.30 — Remote web no longer jumps the chat to the top when clicking buttons. Reviews of a few hundred edits no longer open as a 4000-line rewrite.</p>
+<p>0.2.29 — Remote web uses thin rounded overlay scrollbars. Sending a message no longer jumps the chat to the top.</p>
+<p>0.2.28 — Small edits no longer show as thousands of lines. The host computes review diffs and sends each file to the remote page separately.</p>
+<p>0.2.27 — Remote workspace: explorer create/rename/delete, larger saves, no error banners. Large reviews no longer freeze the page.</p>
+<p>0.2.26 — Remote workspace uses Monaco with Shiki TextMate highlighting.</p>
+<p>0.2.25 — Remote workspace opens files in a top tab bar so several files can stay open at once.</p>
+<p>0.2.24 — Remote web opens immediately on a long chat: the first frame is small, then history arrives in chunks instead of one giant snapshot.</p>
+<p>0.2.23 — Remote web blocks pinch-zoom, keeps the sidebar/workspace switch compact, connects the chat without a refresh after pairing, and resizes panes without hitching.</p>
+<p>0.2.22 — Remote review opens in the center editor, not a fullscreen overlay. The explorer lists the project files. The browser no longer spins after pairing when the IDE is already in chat. Pane widths are dragged; collapse controls are gone.</p>
+<p>0.2.21 — Remote workspace explorer indexes one folder at a time. Pairing no longer shows a red 0 or “already in use” after a successful login.</p>
+<p>0.2.20 — Remote workspace matches VS Code: explorer | editor | original chat sidebar, with draggable splits. Opening a file always re-syncs it from the computer.</p>
+<p>0.2.19 — Remote web adds sidebar and workspace views. Workspace has a foldable explorer and editor for reading, small edits, and review. Phones can attach photos and files; review and file preview no longer depend on the IDE window.</p>
+<p>0.2.18 — Remote web: menus stay inside the screen, the session reconnects after a drop, pairing can use a saved password, and review/file preview work in the browser.</p>
 <p>0.2.17 — Public remote is a single on/off switch that uses the built-in relay. The pairing page no longer tells HTTP users to drop https.</p>
 <p>0.2.16 — One plugin allows one browser. The default VPS can relay many plugins at once by assigning each a free public port. Pairing codes cannot be stacked.</p>
 <p>0.2.15 — Remote access splits LAN and public. Public mode dials your VPS with an SSH reverse tunnel and issues one pairing code per person.</p>

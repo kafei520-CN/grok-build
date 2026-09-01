@@ -23,26 +23,7 @@ export function countLineDiff(
   oldText: string,
   newText: string,
 ): { added: number; removed: number } {
-  const oldLines = oldText.split('\n');
-  const newLines = newText.split('\n');
-  const oldCount = new Map<string, number>();
-  for (const line of oldLines) {
-    oldCount.set(line, (oldCount.get(line) ?? 0) + 1);
-  }
-  let added = 0;
-  for (const line of newLines) {
-    const left = oldCount.get(line) ?? 0;
-    if (left > 0) {
-      oldCount.set(line, left - 1);
-    } else {
-      added += 1;
-    }
-  }
-  let removed = 0;
-  for (const left of oldCount.values()) {
-    removed += left;
-  }
-  return { added, removed };
+  return countChange(oldText, newText);
 }
 
 export function mergeEdits(edits: FileEdit[]): FileEdit[] {

@@ -82,6 +82,7 @@ export async function pasteClipboard(
     text?: string;
     uris?: string[];
     images?: Array<{ name: string; mimeType: string; data: string }>;
+    files?: Array<{ name: string; mimeType?: string; text?: string }>;
   },
 ): Promise<void> {
   for (const image of payload.images ?? []) {
@@ -93,6 +94,23 @@ export async function pasteClipboard(
         label: image.name || 'image',
         mimeType: image.mimeType,
         data: image.data,
+      },
+      false,
+    );
+  }
+  for (const file of payload.files ?? []) {
+    const text = file.text;
+    if (!text) {
+      continue;
+    }
+    const name = file.name.trim() || 'file.txt';
+    upsert(
+      host,
+      {
+        id: `upload:${Date.now()}:${name}:${host.attachments.length}`,
+        label: name,
+        mimeType: file.mimeType,
+        text: Buffer.byteLength(text, 'utf8') < ATTACH_TEXT_MAX ? text : undefined,
       },
       false,
     );

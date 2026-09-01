@@ -59,7 +59,12 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       controller.removeAttachment(message.id);
       return;
     case 'openFile':
-      await plat().openFile(message.path, true);
+      await controller.previewFileOnRemote(message.path);
+      try {
+        await plat().openFile(message.path, true);
+      } catch {
+        /* Browser overlay already has the file; the IDE may not. */
+      }
       return;
     case 'openUrl': {
       if (!/^https?:/i.test(message.url) && !message.url.toLowerCase().startsWith('mailto:')) {
@@ -213,6 +218,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       return;
     case 'rotateRemoteCode':
       controller.rotateRemoteCode();
+      return;
+    case 'setRemoteAuth':
+      controller.setRemoteAuth({ mode: message.mode, secret: message.secret });
       return;
     case 'setRemotePublicUrl':
       await controller.setRemotePublicUrl(message.url);
@@ -390,6 +398,23 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       return;
     case 'openEdit':
       controller.openEdit(message.path, message.messageId);
+      return;
+    case 'setRemoteView':
+      if (message.view === 'workspace') {
+        await controller.listWorkspace();
+      }
+      return;
+    case 'listWorkspace':
+      await controller.listWorkspace(message.dir);
+      return;
+    case 'openWorkspaceFile':
+      await controller.openWorkspaceFile(message.path);
+      return;
+    case 'saveWorkspaceFile':
+      await controller.saveWorkspaceFile(message.path, message.hash, message.text);
+      return;
+    case 'mutateWorkspace':
+      await controller.mutateWorkspace(message);
       return;
     default:
       return;

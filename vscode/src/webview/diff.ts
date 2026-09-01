@@ -18,12 +18,20 @@ let payload: Payload = { locale: 'en', files: [] };
 let unified = false;
 const openGaps = new Set<string>();
 
-window.addEventListener('message', (event: MessageEvent<{ type: string; payload: Payload }>) => {
-  if (event.data?.type === 'diff') {
-    payload = event.data.payload;
-    render();
-  }
-});
+window.addEventListener(
+  'message',
+  (event: MessageEvent<{ type: string; payload?: Payload; files?: FileDiff[] }>) => {
+    if (event.data?.type === 'diff' && event.data.payload) {
+      payload = event.data.payload;
+      render();
+      return;
+    }
+    if (event.data?.type === 'diffMore' && Array.isArray(event.data.files) && event.data.files.length) {
+      payload.files = [...(payload.files ?? []), ...event.data.files];
+      appendFiles(event.data.files);
+    }
+  },
+);
 
 function loc(): UiLocale {
   return payload.locale === 'zh-CN' ? 'zh-CN' : 'en';
@@ -49,10 +57,28 @@ function render(): void {
   }
   const stage = document.createElement('div');
   stage.className = 'stage';
-  for (const file of files) {
-    stage.append(fileSection(file));
+  for (const [index, file] of files.entries()) {
+    stage.append(fileSection(file, index === 0));
   }
   root.append(stage);
+}
+
+function appendFiles(files: FileDiff[]): void {
+  const stage = root.querySelector('.stage');
+  if (!(stage instanceof HTMLElement)) {
+    render();
+    return;
+  }
+  for (const file of files) {
+    stage.append(fileSection(file, false));
+  }
+  const summary = root.querySelector('.summary');
+  if (summary instanceof HTMLElement) {
+    const all = payload.files ?? [];
+    const added = all.reduce((sum, file) => sum + file.added, 0);
+    const removed = all.reduce((sum, file) => sum + file.removed, 0);
+    summary.innerHTML = `<span class="pill">${escapeHtml(tr('diffFiles', { n: all.length }))}</span><span class="pill add">+${added}</span><span class="pill del">−${removed}</span>`;
+  }
 }
 
 function toolbar(count: number, added: number, removed: number): HTMLElement {
@@ -94,9 +120,9 @@ function modeBtn(id: string, label: string, on: boolean): HTMLButtonElement {
   return btn;
 }
 
-function fileSection(file: FileDiff): HTMLElement {
+function fileSection(file: FileDiff, opened: boolean): HTMLElement {
   const el = document.createElement('section');
-  el.className = 'file';
+  el.className = opened ? 'file' : 'file closed';
   const head = document.createElement('div');
   head.className = 'file-head';
   const toggle = document.createElement('button');
@@ -118,6 +144,28 @@ function fileSection(file: FileDiff): HTMLElement {
   head.append(toggle, stats, open);
   const pane = document.createElement('div');
   pane.className = 'file-pane';
+  let filled = false;
+  const fill = () => {
+    if (filled) {
+      return;
+    }
+    filled = true;
+    fillFilePane(pane, file);
+  };
+  if (opened) {
+    fill();
+  }
+  toggle.addEventListener('click', () => {
+    el.classList.toggle('closed');
+    if (!el.classList.contains('closed')) {
+      fill();
+    }
+  });
+  el.append(head, pane);
+  return el;
+}
+
+function fillFilePane(pane: HTMLElement, file: FileDiff): void {
   if (!unified) {
     const cols = document.createElement('div');
     cols.className = 'col-heads';
@@ -138,11 +186,6 @@ function fileSection(file: FileDiff): HTMLElement {
   }
   stage.append(rail, body);
   pane.append(stage);
-  toggle.addEventListener('click', () => {
-    el.classList.toggle('closed');
-  });
-  el.append(head, pane);
-  return el;
 }
 
 function railDot(
@@ -197,15 +240,21 @@ function hunkEl(fileId: string, index: number, hunk: DiffHunk): HTMLElement {
     btn.innerHTML = `<span class="mark">${iconStar()}</span>${escapeHtml(tr('diffGap', { n: hunk.count }))}`;
     const inner = document.createElement('div');
     inner.hidden = !openGaps.has(id);
-    inner.append(rowsEl(hunk.rows));
+    if (openGaps.has(id) && hunk.rows.length) {
+      inner.append(rowsEl(hunk.rows));
+    }
     btn.addEventListener('click', () => {
       if (openGaps.has(id)) {
         openGaps.delete(id);
       } else {
         openGaps.add(id);
       }
-      inner.hidden = !openGaps.has(id);
-      wrap.classList.toggle('open', openGaps.has(id));
+      const show = openGaps.has(id);
+      if (show && !inner.firstChild && hunk.rows.length) {
+        inner.append(rowsEl(hunk.rows));
+      }
+      inner.hidden = !show;
+      wrap.classList.toggle('open', show);
     });
     wrap.append(btn, inner);
     return wrap;
@@ -222,17 +271,41 @@ function splitPath(filePath: string): { dir: string; name: string } {
   return { dir: norm.slice(0, at), name: norm.slice(at + 1) };
 }
 
+const ROW_PAGE = 200;
+
 function rowsEl(rows: DiffRow[]): HTMLElement {
+  const wrap = document.createElement('div');
   const el = document.createElement('div');
   el.className = unified ? 'rows unified' : 'rows split';
-  for (const row of rows) {
-    if (unified) {
-      el.append(unifiedRow(row));
-    } else {
-      el.append(splitRow(row));
+  wrap.append(el);
+  let shown = 0;
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'more-rows';
+  const paint = (count: number) => {
+    const end = Math.min(rows.length, shown + count);
+    const frag = document.createDocumentFragment();
+    for (let i = shown; i < end; i += 1) {
+      const row = rows[i];
+      if (!row) {
+        continue;
+      }
+      frag.append(unified ? unifiedRow(row) : splitRow(row));
     }
-  }
-  return el;
+    el.append(frag);
+    shown = end;
+    if (shown >= rows.length) {
+      more.remove();
+      return;
+    }
+    more.textContent = tr('diffMore', { n: rows.length - shown });
+    if (!more.isConnected) {
+      wrap.append(more);
+    }
+  };
+  more.addEventListener('click', () => paint(ROW_PAGE));
+  paint(ROW_PAGE);
+  return wrap;
 }
 
 function splitRow(row: DiffRow): HTMLElement {

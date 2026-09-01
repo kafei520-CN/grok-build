@@ -242,6 +242,23 @@ textarea:focus-visible {
   z-index: 30;
 }
 
+.more-menu.pin,
+.picker-menu.pin,
+.menu.pin,
+.ctx-tip.pin,
+.ask-tip.pin {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  overflow: auto;
+  z-index: 50;
+}
+
+#grok-floats {
+  position: static;
+}
+
 .more-menu button {
   display: block;
   width: 100%;
@@ -431,7 +448,9 @@ textarea:focus-visible {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  overflow-anchor: none;
+  /* Keep the visible line stable when the composer or workspace pane resizes.
+     none + a remount is what jumped the chat to the top. */
+  overflow-anchor: auto;
   overscroll-behavior: contain;
   padding: 12px 14px 18px;
   /* block, not flex: Chromium maps the thumb wrong on a flex scrollport and jumps to 0 */
@@ -1239,12 +1258,8 @@ textarea:focus-visible {
   display: block;
 }
 
-.ask-hint::after {
-  content: attr(data-tip);
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 6;
+.ask-tip {
+  display: none;
   width: max-content;
   max-width: 240px;
   padding: 7px 9px;
@@ -1257,17 +1272,13 @@ textarea:focus-visible {
   font-weight: 400;
   line-height: 1.4;
   white-space: pre-wrap;
-  opacity: 0;
-  visibility: hidden;
   pointer-events: none;
-  transform: translateY(4px);
+  z-index: 50;
+  text-align: left;
 }
 
-.ask-hint:hover::after,
-.ask-hint:focus::after {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
+.ask-tip.pin {
+  display: block;
 }
 
 .ask-other {
@@ -2145,9 +2156,7 @@ textarea:focus-visible {
 }
 
 .ctx-tip {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
+  display: none;
   min-width: 180px;
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -2157,12 +2166,12 @@ textarea:focus-visible {
   color: var(--fg);
   font-size: 11px;
   line-height: 1.45;
-  display: none;
-  z-index: 12;
+  pointer-events: none;
+  z-index: 50;
   text-align: left;
 }
 
-.ctx-meter:hover .ctx-tip {
+.ctx-tip.pin {
   display: block;
 }
 
@@ -2554,6 +2563,13 @@ kbd {
   font-size: 22px;
   letter-spacing: 0.12em;
   font-variant-numeric: tabular-nums;
+}
+
+.remote-code.custom {
+  font-size: 15px;
+  letter-spacing: 0;
+  font-variant-numeric: normal;
+  overflow-wrap: anywhere;
 }
 
 .settings-hint {
@@ -3273,7 +3289,9 @@ kbd {
 }
 
 #app[data-surface='glass'] .more-menu,
-#app[data-surface='glass'] .picker-menu {
+#app[data-surface='glass'] .picker-menu,
+#grok-floats[data-surface='glass'] .more-menu,
+#grok-floats[data-surface='glass'] .picker-menu {
   --glass-pane-blur: var(--glass-4-blur, 30px);
   isolation: isolate;
   background: var(--glass-film);
@@ -3287,12 +3305,17 @@ kbd {
   overflow: hidden;
 }
 
-#app[data-surface='glass'] .picker-menu {
+#app[data-surface='glass'] .picker-menu,
+#grok-floats[data-surface='glass'] .more-menu,
+#grok-floats[data-surface='glass'] .picker-menu,
+#grok-floats[data-surface='glass'] .menu {
   overflow: auto;
 }
 
 #app[data-surface='glass'] .more-menu button,
-#app[data-surface='glass'] .picker-menu button {
+#app[data-surface='glass'] .picker-menu button,
+#grok-floats[data-surface='glass'] .more-menu button,
+#grok-floats[data-surface='glass'] .picker-menu button {
   background: none;
   border: none;
   box-shadow: none;
@@ -3338,7 +3361,8 @@ kbd {
   backdrop-filter: blur(var(--glass-6-blur, 37px));
 }
 
-#app[data-surface='glass'] .menu {
+#app[data-surface='glass'] .menu,
+#grok-floats[data-surface='glass'] .menu {
   --glass-pane-blur: var(--glass-7-blur, 41px);
   overflow: hidden;
   isolation: isolate;
@@ -3349,7 +3373,12 @@ kbd {
   backdrop-filter: blur(var(--glass-7-blur, 41px));
 }
 
+#grok-floats[data-surface='glass'] .menu {
+  overflow: auto;
+}
+
 #app[data-surface='glass'] .menu button,
+#grok-floats[data-surface='glass'] .menu button,
 #app[data-surface='glass'] .settings-card .btn:not(.primary),
 #app[data-surface='glass'] .settings-card .seg,
 #app[data-surface='glass'] .settings .icon-btn,
@@ -3395,6 +3424,9 @@ kbd {
 #app[data-surface='glass'][data-wp-kind='image'] .turn-error::before,
 #app[data-surface='glass'][data-wp-kind='image'] .topbar .icon-btn::before,
 #app[data-surface='glass'][data-wp-kind='image'] .more-menu::before,
+#grok-floats[data-surface='glass'][data-wp-kind='image'] .more-menu::before,
+#grok-floats[data-surface='glass'][data-wp-kind='image'] .picker-menu::before,
+#grok-floats[data-surface='glass'][data-wp-kind='image'] .menu::before,
 #app[data-surface='glass'][data-wp-kind='image'] .settings-card::before,
 #app[data-surface='glass'][data-wp-kind='image'] .drawer .dash-card::before,
 #app[data-surface='glass'][data-wp-kind='image'] .picker-menu::before,
@@ -3446,6 +3478,9 @@ kbd {
 #app[data-surface='glass'][data-wp-kind='image'] .turn-error,
 #app[data-surface='glass'][data-wp-kind='image'] .topbar .icon-btn,
 #app[data-surface='glass'][data-wp-kind='image'] .more-menu,
+#grok-floats[data-surface='glass'][data-wp-kind='image'] .more-menu,
+#grok-floats[data-surface='glass'][data-wp-kind='image'] .picker-menu,
+#grok-floats[data-surface='glass'][data-wp-kind='image'] .menu,
 #app[data-surface='glass'][data-wp-kind='image'] .settings-card,
 #app[data-surface='glass'][data-wp-kind='image'] .drawer .dash-card,
 #app[data-surface='glass'][data-wp-kind='image'] .picker-menu,
@@ -3491,5 +3526,668 @@ kbd {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* Remote browser: no stacked frost filters. Review lives in the workspace editor. */
+html.remote-web {
+  --glass-1-blur: 0px;
+  --glass-2-blur: 0px;
+  --glass-3-blur: 0px;
+  --glass-4-blur: 0px;
+  --glass-5-blur: 0px;
+  --glass-6-blur: 0px;
+  --glass-7-blur: 0px;
+}
+
+html.remote-web #grok-veil,
+html.remote-web .settings,
+html.remote-web .drawer,
+html.remote-web .topbar,
+html.remote-web .composer-card,
+html.remote-web .more-menu,
+html.remote-web .picker-menu,
+html.remote-web #grok-floats .more-menu,
+html.remote-web #grok-floats .picker-menu,
+html.remote-web #grok-floats .menu {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html.remote-web,
+html.remote-web body {
+  height: 100dvh;
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--fg) 32%, transparent) transparent;
+}
+
+html.remote-web *::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html.remote-web *::-webkit-scrollbar-track,
+html.remote-web *::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html.remote-web *::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--fg) 26%, transparent);
+  border: 2px solid transparent;
+  border-radius: 99px;
+  background-clip: padding-box;
+}
+
+html.remote-web *::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--ice) 55%, var(--fg));
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+html.remote-web .turn-error,
+html.remote-web .error-banner,
+html.remote-web .ws-banner {
+  display: none !important;
+}
+
+#grok-link-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  background: color-mix(in srgb, var(--error, #f85149) 86%, #111);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+
+.remote-file-pick {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.topbar .ws-mode {
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: none;
+}
+
+.topbar .ws-mode button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+html.ws-dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+html.ws-dragging .ws-nav,
+html.ws-dragging .ws-main,
+html.ws-dragging .ws-chat {
+  pointer-events: none;
+  contain: layout;
+}
+
+.ws-drag-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* Chat stays a child of #app. Moving #grok-body into the shell resets transcript scrollTop to 0. */
+#app.ws-on {
+  display: grid;
+  grid-template-columns: var(--ws-nav, 220px) 8px minmax(160px, 1fr) 8px var(--ws-chat, 360px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+#app.ws-on #grok-header {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+#app.ws-on #grok-ws-shell {
+  grid-column: 1 / 5;
+  grid-row: 2 / 4;
+}
+
+#app.ws-on #grok-body {
+  grid-column: 5;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  contain: layout;
+  background: color-mix(in srgb, var(--bg) 92%, #000);
+}
+
+#app.ws-on #composer-wrap {
+  grid-column: 5;
+  grid-row: 3;
+  min-width: 0;
+  background: color-mix(in srgb, var(--bg) 92%, #000);
+}
+
+#app.ws-on #grok-wallpaper,
+#app.ws-on #grok-veil,
+#app.ws-on #grok-frost,
+#app.ws-on #grok-floats,
+#app.ws-on #grok-settings,
+#app.ws-on #grok-drawer,
+#app.ws-on #grok-lightbox {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+}
+
+.ws-shell {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--ws-nav, 220px) 8px minmax(160px, 1fr) 8px;
+  grid-template-rows: minmax(0, 1fr);
+  border-top: 1px solid var(--line);
+}
+
+.ws-shell[hidden] {
+  display: none !important;
+}
+
+.ws-nav {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: color-mix(in srgb, var(--bg) 92%, #000);
+}
+
+.ws-split[data-split='nav'] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.ws-main {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.ws-split[data-split='chat'] {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.ws-chat {
+  display: none;
+}
+
+.ws-split {
+  position: relative;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.ws-split::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: var(--line);
+}
+
+.ws-split:hover::before,
+.ws-split.drag::before {
+  left: 2px;
+  width: 4px;
+  background: var(--ice);
+}
+
+.ws-explorer-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 35px;
+  padding: 0 8px 0 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.ws-explorer-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ws-explorer-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ws-explorer-btn:hover {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.ws-explorer-btn svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.ws-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 148px;
+  padding: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--elev, var(--bg));
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 35%, transparent);
+}
+
+.ws-menu button {
+  display: block;
+  width: 100%;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ws-menu button:hover {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.ws-search {
+  margin: 0 8px 8px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--bg) 70%, #000);
+  color: inherit;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ws-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ws-twist:not(.open) > .ws-kids {
+  display: none;
+}
+
+.ws-twist-head,
+.ws-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ws-twist-head:hover,
+.ws-row:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.ws-row.on {
+  background: color-mix(in srgb, var(--ice) 18%, transparent);
+}
+
+.ws-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.ws-chevron svg {
+  display: block;
+  transform: rotate(-90deg);
+}
+
+.ws-twist.open > .ws-twist-head .ws-chevron svg {
+  transform: none;
+}
+
+.ws-empty {
+  padding: 6px 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ws-root-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.ws-root-head:hover {
+  background: color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.ws-folder,
+.ws-file {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.ws-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.ws-diff {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
+.ws-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 35px;
+  background: color-mix(in srgb, var(--bg) 82%, #000);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.ws-tab-strip {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.ws-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  flex: 0 0 auto;
+  padding: 0 4px 0 12px;
+  font-size: 13px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ws-tab.review {
+  max-width: 220px;
+}
+
+.ws-tab.on {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.ws-tab:hover {
+  color: var(--fg);
+}
+
+.ws-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-tab-stat {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-tab-stat .add {
+  color: var(--ok);
+}
+
+.ws-tab-stat .del {
+  color: var(--error);
+}
+
+.ws-tab-close {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ws-tab-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+
+.ws-tab-close svg {
+  display: block;
+  width: 10px;
+  height: 10px;
+}
+
+.ws-dirty {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.ws-tab-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  flex-shrink: 0;
+}
+
+.ws-action {
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ws-action:hover:not(:disabled) {
+  color: var(--fg);
+}
+
+.ws-action:disabled {
+  opacity: 0.4;
+}
+
+.ws-action svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.ws-crumb {
+  height: 22px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-edit-stack {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.ws-editor {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  border: 0;
+  padding: 8px 12px;
+  background: var(--bg);
+  color: inherit;
+  font-family: var(--mono, ui-monospace, Consolas, monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+.ws-monaco {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.ws-edit-stack.monaco-on .ws-editor {
+  display: none;
+}
+
+.ws-edit-stack.monaco-on .ws-monaco {
+  display: block;
+}
+
+.ws-welcome,
+.ws-banner {
+  margin: 24px auto;
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.ws-banner.warn {
+  color: var(--warn, #d29922);
+}
+
+@media (max-width: 900px) {
+  #app.ws-on {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) minmax(140px, 38%) auto;
+  }
+
+  #app.ws-on #grok-header {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  #app.ws-on #grok-ws-shell {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  #app.ws-on #grok-body {
+    grid-column: 1;
+    grid-row: 3;
+    border-top: 1px solid var(--line);
+  }
+
+  #app.ws-on #composer-wrap {
+    grid-column: 1;
+    grid-row: 4;
+  }
+
+  .ws-shell {
+    grid-template-columns: var(--ws-nav, 200px) 8px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .ws-split[data-split='chat'] {
+    display: none;
   }
 }

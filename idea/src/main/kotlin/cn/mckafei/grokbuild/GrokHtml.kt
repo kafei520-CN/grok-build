@@ -11,6 +11,22 @@ object GrokHtml {
             copy(SharedAssets.grokSymbol(), File(page.parentFile, "grok-symbol.png"))
         } catch (_: Throwable) {
         }
+        try {
+            copy(SharedAssets.diffJs(), File(page.parentFile, "diff.js"))
+            copy(SharedAssets.diffCss(), File(page.parentFile, "diff.css"))
+        } catch (_: Throwable) {
+        }
+        try {
+            copy(SharedAssets.shikiMonacoJs(), File(page.parentFile, "shiki-monaco.js"))
+        } catch (_: Throwable) {
+        }
+        try {
+            val monaco = SharedAssets.monacoDir()
+            if (File(monaco, "vs/loader.js").isFile) {
+                SharedAssets.copyTree(monaco, File(page.parentFile, "monaco"))
+            }
+        } catch (_: Throwable) {
+        }
         return page
     }
 

@@ -17,6 +17,7 @@ import {
 import { installHint, resolveGrokBinary } from './cli';
 import { ContextMeter } from './contextMeter';
 import { EditJournal } from './editJournal';
+import { slimFileDiffs } from './diff';
 import { applyDiffStats, publicEdits } from './edits';
 import { handleIncoming } from './incoming';
 import { tr, uiLocale } from './locale';
@@ -96,7 +97,16 @@ import {
   normalizePublicUrl,
   remoteBindHost,
   resolveRemoteAssets,
+  sanitizeRemoteSecret,
+  type RemotePairMode,
 } from './remoteGateway';
+import {
+  pushWorkspaceFile,
+  pushWorkspaceIndex,
+  mutateWorkspace,
+  saveWorkspaceFile,
+  type WorkspaceBus,
+} from './workspaceHost';
 import {
   advertisedPublicUrl,
   clampSshPort,
@@ -152,6 +162,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private remoteUser = DEFAULT_PUBLIC_USER;
   private remoteSshPort = DEFAULT_SSH_PORT;
   private remoteForwardPort = DEFAULT_FORWARD_PORT;
+  private remoteCodeMode: RemotePairMode = 'random';
+  private remoteCustomCode = '';
   private readonly tunnel = new ReverseTunnel();
   history?: string[];
   drawer?: DrawerId;
@@ -222,6 +234,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const savedUrl = normalizePublicUrl(plat().getState('ui.remotePublicUrl', ''));
     this.remotePublicUrl =
       savedUrl === advertisedPublicUrl(this.remoteHost, 8787) ? '' : savedUrl;
+    this.remoteCodeMode = plat().getState('ui.remoteCodeMode', 'random') === 'custom' ? 'custom' : 'random';
+    this.remoteCustomCode = sanitizeRemoteSecret(plat().getState('ui.remoteCustomCode', ''));
     this.disposables.push(this.tunnel.onChange(() => this.emit()));
     this.journal = new EditJournal({
       messages: () => this.messages,
@@ -750,6 +764,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     text?: string;
     uris?: string[];
     images?: Array<{ name: string; mimeType: string; data: string }>;
+    files?: Array<{ name: string; mimeType?: string; text?: string }>;
   }): Promise<void> {
     await pasteClipboard(this, payload);
   }
@@ -1136,11 +1151,15 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const files = await this.journal.diffs(messageId, onlyPath);
     if (assistant && files.length > 0 && !onlyPath) {
       assistant.edits = applyDiffStats(assistant.edits ?? [], files);
-      this.emit();
     }
     if (files.length === 0) {
       if (onlyPath) {
-        await plat().openFile(onlyPath, true);
+        await this.previewFileOnRemote(onlyPath);
+        try {
+          await plat().openFile(onlyPath, true);
+        } catch {
+          /* preview already sent to the browser */
+        }
       }
       plat().info(
         tr(onlyPath ? 'reviewMissing' : 'reviewEmpty', {
@@ -1149,28 +1168,107 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       );
       return;
     }
-    plat().showDiff?.({
+    const payload = {
       locale: uiLocale(),
       files,
       messageId: assistant?.id,
       theme: drawers.themeForUi(this.theme),
-      onRevert: () => {
-        void this.journal.revert(assistant?.id).then(async (result) => {
-          if (result === 'cancelled' || result === 'empty') {
-            return;
-          }
-          const still = this.journal.assistant(assistant?.id)?.edits?.length;
-          if (!still) {
-            return;
-          }
-          await this.reviewEdits(assistant?.id);
-        });
-      },
-    });
+    };
+    this.remote?.broadcast({ type: 'diff', payload: { ...payload, files: slimFileDiffs(files) } });
+    try {
+      plat().showDiff?.({
+        ...payload,
+        onRevert: () => {
+          void this.journal.revert(assistant?.id).then(async (result) => {
+            if (result === 'cancelled' || result === 'empty') {
+              return;
+            }
+            const still = this.journal.assistant(assistant?.id)?.edits?.length;
+            if (!still) {
+              return;
+            }
+            await this.reviewEdits(assistant?.id);
+          });
+        },
+      });
+    } catch {
+      /* Remote overlay still received the payload. */
+    }
+  }
+
+  async previewFileOnRemote(filePath: string): Promise<void> {
+    if (!this.remote?.info().running) {
+      return;
+    }
+    try {
+      const raw = await plat().readFile(filePath);
+      if (raw.byteLength > 400 * 1024) {
+        this.remote.broadcast({ type: 'filePreview', path: filePath, tooLarge: true });
+        return;
+      }
+      const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+      if (bytes.includes(0)) {
+        this.remote.broadcast({ type: 'filePreview', path: filePath, binary: true });
+        return;
+      }
+      this.remote.broadcast({
+        type: 'filePreview',
+        path: filePath,
+        text: new TextDecoder('utf-8').decode(bytes),
+      });
+    } catch {
+      this.remote.broadcast({ type: 'filePreview', path: filePath, missing: true });
+    }
   }
 
   openEdit(filePath: string, messageId?: string): void {
     void this.reviewEdits(messageId, filePath);
+  }
+
+  async listWorkspace(dir?: string): Promise<void> {
+    await pushWorkspaceIndex(this.workspaceBus(), dir);
+  }
+
+  async openWorkspaceFile(relOrAbs: string): Promise<void> {
+    await pushWorkspaceFile(this.workspaceBus(), relOrAbs);
+  }
+
+  async saveWorkspaceFile(relOrAbs: string, hash: string, text: string): Promise<void> {
+    await saveWorkspaceFile(this.workspaceBus(), relOrAbs, hash, text);
+  }
+
+  async mutateWorkspace(op: {
+    action: 'create' | 'rename' | 'delete';
+    dir?: string;
+    path?: string;
+    name?: string;
+    kind?: 'file' | 'dir';
+  }): Promise<void> {
+    await mutateWorkspace(this.workspaceBus(), op);
+  }
+
+  private workspaceBus(): WorkspaceBus {
+    return {
+      running: () => Boolean(this.remote?.info().running),
+      broadcast: (payload) => {
+        this.remote?.broadcast(payload);
+      },
+      busyFile: (filePath) => this.workspaceBusy(filePath),
+    };
+  }
+
+  private workspaceBusy(filePath: string): boolean {
+    if (this.status !== 'streaming') {
+      return false;
+    }
+    const abs = (this.journal.resolvePath(filePath) ?? filePath).replace(/\\/g, '/').toLowerCase();
+    for (const edit of this.journal.assistant()?.edits ?? []) {
+      const other = (this.journal.resolvePath(edit.path) ?? edit.path).replace(/\\/g, '/').toLowerCase();
+      if (other === abs) {
+        return true;
+      }
+    }
+    return false;
   }
 
   closeDrawer(): void { drawers.closeDrawer(this); }
@@ -1242,7 +1340,12 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
           void dispatchUi(this, message);
         },
         snapshot: () => this.snapshot(),
-        onClients: () => this.emit(),
+        onClients: () => {
+          this.emit();
+          if ((this.remote?.info().clients ?? 0) > 0) {
+            void this.listWorkspace();
+          }
+        },
       });
       this.remote = gateway;
       this.remoteWatch = [
@@ -1250,6 +1353,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
         this.onDidStream((tail) => gateway.broadcast(tail)),
       ];
     }
+    this.syncPairSecret();
     try {
       await this.remote.apply({
         port: this.remotePort,
@@ -1365,8 +1469,40 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     });
   }
   rotateRemoteCode(): void {
+    if (this.remoteCodeMode === 'custom') {
+      return;
+    }
     this.remote?.rotateCode();
     this.emit();
+  }
+
+  setRemoteAuth(fields: { mode?: RemotePairMode; secret?: string }): void {
+    if (fields.mode === 'random' || fields.mode === 'custom') {
+      this.remoteCodeMode = fields.mode;
+      void plat().setState('ui.remoteCodeMode', fields.mode);
+    }
+    if (fields.secret !== undefined) {
+      const next = sanitizeRemoteSecret(fields.secret);
+      if (next) {
+        this.remoteCustomCode = next;
+        void plat().setState('ui.remoteCustomCode', next);
+      }
+    }
+    this.syncPairSecret();
+    this.emit();
+  }
+
+  private syncPairSecret(): void {
+    if (!this.remote) {
+      return;
+    }
+    if (this.remoteCodeMode === 'custom') {
+      this.remote.setPairSecret(this.remoteCustomCode, 'custom');
+      return;
+    }
+    if (this.remote.info().codeMode !== 'random' || !this.remote.info().code) {
+      this.remote.rotateCode();
+    }
   }
   private remoteInfo(): RemoteAccessInfo {
     const live = this.remote?.info();
@@ -1391,7 +1527,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       if (this.remotePublic && publicUrl) {
         urls.push(publicUrl);
       }
-      return { ...live, publicUrl, urls: [...new Set(urls)], ...extra };
+      return { ...live, publicUrl, urls: [...new Set(urls)], codeMode: live.codeMode, ...extra };
     }
     return {
       running: false,
@@ -1399,7 +1535,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       bind: remoteBindHost(this.remoteLocal),
       local: false,
       public: false,
-      code: '',
+      code: this.remoteCodeMode === 'custom' ? this.remoteCustomCode : '',
+      codeMode: this.remoteCodeMode,
       publicUrl: this.effectivePublicUrl(),
       urls: [],
       clients: 0,
@@ -1611,7 +1748,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const after = next?.role === 'assistant' ? stepsStamp(next.steps) : '';
     if (after && after !== before) {
       this.flushEmitTimer();
-      this.emit();
+      // Tail is the last assistant only — a full snapshot over a tunneled WS stalls the browser.
+      this.emitTail();
     }
   }
 

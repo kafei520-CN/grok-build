@@ -473,6 +473,7 @@ export interface RemoteAccessInfo {
   local?: boolean;
   public?: boolean;
   code: string;
+  codeMode?: 'random' | 'custom';
   localCode?: string;
   publicUrl?: string;
   urls: string[];
@@ -647,6 +648,7 @@ export type WebviewToHost =
     }
   | { type: 'stopRemote' }
   | { type: 'rotateRemoteCode' }
+  | { type: 'setRemoteAuth'; mode?: 'random' | 'custom'; secret?: string }
   | { type: 'setRemotePublicUrl'; url: string }
   | {
       type: 'setRemoteTunnel';
@@ -735,7 +737,20 @@ export type WebviewToHost =
       text?: string;
       uris?: string[];
       images?: Array<{ name: string; mimeType: string; data: string }>;
+      files?: Array<{ name: string; mimeType?: string; text?: string }>;
     }
   | { type: 'undoEdits'; messageId?: string }
   | { type: 'reviewEdits'; messageId?: string; path?: string }
-  | { type: 'openEdit'; path: string; messageId?: string };
+  | { type: 'openEdit'; path: string; messageId?: string }
+  | { type: 'setRemoteView'; view: 'sidebar' | 'workspace' }
+  | { type: 'listWorkspace'; dir?: string }
+  | { type: 'openWorkspaceFile'; path: string }
+  | { type: 'saveWorkspaceFile'; path: string; hash: string; text: string }
+  | {
+      type: 'mutateWorkspace';
+      action: 'create' | 'rename' | 'delete';
+      dir?: string;
+      path?: string;
+      name?: string;
+      kind?: 'file' | 'dir';
+    };

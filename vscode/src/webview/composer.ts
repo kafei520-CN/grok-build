@@ -5,8 +5,11 @@ import { lerpInt, liveEditSummary, type LiveEditSummary } from '../liveEdits';
 import { FALLBACK_COMMANDS, filterCommands } from '../slash';
 import type { Attachment, ChatState, ModelOption } from '../types';
 import { jumpBottomKind } from './scroll';
-import { canSend, canType, loc, post, render, tr, turnBusy, ui } from './app';
+import { canSend, canType, isBooting, isRemoteWeb, loc, post, render, tr, turnBusy, ui } from './app';
+import { scrollTranscript } from './transcript';
 import { iconButton } from './dom';
+import { pickRemoteFiles, sendBrowserFiles } from './drop';
+import { bindHoverPin, findPinned, pinFloating, releaseByClass } from './popover';
 import { iconChevron, iconDown, iconPlus, iconStar, iconStop } from './icons';
 import { escapeHtml } from './markdown';
 
@@ -87,15 +90,21 @@ export function patchComposer(): void {
       chips.append(attachmentChip(attachment));
     }
   }
+  if (isBooting() || ui.state.settingsOpen) {
+    releaseByClass('menu');
+    releaseByClass('picker-menu');
+    releaseByClass('ctx-tip');
+  }
   const menuSlot = document.getElementById('composer-menu-slot');
   const nextMenuKey = `${ui.menu ?? ''}:${ui.draft}:${(ui.state.fileHits ?? []).length}`;
   if (menuSlot && nextMenuKey !== menuKey) {
     menuKey = nextMenuKey;
     menuSlot.replaceChildren();
-    if (ui.menu === 'slash') {
-      menuSlot.append(slashMenu());
-    } else if (ui.menu === 'files') {
-      menuSlot.append(fileMenu());
+    releaseByClass('menu');
+    if (!isBooting() && !ui.state.settingsOpen && ui.menu === 'slash') {
+      pinFloating(slashMenu(), input, { prefer: 'above', align: 'start' });
+    } else if (!isBooting() && !ui.state.settingsOpen && ui.menu === 'files') {
+      pinFloating(fileMenu(), input, { prefer: 'above', align: 'start' });
     }
   }
   const card = document.getElementById('composer-card');
@@ -207,7 +216,13 @@ function bindComposerInput(input: HTMLTextAreaElement): void {
 }
 
 function fillComposerBar(bar: HTMLElement, input: HTMLTextAreaElement): void {
-  const plus = iconButton(tr('attach'), iconPlus(), () => post({ type: 'attach' }));
+  const plus = iconButton(isRemoteWeb() ? tr('attachPick') : tr('attach'), iconPlus(), () => {
+    if (isRemoteWeb()) {
+      pickRemoteFiles();
+      return;
+    }
+    post({ type: 'attach' });
+  });
   const seg = document.createElement('div');
   seg.className = 'seg';
   for (const [id, key] of [
@@ -245,6 +260,7 @@ function fillComposerBar(bar: HTMLElement, input: HTMLTextAreaElement): void {
     send.innerHTML = iconStar('14');
     send.addEventListener('click', () => sendFrom(input));
   }
+  releaseByClass('picker-menu');
   bar.replaceChildren(plus, seg, modelPicker(), effortPicker(), contextMeter(), send);
 }
 
@@ -291,9 +307,9 @@ function patchContextMeter(bar: HTMLElement): void {
     fill.setAttribute('stroke-dasharray', circ.toFixed(2));
     fill.setAttribute('stroke-dashoffset', offset.toFixed(2));
   }
-  const tip = wrap.querySelector('.ctx-tip');
-  if (tip) {
-    tip.replaceWith(contextTip(ctx, percent, compactAt));
+  const tip = wrap.querySelector('.ctx-tip') ?? findPinned('.ctx-tip');
+  if (tip instanceof HTMLElement) {
+    fillContextTip(tip, ctx, percent, compactAt);
   }
 }
 
@@ -318,7 +334,9 @@ function contextMeter(): HTMLElement {
       stroke-linecap="round" stroke-dasharray="${circ.toFixed(2)}"
       stroke-dashoffset="${offset.toFixed(2)}" transform="rotate(-90 14 14)"/>
   </svg>`;
-  wrap.append(contextTip(ctx, percent, compactAt));
+  const tip = contextTip(ctx, percent, compactAt);
+  wrap.append(tip);
+  bindHoverPin(wrap, tip, { prefer: 'above', align: 'end' });
   return wrap;
 }
 
@@ -329,9 +347,20 @@ function contextTip(
 ): HTMLElement {
   const tip = document.createElement('div');
   tip.className = 'ctx-tip';
+  fillContextTip(tip, ctx, percent, compactAt);
+  return tip;
+}
+
+function fillContextTip(
+  tip: HTMLElement,
+  ctx: ChatState['context'],
+  percent: number,
+  compactAt: number,
+): void {
+  tip.replaceChildren();
   if (!ctx || ctx.total <= 0) {
     tip.textContent = tr('ctxWaiting');
-    return tip;
+    return;
   }
   const rows: Array<[string, string]> = [
     [tr('ctxTitle'), `${percent}%`],
@@ -366,7 +395,6 @@ function contextTip(
     }
     tip.append(line);
   }
-  return tip;
 }
 
 function currentModel(): ModelOption | undefined {
@@ -467,10 +495,11 @@ function pickerControl(opts: {
     render();
   });
   wrap.append(btn);
-  if (ui.picker === opts.kind && opts.items.length > 0) {
+  if (ui.picker === opts.kind && opts.items.length > 0 && !ui.state.settingsOpen) {
     const list = document.createElement('div');
     list.className = 'picker-menu';
     list.setAttribute('role', 'listbox');
+    list.addEventListener('click', (event) => event.stopPropagation());
     for (const item of opts.items) {
       const option = document.createElement('button');
       option.type = 'button';
@@ -486,7 +515,7 @@ function pickerControl(opts: {
       });
       list.append(option);
     }
-    wrap.append(list);
+    pinFloating(list, btn, { prefer: 'above', align: opts.kind === 'effort' ? 'end' : 'start' });
   }
   return wrap;
 }
@@ -499,6 +528,7 @@ function slashMenu(): HTMLElement {
   );
   const el = document.createElement('div');
   el.className = 'menu';
+  el.addEventListener('click', (event) => event.stopPropagation());
   for (const cmd of hits) {
     const item = document.createElement('button');
     item.type = 'button';
@@ -518,6 +548,7 @@ function slashMenu(): HTMLElement {
 function fileMenu(): HTMLElement {
   const el = document.createElement('div');
   el.className = 'menu';
+  el.addEventListener('click', (event) => event.stopPropagation());
   for (const hit of ui.state.fileHits ?? []) {
     const item = document.createElement('button');
     item.type = 'button';
@@ -566,30 +597,7 @@ function handlePaste(event: ClipboardEvent): void {
     return;
   }
   event.preventDefault();
-  void (async () => {
-    const images: Array<{ name: string; mimeType: string; data: string }> = [];
-    for (const file of files) {
-      if (!file.type.startsWith('image/')) {
-        continue;
-      }
-      const buf = new Uint8Array(await file.arrayBuffer());
-      images.push({
-        name: file.name || 'paste.png',
-        mimeType: file.type || 'image/png',
-        data: bytesToBase64(buf),
-      });
-    }
-    post({ type: 'pasteClipboard', text, uris, images });
-  })();
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
+  void sendBrowserFiles(files, { text, uris });
 }
 
 function sendFrom(input: HTMLTextAreaElement): void {
@@ -603,11 +611,17 @@ function sendFrom(input: HTMLTextAreaElement): void {
   ui.stickToBottom = true;
   input.value = '';
   autosize(input);
+  scrollTranscript();
 }
 
 function autosize(input: HTMLTextAreaElement): void {
+  const before = input.style.height;
   input.style.height = 'auto';
-  input.style.height = `${Math.min(Math.max(input.scrollHeight, 44), 160)}px`;
+  const next = `${Math.min(Math.max(input.scrollHeight, 44), 160)}px`;
+  input.style.height = next;
+  if (before !== next) {
+    scrollTranscript();
+  }
 }
 
 function composerPlaceholder(): string {
@@ -789,11 +803,7 @@ function tickLiveCounts(el: HTMLElement, summary: LiveEditSummary, first: boolea
 
 export function jumpToLatest(): void {
   ui.stickToBottom = true;
-  const transcript = document.getElementById('transcript');
-  if (transcript) {
-    transcript.scrollTop = transcript.scrollHeight;
-    ui.transcriptScroll = transcript.scrollTop;
-  }
+  scrollTranscript();
   patchJumpBottom();
 }
 

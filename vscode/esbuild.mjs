@@ -1,5 +1,6 @@
 import * as esbuild from 'esbuild';
-import { mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import * as path from 'node:path';
 
 const watch = process.argv.includes('--watch');
 const test = process.argv.includes('--test');
@@ -50,6 +51,16 @@ const host = {
   banner: { js: '#!/usr/bin/env node' },
 };
 
+const shikiMonaco = {
+  ...common,
+  entryPoints: ['src/webview/shiki-monaco.ts'],
+  outfile: 'dist/shiki-monaco.js',
+  platform: 'browser',
+  format: 'iife',
+  target: 'es2022',
+  external: [],
+};
+
 const tests = {
   ...common,
   entryPoints: [
@@ -96,12 +107,16 @@ const tests = {
     'src/liveEdits.test.ts',
     'src/permissionView.test.ts',
     'src/webview/scroll.test.ts',
+    'src/webview/popover.test.ts',
+    'src/webview/monaco.test.ts',
     'src/controller.test.ts',
     'src/dispatch.test.ts',
     'src/reconnect.test.ts',
     'src/notify.test.ts',
     'src/remoteGateway.test.ts',
+    'src/remoteState.test.ts',
     'src/remoteTunnel.test.ts',
+    'src/workspaceIndex.test.ts',
   ],
   outdir: 'dist/test',
   format: 'cjs',
@@ -114,12 +129,14 @@ async function run() {
     await esbuild.build(tests);
     return;
   }
+  copyMonaco();
   if (watch) {
     const ctxs = await Promise.all([
       esbuild.context(extension),
       esbuild.context(webview),
       esbuild.context(diffView),
       esbuild.context(host),
+      esbuild.context(shikiMonaco),
     ]);
     await Promise.all(ctxs.map((ctx) => ctx.watch()));
     return;
@@ -129,7 +146,30 @@ async function run() {
     esbuild.build(webview),
     esbuild.build(diffView),
     esbuild.build(host),
+    esbuild.build(shikiMonaco),
   ]);
+}
+
+function copyMonaco() {
+  const src = path.join('node_modules', 'monaco-editor', 'min', 'vs');
+  const dest = path.join('dist', 'monaco', 'vs');
+  if (!existsSync(src)) {
+    console.warn('monaco-editor missing; remote workspace falls back to a textarea');
+    return;
+  }
+  mkdirSync(path.dirname(dest), { recursive: true });
+  try {
+    cpSync(src, dest, {
+      recursive: true,
+      filter: (from) => !from.endsWith('.map'),
+    });
+  } catch (error) {
+    if (existsSync(path.join(dest, 'loader.js'))) {
+      console.warn('monaco copy skipped; existing dist/monaco/vs kept');
+      return;
+    }
+    throw error;
+  }
 }
 
 run().catch((err) => {

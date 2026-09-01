@@ -67,11 +67,45 @@ describe('dispatchUi', () => {
       rotateRemoteCode() {
         seen.push('rotate');
       },
+      setRemoteAuth(fields: { mode?: string; secret?: string }) {
+        seen.push(`auth:${fields.mode ?? ''}:${fields.secret ?? ''}`);
+      },
     } as unknown as GrokController;
     await dispatchUi(controller, { type: 'openRemote' });
     await dispatchUi(controller, { type: 'startRemote', port: 8787 });
     await dispatchUi(controller, { type: 'rotateRemoteCode' });
-    assert.deepEqual(seen, ['open', 'start:8787', 'rotate']);
+    await dispatchUi(controller, { type: 'setRemoteAuth', mode: 'custom', secret: 'ok-pass' });
+    assert.deepEqual(seen, ['open', 'start:8787', 'rotate', 'auth:custom:ok-pass']);
+  });
+
+  it('routes workspace list and file open', async () => {
+    const seen: string[] = [];
+    const controller = {
+      async listWorkspace(dir?: string) {
+        seen.push(`list:${dir ?? ''}`);
+      },
+      async openWorkspaceFile(filePath: string) {
+        seen.push(`open:${filePath}`);
+      },
+      async saveWorkspaceFile(filePath: string, hash: string) {
+        seen.push(`save:${filePath}:${hash}`);
+      },
+      async mutateWorkspace(op: { action: string; name?: string }) {
+        seen.push(`mutate:${op.action}:${op.name ?? ''}`);
+      },
+    } as unknown as GrokController;
+    await dispatchUi(controller, { type: 'setRemoteView', view: 'workspace' });
+    await dispatchUi(controller, { type: 'listWorkspace', dir: 'src' });
+    await dispatchUi(controller, { type: 'openWorkspaceFile', path: 'src/a.ts' });
+    await dispatchUi(controller, { type: 'saveWorkspaceFile', path: 'src/a.ts', hash: 'abc', text: 'x' });
+    await dispatchUi(controller, { type: 'mutateWorkspace', action: 'create', dir: '', name: 'n.ts', kind: 'file' });
+    assert.deepEqual(seen, [
+      'list:',
+      'list:src',
+      'open:src/a.ts',
+      'save:src/a.ts:abc',
+      'mutate:create:n.ts',
+    ]);
   });
 
   it('routes public remote seats and advertised url', async () => {

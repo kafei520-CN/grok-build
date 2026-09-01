@@ -60,17 +60,6 @@ export function onUserScroll(
   };
 }
 
-/**
- * Chromium may reset a remounted scrollport to 0. Restore the last user
- * position instead of jumping to the top.
- */
-export function restoreScrollTop(scrollTop: number, saved: number): number | undefined {
-  if (scrollTop === 0 && saved > 0) {
-    return saved;
-  }
-  return undefined;
-}
-
 export type JumpBottomKind = 'hidden' | 'arrow' | 'dots';
 
 /** Hidden while pinned to the bottom; dots if a turn is live, else an arrow. */

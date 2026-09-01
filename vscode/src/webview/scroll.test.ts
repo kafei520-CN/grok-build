@@ -8,7 +8,6 @@ import {
   jumpBottomKind,
   nearBottom,
   onUserScroll,
-  restoreScrollTop,
   shouldPinToBottom,
   userHeldScroll,
   type TranscriptScroll,
@@ -68,21 +67,15 @@ describe('transcript scroll', () => {
       nearBottom({ scrollTop: 0, scrollHeight: 800, clientHeight: 200 }),
       false,
     );
-    const dragged = onUserScroll(idle(), 500, lowerHalf);
+    const dragged = onUserScroll(idle({ lastUserScroll: 500 }), 500, lowerHalf);
     assert.equal(dragged.stickToBottom, false);
     assert.equal(dragged.lastUserScroll, 500);
     assert.equal(dragged.transcriptScroll, 400);
-    const atEnd = onUserScroll(idle(), 500, atBottom);
+    const atEnd = onUserScroll(idle({ lastUserScroll: 500 }), 500, atBottom);
     assert.equal(atEnd.stickToBottom, true);
     const pinned = onUserScroll(idle({ pinLock: true, stickToBottom: false }), 500, atBottom);
     assert.equal(pinned.stickToBottom, false);
     assert.equal(pinned.lastUserScroll, 0);
-  });
-
-  it('restores a remount that Chromium reset to scrollTop 0', () => {
-    assert.equal(restoreScrollTop(0, 420), 420);
-    assert.equal(restoreScrollTop(80, 420), undefined);
-    assert.equal(restoreScrollTop(0, 0), undefined);
   });
 
   it('hides at the bottom even while streaming', () => {
@@ -98,6 +91,7 @@ describe('transcript scroll', () => {
     assert.ok(block, 'missing .transcript rule');
     assert.match(block[0], /display:\s*block/);
     assert.doesNotMatch(block[0], /display:\s*flex/);
+    assert.match(block[0], /overflow-anchor:\s*auto/);
     assert.ok(BOTTOM_SLACK_PX > 0);
   });
 });

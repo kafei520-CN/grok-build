@@ -11,8 +11,9 @@ import type {
   PlanStep,
 } from '../types';
 import { loc, post, render, tr, ui } from './app';
+import { bindHoverPin } from './popover';
 import { patchJumpBottom } from './composer';
-import { restoreScrollTop, shouldPinToBottom, userHeldScroll, type TranscriptScroll } from './scroll';
+import { onUserScroll, shouldPinToBottom, type TranscriptScroll } from './scroll';
 import { bootStar, errorCard, home, loginCard, panel, setupCard } from './chrome';
 import { button, iconButton } from './dom';
 import {
@@ -50,7 +51,7 @@ export function patchBody(parent: HTMLElement): void {
     body.id = 'grok-body';
     const header = document.getElementById('grok-header');
     const composer = document.getElementById('composer-wrap');
-    if (composer) {
+    if (composer && composer.parentElement === parent) {
       parent.insertBefore(body, composer);
     } else if (header?.nextSibling) {
       parent.insertBefore(body, header.nextSibling);
@@ -438,28 +439,22 @@ export function scrollTranscript(): void {
   bindTranscriptScroll(el);
   scrollState.stickToBottom = ui.stickToBottom;
   scrollState.transcriptScroll = ui.transcriptScroll;
-  const now = Date.now();
   if (
-    shouldPinToBottom({
+    !shouldPinToBottom({
       stickToBottom: ui.stickToBottom,
       lightbox: Boolean(ui.lightboxSrc),
-      now,
+      now: Date.now(),
       lastUserScroll: scrollState.lastUserScroll,
     })
   ) {
-    scrollState.pinLock = true;
-    el.scrollTop = el.scrollHeight;
-    scrollState.pinLock = false;
-    patchJumpBottom();
     return;
   }
-  if (ui.lightboxSrc || userHeldScroll(now, scrollState.lastUserScroll)) {
-    return;
-  }
-  const restored = restoreScrollTop(el.scrollTop, ui.transcriptScroll);
-  if (restored !== undefined) {
-    el.scrollTop = restored;
-  }
+  scrollState.pinLock = true;
+  el.scrollTop = el.scrollHeight;
+  ui.transcriptScroll = el.scrollTop;
+  scrollState.transcriptScroll = el.scrollTop;
+  scrollState.pinLock = false;
+  patchJumpBottom();
 }
 
 function bindTranscriptScroll(el?: HTMLElement | null): void {
@@ -471,18 +466,54 @@ function bindTranscriptScroll(el?: HTMLElement | null): void {
   const markUser = () => {
     scrollState.lastUserScroll = Date.now();
   };
-  node.addEventListener('pointerdown', markUser, { passive: true });
-  node.addEventListener('wheel', markUser, { passive: true });
+  node.addEventListener(
+    'pointerdown',
+    (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('button, a, summary')) {
+        return;
+      }
+      markUser();
+    },
+    { capture: true, passive: true },
+  );
+  node.addEventListener(
+    'mousedown',
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      const control = target.closest('button, a');
+      if (!(control instanceof HTMLElement)) {
+        return;
+      }
+      event.preventDefault();
+      control.focus({ preventScroll: true });
+    },
+    { capture: true },
+  );
+  node.addEventListener('wheel', markUser, { passive: true, capture: true });
+  node.addEventListener('touchmove', markUser, { passive: true, capture: true });
   node.addEventListener(
     'scroll',
     () => {
       if (scrollState.pinLock) {
         return;
       }
-      scrollState.lastUserScroll = Date.now();
-      ui.stickToBottom =
-        node.scrollHeight - node.scrollTop - node.clientHeight < 56;
-      ui.transcriptScroll = node.scrollTop;
+      const next = onUserScroll(scrollState, Date.now(), {
+        scrollTop: node.scrollTop,
+        scrollHeight: node.scrollHeight,
+        clientHeight: node.clientHeight,
+      });
+      if (next === scrollState) {
+        return;
+      }
+      scrollState.lastUserScroll = next.lastUserScroll;
+      scrollState.stickToBottom = next.stickToBottom;
+      scrollState.transcriptScroll = next.transcriptScroll;
+      ui.stickToBottom = next.stickToBottom;
+      ui.transcriptScroll = next.transcriptScroll;
       patchJumpBottom();
     },
     { passive: true },
@@ -972,18 +1003,6 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
   el.className = message.streaming ? 'work live' : 'work';
   el.dataset.mid = message.id;
   el.open = ui.workOpen.get(message.id) ?? Boolean(message.streaming);
-  el.addEventListener('toggle', (event) => {
-    if (!event.isTrusted) {
-      return;
-    }
-    ui.workOpen.set(message.id, el.open);
-    if (el.open) {
-      const live = ui.state.messages.find((item) => item.id === message.id);
-      if (live) {
-        patchWorkBody(el.querySelector('.work-body'), live);
-      }
-    }
-  });
   const summary = document.createElement('summary');
   const mark = document.createElement('span');
   mark.className = message.streaming ? 'mark pulse' : 'mark';
@@ -992,6 +1011,17 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
   label.className = 'work-label';
   label.textContent = workLabel(message);
   summary.append(mark, label);
+  summary.addEventListener('click', (event) => {
+    event.preventDefault();
+    el.open = !el.open;
+    ui.workOpen.set(message.id, el.open);
+    if (el.open) {
+      const live = ui.state.messages.find((item) => item.id === message.id);
+      if (live) {
+        patchWorkBody(el.querySelector('.work-body'), live);
+      }
+    }
+  });
   const body = document.createElement('div');
   body.className = 'work-body';
   if (message.thinking) {
@@ -1261,11 +1291,6 @@ function permissionBar(): HTMLElement {
   const fold = document.createElement('details');
   fold.className = 'permission-fold';
   fold.open = ui.permissionOpen.get(perm.requestId) ?? false;
-  fold.addEventListener('toggle', (event) => {
-    if (event.isTrusted) {
-      ui.permissionOpen.set(perm.requestId, fold.open);
-    }
-  });
   const head = document.createElement('summary');
   const kicker = document.createElement('span');
   kicker.className = 'permission-kind';
@@ -1274,6 +1299,11 @@ function permissionBar(): HTMLElement {
   name.className = 'permission-file';
   name.textContent = permissionTarget(perm);
   head.append(kicker, name);
+  head.addEventListener('click', (event) => {
+    event.preventDefault();
+    fold.open = !fold.open;
+    ui.permissionOpen.set(perm.requestId, fold.open);
+  });
   fold.append(head);
   if (perm.details) {
     const pre = document.createElement('pre');
@@ -1398,8 +1428,12 @@ function askChoiceButton(
     const mark = document.createElement('span');
     mark.className = 'ask-hint';
     mark.setAttribute('aria-label', tr('askHint'));
-    mark.dataset.tip = hint.replace(/"/g, "'");
     mark.innerHTML = iconAskHint();
+    const tip = document.createElement('span');
+    tip.className = 'ask-tip';
+    tip.textContent = hint;
+    mark.append(tip);
+    bindHoverPin(mark, tip, { prefer: 'above', align: 'end' });
     mark.addEventListener('click', (event) => event.stopPropagation());
     el.append(mark);
   }

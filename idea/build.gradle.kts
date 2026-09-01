@@ -38,10 +38,19 @@ val copySharedAssets by tasks.registering(Copy::class) {
     from(vscodeRoot.resolve("dist/webview.js"))
     from(vscodeRoot.resolve("dist/diff.js"))
     from(vscodeRoot.resolve("dist/host.js"))
+    from(vscodeRoot.resolve("dist")) {
+        include("shiki-monaco.js")
+    }
     from(vscodeRoot.resolve("media/chat.css"))
     from(vscodeRoot.resolve("media/diff.css"))
     from(vscodeRoot.resolve("media/icon.svg"))
     from(vscodeRoot.resolve("media/grok-symbol.png"))
+    val monaco = vscodeRoot.resolve("dist/monaco")
+    if (monaco.resolve("vs/loader.js").isFile) {
+        from(monaco) {
+            into("monaco")
+        }
+    }
     into(generatedGrok.map { it.dir("grok") })
     doFirst {
         val host = vscodeRoot.resolve("dist/host.js")

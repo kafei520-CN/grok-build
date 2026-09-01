@@ -88,4 +88,16 @@ describe('attachments', () => {
     assert.equal(host.attachments[0]?.label, 'a.ts');
     assert.equal(host.attachments[0]?.text, 'export const n = 1;\n');
   });
+
+  it('attaches browser-picked text files without a workspace path', async () => {
+    bindPlatform(fakePlat());
+    const host: AttachmentHost = { attachments: [], emit() {} };
+    await pasteClipboard(host, {
+      files: [{ name: 'note.md', mimeType: 'text/markdown', text: '# hi\n' }],
+    });
+    assert.equal(host.attachments.length, 1);
+    assert.equal(host.attachments[0]?.label, 'note.md');
+    assert.equal(host.attachments[0]?.path, undefined);
+    assert.equal(host.attachments[0]?.text, '# hi\n');
+  });
 });

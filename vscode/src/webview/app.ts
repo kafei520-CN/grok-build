@@ -2,6 +2,17 @@ import type { ChatState, WebviewToHost } from '../types';
 import { t, type StringKey, type UiLocale } from '../i18n';
 import { normalizeTheme } from '../theme';
 
+export type WsFile = {
+  path: string;
+  rel: string;
+  text?: string;
+  hash?: string;
+  tooLarge?: boolean;
+  binary?: boolean;
+  missing?: boolean;
+  review?: unknown;
+};
+
 type VsCodeApi = {
   postMessage(message: WebviewToHost): void;
   getState(): unknown;
@@ -49,6 +60,33 @@ export const ui = {
   transcriptScroll: 0,
   composer: undefined as HTMLTextAreaElement | undefined,
   wantFocus: false,
+  remoteView: readRemoteView(vscode.getState()),
+  wsRootName: '',
+  wsDirs: {} as Record<
+    string,
+    Array<{ path: string; rel: string; name: string; kind: 'file' | 'dir' }>
+  >,
+  wsTruncated: false,
+  wsQuery: '',
+  wsFolderLoading: new Set<string>(),
+  wsTabs: [] as WsFile[],
+  wsActive: '',
+  wsDrafts: {} as Record<string, string>,
+  wsAsk: '',
+  wsNotice: '',
+  wsListed: false,
+  wsPane: 'file' as 'file' | 'review',
+  wsDiff: undefined as
+    | {
+        locale?: string;
+        files?: unknown[];
+        messageId?: string;
+        theme?: unknown;
+      }
+    | undefined,
+  wsFolderOpen: new Set<string>(),
+  wsNavPx: readPx(vscode.getState(), 'wsNavPx', 220),
+  wsChatPx: readPx(vscode.getState(), 'wsChatPx', 360),
 };
 
 export function loc(): UiLocale {
@@ -73,8 +111,15 @@ export function emptyState(): ChatState {
   };
 }
 
+export function isRemoteWeb(): boolean {
+  return document.documentElement.classList.contains('remote-web');
+}
+
 export function isBooting(): boolean {
-  return ui.state.status === 'connecting';
+  if (ui.state.status !== 'connecting') {
+    return false;
+  }
+  return !(isRemoteWeb() && ui.state.messages.length > 0);
 }
 
 let prefsToken = '';
@@ -87,6 +132,9 @@ export function persistUi(): void {
     timestamps: ui.state.timestamps,
     multiline: ui.state.multiline,
     sessionsMode: ui.sessionsMode,
+    remoteView: ui.remoteView,
+    wsNavPx: ui.wsNavPx,
+    wsChatPx: ui.wsChatPx,
     theme,
   });
   if (next === prefsToken) {
@@ -99,8 +147,26 @@ export function persistUi(): void {
     timestamps: ui.state.timestamps,
     multiline: ui.state.multiline,
     sessionsMode: ui.sessionsMode,
+    remoteView: ui.remoteView,
+    wsNavPx: ui.wsNavPx,
+    wsChatPx: ui.wsChatPx,
     theme,
   });
+}
+
+function readPx(raw: unknown, key: string, fallback: number): number {
+  if (!raw || typeof raw !== 'object') {
+    return fallback;
+  }
+  const value = (raw as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function readRemoteView(raw: unknown): 'sidebar' | 'workspace' {
+  if (raw && typeof raw === 'object' && (raw as { remoteView?: string }).remoteView === 'workspace') {
+    return 'workspace';
+  }
+  return 'sidebar';
 }
 
 function readSessionsMode(raw: unknown): 'list' | 'workspace' {

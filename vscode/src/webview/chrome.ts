@@ -1,7 +1,8 @@
 import type { StringKey } from '../i18n';
 import { formatRelativeTime } from '../i18n';
-import { isBooting, loc, post, render, tr, ui } from './app';
+import { isBooting, isRemoteWeb, loc, persistUi, post, render, tr, ui } from './app';
 import { button, iconButton } from './dom';
+import { findPinned, pinFloating, releaseFloating } from './popover';
 import { iconClock, iconClose, iconEdit, iconGrid, iconMore, iconStar } from './icons';
 import { escapeHtml } from './markdown';
 import { mountDashboard } from './dashboard';
@@ -15,6 +16,10 @@ export function patchHeader(parent: HTMLElement): void {
   if (isBooting()) {
     el?.remove();
     headerLocale = undefined;
+    const menu = findPinned('.more-menu');
+    if (menu) {
+      releaseFloating(menu);
+    }
     return;
   }
   const locale = ui.state.locale ?? 'en';
@@ -27,6 +32,7 @@ export function patchHeader(parent: HTMLElement): void {
       parent.prepend(next);
     }
     headerLocale = locale;
+    syncMoreMenu(next);
     return;
   }
   const mark = el.querySelector('.brand .mark');
@@ -35,12 +41,12 @@ export function patchHeader(parent: HTMLElement): void {
   }
   const more = el.querySelector('[data-act="more"]');
   more?.classList.toggle('open', ui.moreOpen);
-  const menu = el.querySelector('.more-menu');
-  if (ui.moreOpen && !menu) {
-    el.querySelector('.header-actions')?.append(moreMenu());
-  } else if (!ui.moreOpen) {
-    menu?.remove();
+  if (isRemoteWeb()) {
+    for (const btn of el.querySelectorAll('.ws-mode button')) {
+      btn.classList.toggle('on', (btn as HTMLElement).dataset.view === ui.remoteView);
+    }
   }
+  syncMoreMenu(el);
 }
 
 export function renderHeader(): HTMLElement {
@@ -77,11 +83,60 @@ export function renderHeader(): HTMLElement {
   const fresh = iconButton(tr('newSession'), iconEdit(), () => post({ type: 'newSession' }));
   fresh.dataset.act = 'new';
   actions.append(sessions, dash, more, fresh);
-  if (ui.moreOpen) {
-    actions.append(moreMenu());
+  if (isRemoteWeb()) {
+    el.append(brand, remoteViewSeg(), actions);
+  } else {
+    el.append(brand, actions);
   }
-  el.append(brand, actions);
   return el;
+}
+
+function remoteViewSeg(): HTMLElement {
+  const seg = document.createElement('div');
+  seg.className = 'seg ws-mode';
+  for (const [id, label] of [
+    ['sidebar', tr('remoteViewSidebar')],
+    ['workspace', tr('remoteViewWorkspace')],
+  ] as const) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.view = id;
+    btn.textContent = label;
+    if (ui.remoteView === id) {
+      btn.classList.add('on');
+    }
+    btn.addEventListener('click', () => {
+      if (ui.remoteView === id) {
+        return;
+      }
+      ui.remoteView = id;
+      ui.moreOpen = false;
+      persistAndSwitch();
+    });
+    seg.append(btn);
+  }
+  return seg;
+}
+
+function persistAndSwitch(): void {
+  persistUi();
+  post({ type: 'setRemoteView', view: ui.remoteView });
+  if (ui.remoteView === 'workspace') {
+    post({ type: 'listWorkspace' });
+  }
+  render();
+}
+
+function syncMoreMenu(header: HTMLElement): void {
+  const more = header.querySelector('[data-act="more"]');
+  const menu = findPinned('.more-menu');
+  if (!ui.moreOpen || !(more instanceof HTMLElement)) {
+    if (menu) {
+      releaseFloating(menu);
+    }
+    return;
+  }
+  pinFloating(menu ?? moreMenu(), more, { prefer: 'below', align: 'end' });
 }
 
 function moreMenu(): HTMLElement {

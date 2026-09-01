@@ -5,17 +5,25 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Socket } from 'node:net';
 import type { WebviewToHost } from './types';
+import { packRemotePayload } from './remoteState';
 
 export const DEFAULT_REMOTE_PORT = 8787;
+/** Keep the pairing token after a drop so the same browser can reconnect. */
+export const TOKEN_GRACE_MS = 45_000;
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const MAX_FRAME = 8 * 1024 * 1024;
 const MAX_CLIENTS = 1;
 const COOKIE = 'grok_sess';
+const BEAT_MS = 20_000;
 
 export interface RemoteAssets {
   webviewJs: string;
   chatCss: string;
+  diffJs?: string;
+  diffCss?: string;
   symbol?: string;
+  monacoDir?: string;
+  shikiMonacoJs?: string;
 }
 
 export type RemoteBindHost = '0.0.0.0' | '127.0.0.1';
@@ -33,6 +41,7 @@ export interface RemoteInfo {
   local: boolean;
   public: boolean;
   code: string;
+  codeMode: RemotePairMode;
   localCode?: string;
   publicUrl: string;
   urls: string[];
@@ -57,9 +66,22 @@ export function clampRemotePort(raw: unknown): number {
   return Math.max(1024, Math.min(65535, n));
 }
 
+export type RemotePairMode = 'random' | 'custom';
+
 export function generatePairCode(): string {
   const n = randomBytes(4).readUInt32BE(0) % 1_000_000;
   return n.toString().padStart(6, '0');
+}
+
+/** Custom pairing secret: 4–64 chars, no control characters. */
+export function sanitizeRemoteSecret(raw: unknown): string {
+  const text = String(raw ?? '')
+    .replace(/[\r\n\0]/g, '')
+    .trim();
+  if (text.length < 4 || text.length > 64) {
+    return '';
+  }
+  return text;
 }
 
 export function lanUrls(port: number): string[] {
@@ -108,18 +130,31 @@ export function normalizePublicUrl(raw: unknown): string {
 export function resolveRemoteAssets(fromFile = __dirname): RemoteAssets {
   const env = process.env.GROK_REMOTE_ASSETS?.trim();
   if (env && fs.existsSync(path.join(env, 'webview.js'))) {
+    const monacoDir = path.join(env, 'monaco');
     return {
       webviewJs: path.join(env, 'webview.js'),
       chatCss: path.join(env, 'chat.css'),
+      diffJs: path.join(env, 'diff.js'),
+      diffCss: path.join(env, 'diff.css'),
       symbol: path.join(env, 'grok-symbol.png'),
+      ...(fs.existsSync(path.join(monacoDir, 'vs', 'loader.js')) ? { monacoDir } : {}),
+      ...(fs.existsSync(path.join(env, 'shiki-monaco.js'))
+        ? { shikiMonacoJs: path.join(env, 'shiki-monaco.js') }
+        : {}),
     };
   }
   const dir = path.dirname(fromFile);
   const root = path.basename(dir) === 'dist' ? path.join(dir, '..') : dir;
+  const monacoDir = path.join(dir, 'monaco');
+  const shikiMonacoJs = path.join(dir, 'shiki-monaco.js');
   return {
     webviewJs: path.join(dir, 'webview.js'),
     chatCss: path.join(root, 'media', 'chat.css'),
+    diffJs: path.join(dir, 'diff.js'),
+    diffCss: path.join(root, 'media', 'diff.css'),
     symbol: path.join(root, 'media', 'grok-symbol.png'),
+    ...(fs.existsSync(path.join(monacoDir, 'vs', 'loader.js')) ? { monacoDir } : {}),
+    ...(fs.existsSync(shikiMonacoJs) ? { shikiMonacoJs } : {}),
   };
 }
 
@@ -129,6 +164,7 @@ export class RemoteGateway {
   private readonly sockets = new Set<Socket>();
   private readonly socketToken = new Map<Socket, string>();
   private code = '';
+  private pairMode: RemotePairMode = 'random';
   private localOn = false;
   private publicOn = false;
   private publicUrl = '';
@@ -136,6 +172,8 @@ export class RemoteGateway {
   private bind: RemoteBindHost = '127.0.0.1';
   private fails = 0;
   private failReset?: ReturnType<typeof setTimeout>;
+  private tokenGrace?: ReturnType<typeof setTimeout>;
+  private beat?: ReturnType<typeof setInterval>;
   private error?: string;
   private readonly unsub: Array<{ dispose(): void }> = [];
 
@@ -159,6 +197,7 @@ export class RemoteGateway {
       local: this.localOn,
       public: this.publicOn,
       code: this.code,
+      codeMode: this.pairMode,
       localCode: this.localOn ? this.code : undefined,
       publicUrl: this.publicUrl,
       urls: [...new Set(urls)],
@@ -191,7 +230,7 @@ export class RemoteGateway {
     }
     const port = clampRemotePort(opts.port ?? this.port);
     const bind = remoteBindHost(opts.local);
-    if (!this.code) {
+    if (!this.code && this.pairMode !== 'custom') {
       this.code = generatePairCode();
     }
     this.localOn = opts.local;
@@ -240,6 +279,8 @@ export class RemoteGateway {
       clearTimeout(this.failReset);
       this.failReset = undefined;
     }
+    this.clearTokenGrace();
+    this.stopBeat();
     this.fails = 0;
     await this.closeServer();
     this.error = undefined;
@@ -256,17 +297,28 @@ export class RemoteGateway {
 
   rotateCode(): string {
     this.dropAllSessions();
+    this.pairMode = 'random';
     this.code = generatePairCode();
     return this.code;
+  }
+
+  setPairSecret(code: string, mode: RemotePairMode): void {
+    const next = mode === 'custom' ? sanitizeRemoteSecret(code) : String(code ?? '').trim();
+    if (this.pairMode === mode && this.code === next) {
+      return;
+    }
+    this.dropAllSessions();
+    this.pairMode = mode;
+    this.code = next;
   }
 
   broadcast(payload: unknown): void {
     if (!this.sockets.size) {
       return;
     }
-    const raw = JSON.stringify(payload);
+    const frames = packRemotePayload(payload);
     for (const sock of this.sockets) {
-      sendText(sock, raw);
+      sendPacked(sock, frames);
     }
   }
 
@@ -275,12 +327,56 @@ export class RemoteGateway {
   }
 
   private dropAllSessions(): void {
+    this.clearTokenGrace();
+    this.stopBeat();
     for (const sock of this.sockets) {
       sock.destroy();
     }
     this.sockets.clear();
     this.socketToken.clear();
     this.tokens.clear();
+  }
+
+  private scheduleTokenGrace(): void {
+    this.clearTokenGrace();
+    this.tokenGrace = setTimeout(() => {
+      this.tokenGrace = undefined;
+      if (this.sockets.size === 0) {
+        this.tokens.clear();
+      }
+    }, TOKEN_GRACE_MS);
+    this.tokenGrace.unref?.();
+  }
+
+  private clearTokenGrace(): void {
+    if (this.tokenGrace) {
+      clearTimeout(this.tokenGrace);
+      this.tokenGrace = undefined;
+    }
+  }
+
+  private startBeat(): void {
+    if (this.beat) {
+      return;
+    }
+    this.beat = setInterval(() => {
+      for (const sock of [...this.sockets]) {
+        try {
+          sock.write(Buffer.from([0x89, 0x00]));
+        } catch {
+          sock.destroy();
+        }
+      }
+    }, BEAT_MS);
+    this.beat.unref?.();
+  }
+
+  private stopBeat(): void {
+    if (!this.beat) {
+      return;
+    }
+    clearInterval(this.beat);
+    this.beat = undefined;
   }
 
   private dropToken(token: string): void {
@@ -294,8 +390,13 @@ export class RemoteGateway {
     }
   }
 
+  private pairHtml(req: IncomingMessage): string {
+    return pairPage(zh(req), this.pairMode === 'custom');
+  }
+
   private matchCode(input: string): { kind: 'local' | 'public' } | undefined {
-    if (!this.code || !codesEqual(input, this.code)) {
+    const guess = input.trim();
+    if (!this.code || !guess || !codesEqual(guess, this.code)) {
       return undefined;
     }
     return { kind: this.publicOn ? 'public' : 'local' };
@@ -307,12 +408,36 @@ export class RemoteGateway {
       this.pair(req, res);
       return;
     }
+    if (url.pathname.startsWith('/monaco/')) {
+      this.monacoFile(res, url.pathname);
+      return;
+    }
+    if (url.pathname === '/shiki-monaco.js' && this.assets.shikiMonacoJs) {
+      this.file(res, this.assets.shikiMonacoJs, 'application/javascript; charset=utf-8', true);
+      return;
+    }
     if (url.pathname === '/webview.js') {
       this.file(res, this.assets.webviewJs, 'application/javascript; charset=utf-8');
       return;
     }
     if (url.pathname === '/chat.css') {
       this.file(res, this.assets.chatCss, 'text/css; charset=utf-8');
+      return;
+    }
+    if (url.pathname === '/diff.js' && this.assets.diffJs) {
+      this.file(res, this.assets.diffJs, 'application/javascript; charset=utf-8');
+      return;
+    }
+    if (url.pathname === '/diff.css' && this.assets.diffCss) {
+      this.file(res, this.assets.diffCss, 'text/css; charset=utf-8');
+      return;
+    }
+    if (url.pathname === '/diff.html' || url.pathname === '/diff') {
+      if (!this.authed(req)) {
+        this.html(res, this.pairHtml(req));
+        return;
+      }
+      this.html(res, diffPage());
       return;
     }
     if (url.pathname === '/grok-symbol.png' && this.assets.symbol) {
@@ -322,7 +447,7 @@ export class RemoteGateway {
     if (url.pathname === '/' || url.pathname === '/index.html') {
       const token = this.sessionToken(req, url);
       if (!token) {
-        this.html(res, pairPage(zh(req)));
+        this.html(res, this.pairHtml(req));
         return;
       }
       this.html(res, chatPage(token, safeCspHost(req.headers.host), zh(req)));
@@ -341,13 +466,18 @@ export class RemoteGateway {
         res.end('too many attempts');
         return;
       }
+      const already = this.sessionToken(req);
+      if (already) {
+        sendPairRedirect(res, already);
+        return;
+      }
       let code = '';
       const raw = Buffer.concat(chunks).toString('utf8');
       try {
         const json = JSON.parse(raw) as { code?: string };
-        code = String(json.code ?? '');
+        code = String(json.code ?? '').trim();
       } catch {
-        code = new URLSearchParams(raw).get('code') ?? '';
+        code = (new URLSearchParams(raw).get('code') ?? '').trim();
       }
       const matched = this.matchCode(code);
       if (matched && (this.sockets.size >= 1 || this.tokens.size >= 1)) {
@@ -370,11 +500,7 @@ export class RemoteGateway {
       }
       const token = randomBytes(24).toString('hex');
       this.tokens.set(token, matched);
-      res.writeHead(302, {
-        Location: `/?s=${token}`,
-        'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`,
-      });
-      res.end();
+      sendPairRedirect(res, token);
     });
   }
 
@@ -410,10 +536,24 @@ export class RemoteGateway {
       socket.destroy();
       return;
     }
+    const incoming = this.sessionToken(req);
     if (this.sockets.size >= MAX_CLIENTS) {
-      socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
-      socket.destroy();
-      return;
+      let replaced = false;
+      if (incoming) {
+        for (const [old, tied] of [...this.socketToken]) {
+          if (tied === incoming) {
+            this.socketToken.delete(old);
+            this.sockets.delete(old);
+            old.destroy();
+            replaced = true;
+          }
+        }
+      }
+      if (!replaced && this.sockets.size >= MAX_CLIENTS) {
+        socket.write('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
     }
     const key = req.headers['sec-websocket-key'];
     if (typeof key !== 'string') {
@@ -425,13 +565,14 @@ export class RemoteGateway {
       'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
         `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
     );
-    const token = this.sessionToken(req);
-    if (token) {
-      this.socketToken.set(socket, token);
+    if (incoming) {
+      this.socketToken.set(socket, incoming);
     }
+    this.clearTokenGrace();
     this.sockets.add(socket);
+    this.startBeat();
     this.handlers.onClients?.();
-    sendText(socket, JSON.stringify({ type: 'state', state: this.handlers.snapshot() }));
+    sendPacked(socket, packRemotePayload({ type: 'state', state: this.handlers.snapshot() }));
     let buf = Buffer.alloc(0);
     socket.on('data', (chunk) => {
       buf = Buffer.concat([buf, chunk]);
@@ -455,6 +596,9 @@ export class RemoteGateway {
         try {
           const msg = JSON.parse(frame.payload.toString('utf8')) as WebviewToHost;
           if (msg && typeof msg.type === 'string') {
+            if (msg.type === 'ready') {
+              sendPacked(socket, packRemotePayload({ type: 'state', state: this.handlers.snapshot() }));
+            }
             this.handlers.onClientMessage(msg);
           }
         } catch {
@@ -466,7 +610,8 @@ export class RemoteGateway {
       this.socketToken.delete(socket);
       if (this.sockets.delete(socket)) {
         if (this.sockets.size === 0) {
-          this.tokens.clear();
+          this.stopBeat();
+          this.scheduleTokenGrace();
         }
         this.handlers.onClients?.();
       }
@@ -478,14 +623,41 @@ export class RemoteGateway {
     });
   }
 
-  private file(res: ServerResponse, file: string, type: string): void {
+  private monacoFile(res: ServerResponse, pathname: string): void {
+    const root = this.assets.monacoDir;
+    if (!root) {
+      res.writeHead(404);
+      res.end('missing');
+      return;
+    }
+    const rel = pathname.replace(/^\/monaco\/?/, '');
+    if (!rel || rel.includes('\0') || rel.split(/[/\\]/).includes('..')) {
+      res.writeHead(400);
+      res.end('bad path');
+      return;
+    }
+    const abs = path.resolve(root, rel);
+    const base = path.resolve(root);
+    const inside = abs === base || abs.startsWith(`${base}${path.sep}`);
+    if (!inside) {
+      res.writeHead(400);
+      res.end('bad path');
+      return;
+    }
+    this.file(res, abs, monacoType(abs), true);
+  }
+
+  private file(res: ServerResponse, file: string, type: string, cache = false): void {
     fs.readFile(file, (err, data) => {
       if (err) {
         res.writeHead(404);
         res.end('missing');
         return;
       }
-      res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+      res.writeHead(200, {
+        'content-type': type,
+        'cache-control': cache ? 'public, max-age=86400' : 'no-store',
+      });
       res.end(data);
     });
   }
@@ -494,6 +666,25 @@ export class RemoteGateway {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
     res.end(body);
   }
+}
+
+function monacoType(file: string): string {
+  if (file.endsWith('.js')) {
+    return 'application/javascript; charset=utf-8';
+  }
+  if (file.endsWith('.css')) {
+    return 'text/css; charset=utf-8';
+  }
+  if (file.endsWith('.ttf')) {
+    return 'font/ttf';
+  }
+  if (file.endsWith('.woff')) {
+    return 'font/woff';
+  }
+  if (file.endsWith('.woff2')) {
+    return 'font/woff2';
+  }
+  return 'application/octet-stream';
 }
 
 function codesEqual(a: string, b: string): boolean {
@@ -516,41 +707,123 @@ function cookie(req: IncomingMessage, name: string): string | undefined {
   return undefined;
 }
 
+function sendPairRedirect(res: ServerResponse, token: string): void {
+  res.writeHead(302, {
+    Location: `/?s=${token}`,
+    'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`,
+  });
+  res.end();
+}
+
 function zh(req: IncomingMessage): boolean {
   return (req.headers['accept-language'] ?? '').toLowerCase().includes('zh');
 }
 
-function pairPage(chinese: boolean): string {
+function pairPage(chinese: boolean, custom: boolean): string {
   const title = chinese ? 'Grok 远程校验' : 'Grok remote pair';
-  const hint = chinese
-    ? '浏览器会连到本机工作区并可以改文件、跑命令。只把校验码给信任的人。'
-    : 'This browser session can edit the workspace and run commands. Share the code only with people you trust.';
-  const label = chinese ? '校验码' : 'Pairing code';
+  const hint = custom
+    ? chinese
+      ? '浏览器会连到本机工作区并可以改文件、跑命令。只把密码给信任的人。'
+      : 'This browser session can edit the workspace and run commands. Share the password only with people you trust.'
+    : chinese
+      ? '浏览器会连到本机工作区并可以改文件、跑命令。只把校验码给信任的人。'
+      : 'This browser session can edit the workspace and run commands. Share the code only with people you trust.';
+  const label = custom
+    ? chinese
+      ? '密码'
+      : 'Password'
+    : chinese
+      ? '校验码'
+      : 'Pairing code';
   const go = chinese ? '进入' : 'Enter';
-  return `<!DOCTYPE html><html lang="${chinese ? 'zh-CN' : 'en'}"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${title}</title>
-<style>body{font:15px/1.45 system-ui,sans-serif;background:#111;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}form{width:min(360px,92vw);display:grid;gap:12px}input{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid #444;background:#1c1c1c;color:#fff}button{font:inherit;padding:10px;border:0;border-radius:10px;background:#b9d4ff;color:#111;cursor:pointer}p{color:#aaa}</style></head>
-<body><form method="post" action="/pair"><h1>${title}</h1><p>${hint}</p><label>${label}<input name="code" inputmode="numeric" autocomplete="one-time-code" required/></label><button type="submit">${go}</button></form></body></html>`;
+  const failNet = JSON.stringify(chinese ? '连不上，请稍后重试。' : 'Could not reach the plugin.');
+  const field = custom
+    ? '<input name="code" type="password" autocomplete="current-password" maxlength="64" required autofocus/>'
+    : '<input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\\d{6}" required autofocus/>';
+  const inputCss = custom
+    ? 'letter-spacing:normal;text-align:left'
+    : 'letter-spacing:.28em;text-align:center';
+  return `<!DOCTYPE html><html lang="${chinese ? 'zh-CN' : 'en'}"><head><meta charset="UTF-8"/>${noZoomMeta()}<title>${title}</title>
+<style>html,body{touch-action:manipulation;-webkit-text-size-adjust:100%}body{font:15px/1.45 system-ui,sans-serif;background:#111;color:#eee;display:grid;place-items:center;min-height:100dvh;margin:0}form{width:min(360px,92vw);display:grid;gap:12px}h1{font-size:1.25rem;margin:0}input{font:inherit;padding:12px;border-radius:12px;border:1px solid #444;background:#1c1c1c;color:#fff;${inputCss}}button{font:inherit;padding:12px;border:0;border-radius:12px;background:#b9d4ff;color:#111;cursor:pointer}p,#err{color:#aaa}#err{color:#f85149;min-height:1.2em}</style></head>
+<body><form method="post" action="/pair"><h1>${title}</h1><p>${hint}</p><label>${label}${field}</label><p id="err"></p><button type="submit">${go}</button></form>
+${noZoomScript()}
+<script>
+document.querySelector('form').addEventListener('submit', function(ev) {
+  ev.preventDefault();
+  var input = document.querySelector('input[name=code]');
+  var err = document.getElementById('err');
+  err.textContent = '';
+  fetch('/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: input.value }), credentials: 'same-origin' })
+    .then(function(res) {
+      if (res.ok || res.redirected || res.status === 302 || res.status === 0 || res.type === 'opaqueredirect') {
+        var next = '/';
+        try {
+          var u = new URL(res.url || '/', location.href);
+          if (u.searchParams.get('s')) next = u.pathname + u.search;
+        } catch (e) {}
+        location.replace(next);
+        return;
+      }
+      return res.text().then(function(text) {
+        var msg = String(text || '').trim();
+        err.textContent = msg && msg !== '0' ? msg : String(res.status || ${failNet});
+      });
+    })
+    .catch(function() { err.textContent = ${failNet}; });
+});
+</script>
+</body></html>`;
+}
+
+function noZoomMeta(): string {
+  return '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover"/>';
+}
+
+function noZoomScript(): string {
+  return `<script>
+(function(){
+  function stop(e){ e.preventDefault(); }
+  document.addEventListener('gesturestart', stop, {passive:false});
+  document.addEventListener('gesturechange', stop, {passive:false});
+  document.addEventListener('gestureend', stop, {passive:false});
+  document.addEventListener('touchmove', function(e){ if (e.touches && e.touches.length > 1) e.preventDefault(); }, {passive:false});
+  document.addEventListener('wheel', function(e){ if (e.ctrlKey) e.preventDefault(); }, {passive:false});
+})();
+</script>`;
 }
 
 function chatPage(token: string, host: string, chinese: boolean): string {
   const wsPath = `/ws?s=${encodeURIComponent(token)}`;
   const csp =
     `default-src 'none'; img-src data: blob: https: http:; media-src blob: http: https:; ` +
-    `style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; ` +
+    `style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src 'self'; ` +
+    `font-src 'self' data:; worker-src 'self' blob:; ` +
     `connect-src 'self' http://${host} https://${host} ws://${host} wss://${host} ws: wss: http: https:`;
   const lang = chinese ? 'zh-CN' : 'en';
-  const stalled = chinese
-    ? '页面开了，但会话通道没连上。请刷新后重新输入校验码。'
-    : 'The page loaded, but the session channel did not. Refresh and pair again.';
+  const stalled = JSON.stringify(
+    chinese
+      ? '页面开了，但会话通道没连上。请刷新后重新输入校验码。'
+      : 'The page loaded, but the session channel did not. Refresh and pair again.',
+  );
+  const reconnecting = JSON.stringify(
+    chinese ? '连接中断，正在重连…' : 'Connection lost, reconnecting…',
+  );
+  const giveUp = JSON.stringify(
+    chinese
+      ? '会话通道已断开。请刷新后重新输入校验码。'
+      : 'The session channel dropped. Refresh and pair again.',
+  );
   return `<!DOCTYPE html>
-<html lang="${lang}"><head>
+<html lang="${lang}" class="remote-web"><head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+${noZoomMeta()}
+<meta name="color-scheme" content="dark light"/>
 <meta http-equiv="Content-Security-Policy" content="${csp}"/>
 <link rel="stylesheet" href="/chat.css"/>
 <title>Grok Build</title>
 </head><body>
 <div id="app"></div>
+${noZoomScript()}
 <script>
 window.acquireVsCodeApi = function() {
   if (window.__grokApi) return window.__grokApi;
@@ -558,41 +831,86 @@ window.acquireVsCodeApi = function() {
   var path = ${JSON.stringify(wsPath)};
   var ws;
   var queue = [];
+  var inbox = [];
+  var primed = false;
   var opened = false;
+  var failStreak = 0;
   var retryTimer;
   var state;
   try { state = JSON.parse(sessionStorage.getItem('grok-ui') || 'null'); } catch (e) {}
-  try { if (/[?&]s=/.test(location.search)) history.replaceState(null, '', location.pathname); } catch (e) {}
+  function banner(text) {
+    var el = document.getElementById('grok-link-banner');
+    if (!text) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'grok-link-banner';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+  }
   function retry() {
     if (retryTimer) return;
     retryTimer = setTimeout(function() { retryTimer = 0; open(); }, opened ? 800 : 1500);
   }
-  function bind(sock) {
-    sock.onmessage = function(ev) {
-      try {
-        window.dispatchEvent(new MessageEvent('message', { data: JSON.parse(ev.data), origin: location.origin }));
-      } catch (e) {}
+  function stripToken() {
+    try { if (/[?&]s=/.test(location.search)) history.replaceState(null, '', location.pathname); } catch (e) {}
+  }
+  function dispatchHost(text) {
+    var data;
+    try { data = JSON.parse(text); } catch (e) { return; }
+    if (typeof window.__grokDeliver === 'function') {
+      try { window.__grokDeliver(data); } catch (e) {}
+      return;
+    }
+    try {
+      window.dispatchEvent(new MessageEvent('message', { data: data, origin: location.origin }));
+    } catch (e) {}
+  }
+  function deliver(raw) {
+    var go = function(text) {
+      if (!primed) { inbox.push(text); return; }
+      dispatchHost(text);
     };
+    if (typeof raw === 'string') go(raw);
+    else if (raw && typeof raw.text === 'function') raw.text().then(go).catch(function() {});
+  }
+  function bind(sock) {
+    sock.onmessage = function(ev) { deliver(ev.data); };
     sock.onopen = function() {
       opened = true;
+      failStreak = 0;
+      banner('');
+      stripToken();
       while (queue.length) sock.send(JSON.stringify(queue.shift()));
     };
     sock.onerror = function() { try { sock.close(); } catch (e) {} };
     sock.onclose = function() {
+      failStreak += 1;
       if (!opened) {
         var app = document.getElementById('app');
         if (app && !document.getElementById('grok-header')) {
-          app.textContent = ${JSON.stringify(stalled)};
+          app.textContent = ${stalled};
         }
+      } else if (failStreak >= 4) {
+        banner(${giveUp});
+      } else {
+        banner(${reconnecting});
       }
       retry();
     };
   }
   function open() {
+    if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
     ws = new WebSocket(proto + '//' + location.host + path);
     bind(ws);
   }
-  open();
+  window.__grokPrime = function() {
+    primed = true;
+    var held = inbox.splice(0, inbox.length);
+    for (var i = 0; i < held.length; i++) dispatchHost(held[i]);
+    open();
+  };
   window.__grokApi = {
     postMessage: function(msg) {
       if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -609,6 +927,43 @@ window.acquireVsCodeApi = function() {
 </script>
 <script src="/webview.js"></script>
 </body></html>`;
+}
+
+function diffPage(): string {
+  return `<!DOCTYPE html>
+<html lang="en" class="remote-web"><head>
+<meta charset="UTF-8"/>
+${noZoomMeta()}
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';"/>
+<link rel="stylesheet" href="/diff.css"/>
+<title>Grok Diff</title>
+</head><body>
+<div id="app"></div>
+${noZoomScript()}
+<script>
+window.acquireVsCodeApi = function() {
+  if (window.__grokDiffApi) return window.__grokDiffApi;
+  window.__grokDiffApi = {
+    postMessage: function(msg) {
+      parent.postMessage({ source: 'grok-diff', message: msg }, '*');
+    }
+  };
+  return window.__grokDiffApi;
+};
+window.addEventListener('message', function(ev) {
+  if (ev.data && ev.data.type === 'diff') {
+    window.dispatchEvent(new MessageEvent('message', { data: ev.data }));
+  }
+});
+</script>
+<script src="/diff.js"></script>
+</body></html>`;
+}
+
+function sendPacked(socket: Socket, frames: string[]): void {
+  for (const frame of frames) {
+    sendText(socket, frame);
+  }
 }
 
 function sendText(socket: Socket, text: string): void {

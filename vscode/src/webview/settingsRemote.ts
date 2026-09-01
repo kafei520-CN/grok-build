@@ -34,7 +34,7 @@ export function mountRemoteBody(): HTMLElement {
   hint.textContent = tr('settingsRemoteHint');
   const shared = document.createElement('div');
   shared.className = 'settings-card';
-  shared.append(portRow(remote?.port ?? 8787, running));
+  shared.append(portRow(remote?.port ?? 8787, running), authBlock(remote));
   if (remote?.error) {
     const err = document.createElement('div');
     err.className = 'settings-hint';
@@ -88,8 +88,7 @@ function localCard(localOn: boolean, publicOn: boolean): HTMLElement {
   );
   const remote = ui.state.remote;
   if (localOn && remote) {
-    const code = remote.localCode ?? remote.code;
-    card.append(codeRow(code, () => post({ type: 'rotateRemoteCode' })), urlBlock(lanOnly(remote.urls, remote.publicUrl)));
+    card.append(urlBlock(lanOnly(remote.urls, remote.publicUrl)));
   }
   return card;
 }
@@ -108,9 +107,6 @@ function publicCard(localOn: boolean, publicOn: boolean): HTMLElement {
     status.className = 'settings-hint';
     status.textContent = tunnelStatus(remote);
     card.append(status);
-    if (remote?.code) {
-      card.append(codeRow(remote.code, () => post({ type: 'rotateRemoteCode' })));
-    }
     if (remote?.publicUrl) {
       card.append(urlBlock([remote.publicUrl]));
     }
@@ -192,7 +188,48 @@ function bindRow(bind: string, port: number): HTMLElement {
   return row;
 }
 
-function codeRow(code: string, onRegen: () => void): HTMLElement {
+let customDraft: string | undefined;
+
+function authBlock(remote: typeof ui.state.remote): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-row stack';
+  const mode = remote?.codeMode === 'custom' ? 'custom' : 'random';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('settingsRemoteAuth');
+  const seg = document.createElement('div');
+  seg.className = 'seg settings-seg';
+  for (const [id, label] of [
+    ['random', tr('settingsRemoteAuthRandom')],
+    ['custom', tr('settingsRemoteAuthCustom')],
+  ] as const) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    if (id === mode) {
+      btn.classList.add('on');
+    }
+    btn.addEventListener('click', () => {
+      if (id !== mode) {
+        customDraft = undefined;
+        post({ type: 'setRemoteAuth', mode: id });
+      }
+    });
+    seg.append(btn);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'settings-hint';
+  hint.textContent = tr('settingsRemoteAuthHint');
+  wrap.append(name, seg, hint);
+  if (mode === 'custom') {
+    wrap.append(customSecretRow(remote));
+  } else {
+    wrap.append(randomCodeRow(remote));
+  }
+  return wrap;
+}
+
+function randomCodeRow(remote: typeof ui.state.remote): HTMLElement {
   const row = document.createElement('div');
   row.className = 'settings-row';
   const copy = document.createElement('div');
@@ -203,21 +240,77 @@ function codeRow(code: string, onRegen: () => void): HTMLElement {
   const help = document.createElement('div');
   help.className = 'settings-hint';
   help.textContent = tr('settingsRemoteCodeHint');
-  const value = document.createElement('div');
-  value.className = 'settings-label remote-code';
-  value.textContent = code;
-  copy.append(name, value, help);
-  const regen = document.createElement('button');
-  regen.type = 'button';
-  regen.className = 'btn';
-  regen.textContent = tr('settingsRemoteRegen');
-  regen.addEventListener('click', onRegen);
-  const copyBtn = document.createElement('button');
-  copyBtn.type = 'button';
-  copyBtn.className = 'btn';
-  copyBtn.textContent = tr('settingsRemoteCopy');
-  copyBtn.addEventListener('click', () => post({ type: 'copyText', text: code }));
-  row.append(copy, copyBtn, regen);
+  copy.append(name);
+  const code = remote?.running ? remote.code : '';
+  if (code) {
+    const value = document.createElement('div');
+    value.className = 'settings-label remote-code';
+    value.textContent = code;
+    copy.append(value);
+  }
+  copy.append(help);
+  row.append(copy);
+  if (code) {
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn';
+    copyBtn.textContent = tr('settingsRemoteCopy');
+    copyBtn.addEventListener('click', () => post({ type: 'copyText', text: code }));
+    const regen = document.createElement('button');
+    regen.type = 'button';
+    regen.className = 'btn';
+    regen.textContent = tr('settingsRemoteRegen');
+    regen.addEventListener('click', () => post({ type: 'rotateRemoteCode' }));
+    row.append(copyBtn, regen);
+  }
+  return row;
+}
+
+function customSecretRow(remote: typeof ui.state.remote): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'settings-row stack';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('settingsRemoteAuthCustom');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'settings-field';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.maxLength = 64;
+  input.placeholder = '4–64';
+  input.value = customDraft ?? remote?.code ?? '';
+  input.addEventListener('input', () => {
+    customDraft = input.value;
+  });
+  const help = document.createElement('div');
+  help.className = 'settings-hint';
+  help.textContent =
+    remote?.running && !remote.code ? tr('settingsRemoteCustomNeed') : tr('settingsRemoteCustomHint');
+  if (remote?.running && !remote.code) {
+    help.classList.add('warn');
+  }
+  const actions = document.createElement('div');
+  actions.className = 'settings-row';
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'btn';
+  save.textContent = tr('settingsRemoteCustomSave');
+  save.addEventListener('click', () => {
+    customDraft = input.value;
+    post({ type: 'setRemoteAuth', mode: 'custom', secret: input.value });
+  });
+  actions.append(save);
+  const live = remote?.code ?? '';
+  if (live) {
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn';
+    copyBtn.textContent = tr('settingsRemoteCopy');
+    copyBtn.addEventListener('click', () => post({ type: 'copyText', text: live }));
+    actions.append(copyBtn);
+  }
+  row.append(name, input, actions, help);
   return row;
 }
 
