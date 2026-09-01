@@ -316,7 +316,7 @@ export class RemoteGateway {
     if (!this.sockets.size) {
       return;
     }
-    const frames = packRemotePayload(payload);
+    const frames = packRemotePayload(payload, 'update');
     for (const sock of this.sockets) {
       sendPacked(sock, frames);
     }
@@ -450,7 +450,7 @@ export class RemoteGateway {
         this.html(res, this.pairHtml(req));
         return;
       }
-      this.html(res, chatPage(token, safeCspHost(req.headers.host), zh(req)));
+      this.html(res, chatPage(token, safeCspHost(req.headers.host), zh(req), hostChromeFrom(this.handlers.snapshot())));
       return;
     }
     res.writeHead(404);
@@ -792,7 +792,34 @@ function noZoomScript(): string {
 </script>`;
 }
 
-function chatPage(token: string, host: string, chinese: boolean): string {
+function hostChromeFrom(snapshot: unknown): { background?: string; foreground?: string } | undefined {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return undefined;
+  }
+  const row = snapshot as {
+    hostChrome?: { background?: string; foreground?: string };
+    theme?: { background?: string };
+  };
+  return {
+    background: row.hostChrome?.background ?? row.theme?.background,
+    foreground: row.hostChrome?.foreground,
+  };
+}
+
+function hostChromeStyle(chrome?: { background?: string; foreground?: string }): string {
+  const hex = (raw: string | undefined, fallback: string): string =>
+    raw && /^#[0-9a-f]{6}$/i.test(raw) ? raw.toLowerCase() : fallback;
+  const bg = hex(chrome?.background, '#1e1e1e');
+  const fg = hex(chrome?.foreground, '#e8e8e8');
+  return `<style id="grok-host-chrome">:root{--vscode-sideBar-background:${bg};--vscode-foreground:${fg};--bg:${bg};--fg:${fg};}</style>`;
+}
+
+function chatPage(
+  token: string,
+  host: string,
+  chinese: boolean,
+  chrome?: { background?: string; foreground?: string },
+): string {
   const wsPath = `/ws?s=${encodeURIComponent(token)}`;
   const csp =
     `default-src 'none'; img-src data: blob: https: http:; media-src blob: http: https:; ` +
@@ -820,6 +847,7 @@ ${noZoomMeta()}
 <meta name="color-scheme" content="dark light"/>
 <meta http-equiv="Content-Security-Policy" content="${csp}"/>
 <link rel="stylesheet" href="/chat.css"/>
+${hostChromeStyle(chrome)}
 <title>Grok Build</title>
 </head><body>
 <div id="app"></div>

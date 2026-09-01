@@ -79,6 +79,16 @@ class HostRpc(
                     CopyPasteManager.getInstance().setContents(StringSelection(str(params, "text")))
                     sidecar.reply(id, true)
                 }
+                "hostChrome" -> {
+                    val vars = GrokTheme.cssVariables()
+                    sidecar.reply(
+                        id,
+                        mapOf(
+                            "background" to vars.getValue("--vscode-sideBar-background"),
+                            "foreground" to vars.getValue("--vscode-foreground"),
+                        ),
+                    )
+                }
                 "createTerminal" -> {
                     GrokTerminal.open(project, str(params, "name", "Grok"), str(params, "command"))
                     sidecar.reply(id, true)

@@ -1,4 +1,4 @@
-import { post, tr, ui } from './app';
+import { copyText, post, tr, ui } from './app';
 import { iconChevron } from './icons';
 
 export function remoteNavRow(): HTMLElement {
@@ -255,7 +255,7 @@ function randomCodeRow(remote: typeof ui.state.remote): HTMLElement {
     copyBtn.type = 'button';
     copyBtn.className = 'btn';
     copyBtn.textContent = tr('settingsRemoteCopy');
-    copyBtn.addEventListener('click', () => post({ type: 'copyText', text: code }));
+    copyBtn.addEventListener('click', () => copyText(code));
     const regen = document.createElement('button');
     regen.type = 'button';
     regen.className = 'btn';
@@ -307,7 +307,7 @@ function customSecretRow(remote: typeof ui.state.remote): HTMLElement {
     copyBtn.type = 'button';
     copyBtn.className = 'btn';
     copyBtn.textContent = tr('settingsRemoteCopy');
-    copyBtn.addEventListener('click', () => post({ type: 'copyText', text: live }));
+    copyBtn.addEventListener('click', () => copyText(live));
     actions.append(copyBtn);
   }
   row.append(name, input, actions, help);
@@ -331,7 +331,7 @@ function urlBlock(urls: string[]): HTMLElement {
     copy.type = 'button';
     copy.className = 'btn';
     copy.textContent = tr('settingsRemoteCopy');
-    copy.addEventListener('click', () => post({ type: 'copyText', text: url }));
+    copy.addEventListener('click', () => copyText(url));
     line.append(text, copy);
     wrap.append(line);
   }

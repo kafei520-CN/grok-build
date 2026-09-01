@@ -55,6 +55,7 @@ export const ui = {
   askOtherDraft: '',
   askPicked: new Set<string>(),
   askPickStamp: '',
+  askDismissedId: '',
   lightboxSrc: undefined as string | undefined,
   stickToBottom: true,
   transcriptScroll: 0,
@@ -99,6 +100,41 @@ export function tr(key: StringKey, vars?: Record<string, string | number>): stri
 
 export function post(message: WebviewToHost): void {
   vscode.postMessage(message);
+}
+
+/** Plugin copies via the host; remote web writes the browser device clipboard. */
+export function copyText(text: string): void {
+  if (!isRemoteWeb()) {
+    post({ type: 'copyText', text });
+    return;
+  }
+  void writeBrowserClipboard(text);
+}
+
+async function writeBrowserClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    /* HTTP / permission — fall back to a user-gesture execCommand. */
+  }
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.top = '0';
+  input.style.left = '0';
+  input.style.width = '1px';
+  input.style.height = '1px';
+  input.style.opacity = '0';
+  document.body.append(input);
+  input.focus();
+  input.select();
+  try {
+    document.execCommand('copy');
+  } finally {
+    input.remove();
+  }
 }
 
 export function emptyState(): ChatState {

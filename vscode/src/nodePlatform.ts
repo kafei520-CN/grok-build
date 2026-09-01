@@ -21,6 +21,7 @@ export class NodePlatform implements Platform {
   file?: FileInfo;
   private readonly settingsFile: string;
   private readonly stateFile: string;
+  private chrome = { background: '#1e1e1e', foreground: '#e8e8e8' };
 
   constructor(
     private readonly opts: {
@@ -35,6 +36,7 @@ export class NodePlatform implements Platform {
     fs.mkdirSync(dir, { recursive: true });
     this.settingsFile = path.join(dir, 'idea-settings.json');
     this.stateFile = path.join(dir, 'idea-ui.json');
+    void this.refreshChrome();
   }
 
   setContext(next: { selection?: SelectionInfo; file?: FileInfo }): void {
@@ -166,6 +168,26 @@ export class NodePlatform implements Platform {
 
   async clipboardWrite(text: string): Promise<void> {
     await this.opts.request('clipboardWrite', { text });
+  }
+
+  hostChrome(): { background: string; foreground: string } {
+    return this.chrome;
+  }
+
+  private async refreshChrome(): Promise<void> {
+    try {
+      const row = await this.opts.request('hostChrome');
+      if (!row || typeof row !== 'object') {
+        return;
+      }
+      const background = (row as { background?: unknown }).background;
+      const foreground = (row as { foreground?: unknown }).foreground;
+      if (typeof background === 'string' && typeof foreground === 'string' && background && foreground) {
+        this.chrome = { background, foreground };
+      }
+    } catch {
+      /* keep the dark fallback until IDEA answers */
+    }
   }
 
   async findFiles(query: string): Promise<Array<{ path: string; label: string }>> {

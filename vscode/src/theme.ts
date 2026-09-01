@@ -121,11 +121,14 @@ export function matchingPresetId(theme: ThemeColors): string | undefined {
 export function applyThemeTo(
   style: { setProperty(name: string, value: string): void; removeProperty?(name: string): void },
   raw: unknown,
+  chrome?: { background?: string; foreground?: string },
 ): void {
   const theme = normalizeTheme(raw);
-  if (theme.background) {
-    const fg = contrastFg(theme.background);
-    style.setProperty('--bg', theme.background);
+  const background = theme.background ?? parseHex(chrome?.background);
+  const hostFg = parseHex(chrome?.foreground);
+  if (background) {
+    const fg = hostFg ?? contrastFg(background);
+    style.setProperty('--bg', background);
     style.setProperty('--fg', fg);
     style.setProperty('--muted', 'color-mix(in srgb, var(--fg) 55%, transparent)');
     style.setProperty('--elev', 'color-mix(in srgb, var(--fg) 6%, var(--bg))');

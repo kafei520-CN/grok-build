@@ -55,11 +55,8 @@ export function hideWorkspace(): void {
 
 export function openWorkspaceReview(payload: WorkspaceDiff): void {
   ui.wsDiff = payload;
-  const first = upsertReviewTabs(payload.files ?? [], false);
-  if (first) {
-    ui.wsActive = first;
-    ui.wsPane = 'review';
-  }
+  ui.wsActive = ensureReviewTab();
+  ui.wsPane = 'review';
   showWorkspaceView();
   render();
 }
@@ -73,7 +70,17 @@ export function appendWorkspaceDiff(files: unknown[]): void {
     return;
   }
   ui.wsDiff = { ...ui.wsDiff, files: [...(ui.wsDiff.files ?? []), ...files] };
-  upsertReviewTabs(files, true);
+  ensureReviewTab();
+  const frame = document.querySelector('#grok-ws-shell iframe.ws-diff');
+  if (
+    isReviewTab(activeFile()) &&
+    frame instanceof HTMLIFrameElement &&
+    frame.dataset.ready === '1' &&
+    frame.contentWindow
+  ) {
+    frame.contentWindow.postMessage({ type: 'diffMore', files }, '*');
+    return;
+  }
   render();
 }
 
@@ -682,13 +689,6 @@ function fileTab(file: WsFile): HTMLElement {
   name.className = 'ws-tab-name';
   name.textContent = tabLabel(file);
   tab.append(name);
-  const stats = reviewStats(file);
-  if (stats) {
-    const pill = document.createElement('span');
-    pill.className = 'ws-tab-stat';
-    pill.innerHTML = `<span class="add">+${stats.added}</span> <span class="del">−${stats.removed}</span>`;
-    tab.append(pill);
-  }
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'ws-tab-close';
@@ -825,49 +825,16 @@ function isReviewTab(file: WsFile | undefined): boolean {
   return Boolean(file?.review);
 }
 
-function reviewTabId(absPath: string, displayPath: string): string {
-  return `diff:${(absPath || displayPath).replace(/\\/g, '/')}`;
-}
-
-function reviewStats(file: WsFile): { added: number; removed: number } | undefined {
-  const raw = file.review;
-  if (!raw || typeof raw !== 'object') {
-    return undefined;
+function ensureReviewTab(): string {
+  const id = 'diff:review';
+  const tab: WsFile = { path: id, rel: tr('grokDiff'), review: true };
+  const idx = findTab(id);
+  if (idx >= 0) {
+    ui.wsTabs[idx] = { ...ui.wsTabs[idx], ...tab };
+  } else {
+    ui.wsTabs.push(tab);
   }
-  const row = raw as { added?: unknown; removed?: unknown };
-  const added = typeof row.added === 'number' ? row.added : 0;
-  const removed = typeof row.removed === 'number' ? row.removed : 0;
-  return { added, removed };
-}
-
-function upsertReviewTabs(files: unknown[], append: boolean): string {
-  if (!append) {
-    ui.wsTabs = ui.wsTabs.filter((tab) => !isReviewTab(tab));
-  }
-  let first = '';
-  for (const raw of files) {
-    if (!raw || typeof raw !== 'object') {
-      continue;
-    }
-    const row = raw as { path?: unknown; absPath?: unknown };
-    const display = typeof row.path === 'string' ? row.path : '';
-    const abs = typeof row.absPath === 'string' ? row.absPath : display;
-    if (!display && !abs) {
-      continue;
-    }
-    const path = reviewTabId(abs, display);
-    const tab: WsFile = { path, rel: display || relOf(abs), review: raw };
-    const idx = findTab(path);
-    if (idx >= 0) {
-      ui.wsTabs[idx] = tab;
-    } else {
-      ui.wsTabs.push(tab);
-    }
-    if (!first) {
-      first = path;
-    }
-  }
-  return first;
+  return id;
 }
 
 function draftOf(file: WsFile): string {
@@ -930,15 +897,10 @@ function hookDiffFrame(): void {
 }
 
 function pushDiff(frame: HTMLIFrameElement): void {
-  const open = activeFile();
-  if (!open?.review || !frame.contentWindow) {
+  if (!ui.wsDiff || !frame.contentWindow) {
     return;
   }
-  const payload = {
-    ...(ui.wsDiff ?? {}),
-    files: [open.review],
-  };
-  frame.contentWindow.postMessage({ type: 'diff', payload }, '*');
+  frame.contentWindow.postMessage({ type: 'diff', payload: ui.wsDiff }, '*');
 }
 
 function onDiffFrameMessage(event: MessageEvent<{ source?: string; message?: { type: string; path?: string } }>): void {

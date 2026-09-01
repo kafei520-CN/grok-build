@@ -10,7 +10,7 @@ import type {
   PermissionPrompt,
   PlanStep,
 } from '../types';
-import { loc, post, render, tr, ui } from './app';
+import { copyText, loc, post, render, tr, ui } from './app';
 import { bindHoverPin } from './popover';
 import { patchJumpBottom } from './composer';
 import { onUserScroll, shouldPinToBottom, type TranscriptScroll } from './scroll';
@@ -148,7 +148,7 @@ function fillBody(el: HTMLElement): void {
   if (ui.state.permission) {
     el.append(permissionBar());
   }
-  if (ui.state.ask) {
+  if (visibleAsk()) {
     el.append(askBar());
   }
   if (ui.state.error && status === 'error') {
@@ -356,17 +356,41 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
   });
 }
 
-function patchAsk(body: HTMLElement): void {
-  const existing = body.querySelector('.ask-card') as HTMLElement | null;
+function visibleAsk(): ChatState['ask'] {
   const ask = ui.state.ask;
+  if (!ask || ask.requestId === ui.askDismissedId) {
+    return undefined;
+  }
+  return ask;
+}
+
+function promptAskCards(body: HTMLElement): HTMLElement[] {
+  return [...body.querySelectorAll(':scope > .ask-card.ask-prompt')] as HTMLElement[];
+}
+
+function clearAskLocal(): void {
+  ui.askDismissedId = ui.state.ask?.requestId ?? ui.askDismissedId;
+  ui.state.ask = undefined;
+  ui.askOtherOpen = false;
+  ui.askOtherDraft = '';
+  ui.askPicked.clear();
+  ui.askPickStamp = '';
+}
+
+function patchAsk(body: HTMLElement): void {
+  const cards = promptAskCards(body);
+  const ask = visibleAsk();
   if (!ask) {
-    existing?.remove();
+    for (const card of cards) {
+      card.remove();
+    }
     ui.askOtherOpen = false;
     ui.askOtherDraft = '';
     ui.askPicked.clear();
     ui.askPickStamp = '';
     return;
   }
+  ui.askDismissedId = '';
   const stamp = `${ask.requestId}:${ask.index ?? 0}`;
   if (ui.askPickStamp !== stamp) {
     ui.askPickStamp = stamp;
@@ -377,6 +401,10 @@ function patchAsk(body: HTMLElement): void {
   const other = ui.askOtherOpen ? '1' : '0';
   const open = (ui.askOpen.get(ask.requestId) ?? true) ? '1' : '0';
   const picked = [...ui.askPicked].sort().join('|');
+  const existing = cards[0];
+  for (const extra of cards.slice(1)) {
+    extra.remove();
+  }
   if (
     existing?.dataset.id === ask.requestId &&
     existing.dataset.stamp === stamp &&
@@ -386,8 +414,11 @@ function patchAsk(body: HTMLElement): void {
   ) {
     return;
   }
-  existing?.remove();
-  body.append(askBar());
+  if (existing) {
+    fillAskCard(existing);
+    return;
+  }
+  body.append(fillAskCard());
 }
 
 function patchPermission(body: HTMLElement): void {
@@ -466,35 +497,8 @@ function bindTranscriptScroll(el?: HTMLElement | null): void {
   const markUser = () => {
     scrollState.lastUserScroll = Date.now();
   };
-  node.addEventListener(
-    'pointerdown',
-    (event) => {
-      const target = event.target;
-      if (target instanceof Element && target.closest('button, a, summary')) {
-        return;
-      }
-      markUser();
-    },
-    { capture: true, passive: true },
-  );
-  node.addEventListener(
-    'mousedown',
-    (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-      const control = target.closest('button, a');
-      if (!(control instanceof HTMLElement)) {
-        return;
-      }
-      event.preventDefault();
-      control.focus({ preventScroll: true });
-    },
-    { capture: true },
-  );
-  node.addEventListener('wheel', markUser, { passive: true, capture: true });
-  node.addEventListener('touchmove', markUser, { passive: true, capture: true });
+  node.addEventListener('pointerdown', markUser, { passive: true });
+  node.addEventListener('wheel', markUser, { passive: true });
   node.addEventListener(
     'scroll',
     () => {
@@ -675,20 +679,7 @@ function userActions(message: ChatMessage, editing: boolean): HTMLElement {
     );
   }
   const copy = iconButton(ui.copiedId === message.id ? tr('copied') : tr('copy'), iconCopy(), () => {
-    if (!message.text) {
-      return;
-    }
-    post({ type: 'copyText', text: message.text });
-    ui.copiedId = message.id;
-    if (ui.copiedTimer !== undefined) {
-      window.clearTimeout(ui.copiedTimer);
-    }
-    ui.copiedTimer = window.setTimeout(() => {
-      ui.copiedId = undefined;
-      ui.copiedTimer = undefined;
-      render();
-    }, 1400);
-    render();
+    copyMessage(message);
   });
   if (ui.copiedId === message.id) {
     copy.classList.add('copied');
@@ -697,6 +688,23 @@ function userActions(message: ChatMessage, editing: boolean): HTMLElement {
   copy.disabled = !message.text;
   row.append(copy);
   return row;
+}
+
+function copyMessage(message: ChatMessage): void {
+  if (!message.text) {
+    return;
+  }
+  copyText(message.text);
+  ui.copiedId = message.id;
+  if (ui.copiedTimer !== undefined) {
+    window.clearTimeout(ui.copiedTimer);
+  }
+  ui.copiedTimer = window.setTimeout(() => {
+    ui.copiedId = undefined;
+    ui.copiedTimer = undefined;
+    render();
+  }, 1400);
+  render();
 }
 
 function canEditUser(message: ChatMessage): boolean {
@@ -1003,17 +1011,10 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
   el.className = message.streaming ? 'work live' : 'work';
   el.dataset.mid = message.id;
   el.open = ui.workOpen.get(message.id) ?? Boolean(message.streaming);
-  const summary = document.createElement('summary');
-  const mark = document.createElement('span');
-  mark.className = message.streaming ? 'mark pulse' : 'mark';
-  mark.innerHTML = iconStar();
-  const label = document.createElement('span');
-  label.className = 'work-label';
-  label.textContent = workLabel(message);
-  summary.append(mark, label);
-  summary.addEventListener('click', (event) => {
-    event.preventDefault();
-    el.open = !el.open;
+  el.addEventListener('toggle', (event) => {
+    if (!event.isTrusted) {
+      return;
+    }
     ui.workOpen.set(message.id, el.open);
     if (el.open) {
       const live = ui.state.messages.find((item) => item.id === message.id);
@@ -1022,6 +1023,14 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
       }
     }
   });
+  const summary = document.createElement('summary');
+  const mark = document.createElement('span');
+  mark.className = message.streaming ? 'mark pulse' : 'mark';
+  mark.innerHTML = iconStar();
+  const label = document.createElement('span');
+  label.className = 'work-label';
+  label.textContent = workLabel(message);
+  summary.append(mark, label);
   const body = document.createElement('div');
   body.className = 'work-body';
   if (message.thinking) {
@@ -1183,22 +1192,7 @@ function turnMeta(message: ChatMessage): HTMLElement {
   copy.title = copied ? tr('copied') : tr('copy');
   copy.innerHTML = copied ? iconCheck() : iconCopy();
   copy.disabled = !message.text;
-  copy.addEventListener('click', () => {
-    if (!message.text) {
-      return;
-    }
-    post({ type: 'copyText', text: message.text });
-    ui.copiedId = message.id;
-    if (ui.copiedTimer !== undefined) {
-      window.clearTimeout(ui.copiedTimer);
-    }
-    ui.copiedTimer = window.setTimeout(() => {
-      ui.copiedId = undefined;
-      ui.copiedTimer = undefined;
-      render();
-    }, 1400);
-    render();
-  });
+  copy.addEventListener('click', () => copyMessage(message));
   const fork = document.createElement('button');
   fork.type = 'button';
   fork.className = 'meta-btn';
@@ -1291,6 +1285,11 @@ function permissionBar(): HTMLElement {
   const fold = document.createElement('details');
   fold.className = 'permission-fold';
   fold.open = ui.permissionOpen.get(perm.requestId) ?? false;
+  fold.addEventListener('toggle', (event) => {
+    if (event.isTrusted) {
+      ui.permissionOpen.set(perm.requestId, fold.open);
+    }
+  });
   const head = document.createElement('summary');
   const kicker = document.createElement('span');
   kicker.className = 'permission-kind';
@@ -1299,11 +1298,6 @@ function permissionBar(): HTMLElement {
   name.className = 'permission-file';
   name.textContent = permissionTarget(perm);
   head.append(kicker, name);
-  head.addEventListener('click', (event) => {
-    event.preventDefault();
-    fold.open = !fold.open;
-    ui.permissionOpen.set(perm.requestId, fold.open);
-  });
   fold.append(head);
   if (perm.details) {
     const pre = document.createElement('pre');
@@ -1331,15 +1325,20 @@ function permissionBar(): HTMLElement {
 }
 
 function askBar(): HTMLElement {
+  return fillAskCard();
+}
+
+function fillAskCard(el?: HTMLElement): HTMLElement {
   const ask = ui.state.ask!;
   const open = ui.askOpen.get(ask.requestId) ?? true;
-  const el = document.createElement('section');
-  el.className = 'ask-card';
-  el.dataset.id = ask.requestId;
-  el.dataset.stamp = `${ask.requestId}:${ask.index ?? 0}`;
-  el.dataset.other = ui.askOtherOpen ? '1' : '0';
-  el.dataset.open = open ? '1' : '0';
-  el.dataset.picked = [...ui.askPicked].sort().join('|');
+  const card = el ?? document.createElement('section');
+  card.className = 'ask-card ask-prompt';
+  card.dataset.id = ask.requestId;
+  card.dataset.stamp = `${ask.requestId}:${ask.index ?? 0}`;
+  card.dataset.other = ui.askOtherOpen ? '1' : '0';
+  card.dataset.open = open ? '1' : '0';
+  card.dataset.picked = [...ui.askPicked].sort().join('|');
+  card.replaceChildren();
   const head = document.createElement('header');
   head.className = 'ask-head';
   const brand = document.createElement('div');
@@ -1366,18 +1365,22 @@ function askBar(): HTMLElement {
     render();
   });
   foldBtn.classList.toggle('open', open);
-  const closeBtn = iconButton(tr('settingsClose'), iconClose(), () => post({ type: 'cancelAsk' }));
+  const closeBtn = iconButton(tr('settingsClose'), iconClose(), () => {
+    clearAskLocal();
+    post({ type: 'cancelAsk' });
+    render();
+  });
   tools.append(foldBtn, closeBtn);
   head.append(brand, tools);
-  el.append(head);
+  card.append(head);
   if (!open) {
-    return el;
+    return card;
   }
   if (ask.kind === 'question' && ask.title) {
     const title = document.createElement('div');
     title.className = 'ask-title';
     title.textContent = ask.title;
-    el.append(title);
+    card.append(title);
   }
   if (ask.kind === 'plan') {
     const body = document.createElement('div');
@@ -1387,20 +1390,20 @@ function askBar(): HTMLElement {
     } else {
       body.textContent = tr('planReadyEmpty');
     }
-    el.append(body);
+    card.append(body);
   }
   const actions = document.createElement('div');
   actions.className = 'ask-actions';
   for (const choice of ask.choices) {
     actions.append(askChoiceButton(choice, ask.kind, Boolean(ask.multiSelect)));
   }
-  el.append(actions);
+  card.append(actions);
   if (ui.askOtherOpen) {
-    el.append(askOtherForm(ask.kind, Boolean(ask.multiSelect)));
+    card.append(askOtherForm(ask.kind, Boolean(ask.multiSelect)));
   } else if (ask.multiSelect) {
-    el.append(askMultiSubmit());
+    card.append(askMultiSubmit());
   }
-  return el;
+  return card;
 }
 
 function askChoiceButton(

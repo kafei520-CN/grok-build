@@ -150,6 +150,14 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
     async clipboardWrite(text) {
       await vscode.env.clipboard.writeText(text);
     },
+    hostChrome() {
+      const kind = vscode.window.activeColorTheme.kind;
+      const light =
+        kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight;
+      return light
+        ? { background: '#f3f3f3', foreground: '#1c1c1c' }
+        : { background: '#1e1e1e', foreground: '#cccccc' };
+    },
     async findFiles(query) {
       findFilesCts?.cancel();
       findFilesCts = new vscode.CancellationTokenSource();

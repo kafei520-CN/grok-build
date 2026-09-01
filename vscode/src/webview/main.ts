@@ -1,4 +1,6 @@
 import type { ChatState, StreamTail } from '../types';
+import { applyEditStatsToMessages, type EditStatsItem } from '../editStats';
+import { mergeLiveMessages } from '../messageMerge';
 import { applyThemeTo } from '../theme';
 import { bindRender, isBooting, isRemoteWeb, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
@@ -31,12 +33,15 @@ type HostMsg = {
   truncated?: boolean;
   messages?: ChatState['messages'];
   hydrate?: number;
+  merge?: boolean;
   prepend?: boolean;
   reset?: boolean;
   done?: boolean;
+  items?: EditStatsItem[];
 } & Partial<StreamTail>;
 
 let hydrateGen = 0;
+let skipHydrate = 0;
 
 function onHostMessage(data: HostMsg | null | undefined): void {
   if (!data || typeof data !== 'object') {
@@ -46,7 +51,16 @@ function onHostMessage(data: HostMsg | null | undefined): void {
     if (typeof data.hydrate === 'number') {
       hydrateGen = data.hydrate;
     }
-    ui.state = normalizeState(data.state);
+    const incoming = normalizeState(data.state);
+    const merged = mergeLiveMessages(ui.state.messages, incoming.messages);
+    if (merged && (data.merge || typeof data.hydrate === 'number')) {
+      incoming.messages = merged;
+      incoming.restoringSession = false;
+      if (typeof data.hydrate === 'number') {
+        skipHydrate = data.hydrate;
+      }
+    }
+    ui.state = incoming;
     persistUi();
     const cue = ui.state.notify;
     if (cue && ui.state.settings?.notifySound !== false) {
@@ -57,6 +71,13 @@ function onHostMessage(data: HostMsg | null | undefined): void {
   }
   if (data.type === 'messages') {
     if (typeof data.hydrate === 'number' && data.hydrate !== hydrateGen) {
+      return;
+    }
+    if (typeof data.hydrate === 'number' && data.hydrate === skipHydrate && data.prepend) {
+      if (data.done) {
+        ui.state.restoringSession = false;
+        render();
+      }
       return;
     }
     const batch = Array.isArray(data.messages) ? data.messages : [];
@@ -75,6 +96,15 @@ function onHostMessage(data: HostMsg | null | undefined): void {
   }
   if (data.type === 'tail' && data.message) {
     applyTail(data as StreamTail);
+    return;
+  }
+  if (data.type === 'editStats' && Array.isArray(data.items)) {
+    const next = applyEditStatsToMessages(ui.state.messages, data.items);
+    if (next !== ui.state.messages) {
+      ui.state = { ...ui.state, messages: next };
+      persistUi();
+      render();
+    }
     return;
   }
   if (!isRemoteWeb()) {
@@ -137,7 +167,11 @@ function applyTail(tail: StreamTail): void {
 function render(): void {
   try {
     document.documentElement.lang = ui.state.locale === 'zh-CN' ? 'zh-CN' : 'en';
-    applyThemeTo(document.documentElement.style, ui.state.theme);
+    applyThemeTo(
+      document.documentElement.style,
+      ui.state.theme,
+      isRemoteWeb() ? ui.state.hostChrome : undefined,
+    );
     syncSurface(
       root,
       ui.state.theme,

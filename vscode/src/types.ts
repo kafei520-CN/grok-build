@@ -463,6 +463,8 @@ export interface ChatState {
   memoryFiles?: MemoryFile[];
   extTab?: 'plugins' | 'marketplace' | 'hooks' | 'workflows';
   theme?: ThemeColors;
+  /** Host workbench colors so Ice/default is not white on remote / IDEA. */
+  hostChrome?: { background: string; foreground: string };
   remote?: RemoteAccessInfo;
 }
 

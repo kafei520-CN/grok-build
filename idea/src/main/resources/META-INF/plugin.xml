@@ -12,7 +12,13 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.32: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.38: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.38 — Remote web uses the host workbench colors so IDEA Ice/default is not white. Settings cards and menus keep a translucent frosted background.</p>
+<p>0.2.37 — Ask cards close immediately on X and reuse the same card for the next question. Remote web copy writes to the browser device clipboard, not the host IDE.</p>
+<p>0.2.36 — Chat edit chips use the same file diffs as Grok Diff. Old sessions get a stats patch so a long chat tail no longer leaves earlier turns showing tool-hunk counts.</p>
+<p>0.2.35 — Remote web no longer replays a long chat from the last chunk on every send/stop. Live updates merge the tail so old sessions do not bounce.</p>
+<p>0.2.34 — Remote web: the composer overlays the chat so send/stop no longer resizes the scrollport and bounces the transcript.</p>
+<p>0.2.33 — Remote review is one Grok Diff tab for the whole page, not a tab per file. Sending or stopping no longer bounces the chat up then down.</p>
 <p>0.2.32 — Remote review opens each changed file as a workspace tab. The chat no longer jumps to the top: the transcript stays in place instead of being moved into the workspace shell.</p>
 <p>0.2.31 — Reviews use histogram anchors plus Myers on the gaps, computed on the host and clipped before the web page. Opening review no longer jumps the chat to the top.</p>
 <p>0.2.30 — Remote web no longer jumps the chat to the top when clicking buttons. Reviews of a few hundred edits no longer open as a 4000-line rewrite.</p>

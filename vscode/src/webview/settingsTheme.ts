@@ -16,7 +16,7 @@ import {
   DEFAULT_GLASS_OPACITY,
   DEFAULT_WALLPAPER_OPACITY,
 } from '../wallpaper';
-import { post, tr, ui } from './app';
+import { isRemoteWeb, post, tr, ui } from './app';
 import { iconChevron } from './icons';
 import { overlayKind, syncSurface, syncWallpaper } from './wallpaper';
 
@@ -481,7 +481,11 @@ function colorRow(
 }
 
 function applyLive(): void {
-  applyThemeTo(document.documentElement.style, live);
+  applyThemeTo(
+    document.documentElement.style,
+    live,
+    isRemoteWeb() ? ui.state.hostChrome : undefined,
+  );
   const app = document.getElementById('app') ?? document.body;
   syncSurface(
     app,

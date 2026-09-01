@@ -5,7 +5,10 @@ export const REMOTE_CHUNK = 64 * 1024;
 
 let hydrateSeq = 0;
 
-export function packRemotePayload(payload: unknown): string[] {
+export function packRemotePayload(
+  payload: unknown,
+  mode: 'replay' | 'update' = 'replay',
+): string[] {
   if (!payload || typeof payload !== 'object') {
     return [JSON.stringify(payload)];
   }
@@ -24,7 +27,31 @@ export function packRemotePayload(payload: unknown): string[] {
   if (messages.length === 0) {
     return [raw];
   }
+  if (mode === 'update') {
+    return packStateUpdate(row.state, messages);
+  }
   return packState(row.state, messages);
+}
+
+/** Live updates: send a tail the client can merge, never wipe the open transcript. */
+function packStateUpdate(state: Record<string, unknown>, messages: unknown[]): string[] {
+  const tail: unknown[] = [];
+  let bytes = 0;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const n = byteLen(JSON.stringify(messages[i]));
+    if (tail.length && bytes + n > REMOTE_STATE_SOFT / 2) {
+      break;
+    }
+    tail.unshift(messages[i]);
+    bytes += n;
+  }
+  return [
+    JSON.stringify({
+      type: 'state',
+      merge: true,
+      state: { ...state, messages: tail, restoringSession: false },
+    }),
+  ];
 }
 
 function packState(state: Record<string, unknown>, messages: unknown[]): string[] {

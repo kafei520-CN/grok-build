@@ -21,8 +21,11 @@
   --glass-sheen: inset 0 1px 0 rgb(255 255 255 / 42%);
   --glass-shadow: var(--glass-sheen), 0 18px 28px rgb(0 0 0 / 28%);
   --glass-shadow-sm: var(--glass-sheen), 0 8px 14px rgb(0 0 0 / 18%);
+  --glass-fill: 40%;
+  --chrome-fill: 52%;
   /* Tiny film so Chromium still runs backdrop-filter; not a tinted overlay. */
   --glass-film: rgb(255 255 255 / 2%);
+  --chrome-film: color-mix(in srgb, var(--bg) var(--chrome-fill), rgb(255 255 255 / 8%));
 }
 
 html,
@@ -227,9 +230,11 @@ textarea:focus-visible {
 .more-menu,
 .picker-menu,
 .menu {
-  background: color-mix(in srgb, var(--bg) 92%, var(--elev));
+  background: var(--chrome-film, color-mix(in srgb, var(--bg) 52%, transparent));
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(var(--glass-4-blur, 18px)) saturate(1.15);
+  backdrop-filter: blur(var(--glass-4-blur, 18px)) saturate(1.15);
 }
 
 .more-menu {
@@ -448,9 +453,7 @@ textarea:focus-visible {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  /* Keep the visible line stable when the composer or workspace pane resizes.
-     none + a remount is what jumped the chat to the top. */
-  overflow-anchor: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   padding: 12px 14px 18px;
   /* block, not flex: Chromium maps the thumb wrong on a flex scrollport and jumps to 0 */
@@ -2525,11 +2528,13 @@ kbd {
 }
 
 .settings-card {
-  background: var(--elev);
+  background: var(--chrome-film, color-mix(in srgb, var(--bg) 52%, transparent));
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   padding: 2px 12px 6px;
   box-shadow: 0 8px 20px color-mix(in srgb, #000 10%, transparent);
+  -webkit-backdrop-filter: blur(var(--glass-6-blur, 20px)) saturate(1.15);
+  backdrop-filter: blur(var(--glass-6-blur, 20px)) saturate(1.15);
 }
 
 .settings-row {
@@ -3529,29 +3534,24 @@ kbd {
   }
 }
 
-/* Remote browser: no stacked frost filters. Review lives in the workspace editor. */
+/* Remote browser: Ice/default has no --vscode-* vars. Keep wallpaper blur off; menus still frost. */
 html.remote-web {
+  --vscode-foreground: #e8e8e8;
+  --vscode-descriptionForeground: #9aa0a6;
+  --vscode-sideBar-background: #1e1e1e;
+  --vscode-editor-background: #1e1e1e;
+  --vscode-textLink-foreground: #b9d4ff;
+  --vscode-errorForeground: #f85149;
+  --fg: var(--vscode-foreground);
+  --bg: var(--vscode-sideBar-background);
+  --muted: var(--vscode-descriptionForeground);
   --glass-1-blur: 0px;
-  --glass-2-blur: 0px;
-  --glass-3-blur: 0px;
-  --glass-4-blur: 0px;
-  --glass-5-blur: 0px;
-  --glass-6-blur: 0px;
-  --glass-7-blur: 0px;
 }
 
-html.remote-web #grok-veil,
-html.remote-web .settings,
-html.remote-web .drawer,
 html.remote-web .topbar,
-html.remote-web .composer-card,
-html.remote-web .more-menu,
-html.remote-web .picker-menu,
-html.remote-web #grok-floats .more-menu,
-html.remote-web #grok-floats .picker-menu,
-html.remote-web #grok-floats .menu {
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+html.remote-web .composer-card {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 html.remote-web,

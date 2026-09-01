@@ -19,6 +19,7 @@ import { ContextMeter } from './contextMeter';
 import { EditJournal } from './editJournal';
 import { slimFileDiffs } from './diff';
 import { applyDiffStats, publicEdits } from './edits';
+import type { EditStatsItem } from './editStats';
 import { handleIncoming } from './incoming';
 import { tr, uiLocale } from './locale';
 import { logError, logInfo, logWarn, showLog } from './logger';
@@ -353,6 +354,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       memoryFiles: this.memoryFiles,
       extTab: this.extTab,
       theme: drawers.themeForUi(this.theme),
+      hostChrome: plat().hostChrome?.(),
       remote: this.remoteInfo(),
     };
   }
@@ -1052,7 +1054,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       this.currentSessionId = agent.sessionId ?? sessionId;
       finalizeReplayTimes(this.messages);
       this.setStatus('ready');
-      void this.journal.hydrateFromGit().then(() => this.emit());
+      void this.journal.hydrateFromGit().then(async () => {
+        await this.syncAllEditStats();
+        this.emit();
+        this.pushEditStats();
+      });
       void this.meter.refresh();
     } catch (error) {
       if (op !== this.sessionOp) {
@@ -1151,6 +1157,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const files = await this.journal.diffs(messageId, onlyPath);
     if (assistant && files.length > 0 && !onlyPath) {
       assistant.edits = applyDiffStats(assistant.edits ?? [], files);
+      this.emit();
+      this.pushEditStats(assistant.id);
     }
     if (files.length === 0) {
       if (onlyPath) {
@@ -1729,7 +1737,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       models: this.models,
       commands: this.commands,
       meter: this.meter,
-      rememberFile: (filePath: string) => this.journal.remember(filePath),
+      rememberFile: (filePath: string) =>
+        this.journal.remember(filePath).then(() => {
+          const live = this.journal.assistant();
+          if (live?.edits?.length) {
+            void this.syncEditStats(live);
+          }
+        }),
       capturePrevious: (filePath: string, previous: string) =>
         this.journal.capturePrevious(filePath, previous),
       displayPath: (filePath: string) => this.displayPath(filePath),
@@ -1962,13 +1976,44 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     return plat().relativePath(filePath);
   }
 
-  private async syncEditStats(assistant: ChatMessage): Promise<void> {
+  private async syncEditStats(
+    assistant: ChatMessage,
+    opts?: { silent?: boolean },
+  ): Promise<void> {
     const files = await this.journal.diffs(assistant.id);
     if (!files.length || !this.messages.includes(assistant)) {
       return;
     }
     assistant.edits = applyDiffStats(assistant.edits ?? [], files);
-    this.emitUnlessReplaying();
+    if (!opts?.silent) {
+      this.emitUnlessReplaying();
+      this.pushEditStats(assistant.id);
+    }
+  }
+
+  private async syncAllEditStats(): Promise<void> {
+    for (const message of this.messages) {
+      if (message.role === 'assistant' && message.edits?.length) {
+        await this.syncEditStats(message, { silent: true });
+      }
+    }
+  }
+
+  private pushEditStats(messageId?: string): void {
+    const items: EditStatsItem[] = [];
+    for (const message of this.messages) {
+      if (message.role !== 'assistant' || !message.edits?.length) {
+        continue;
+      }
+      if (messageId && message.id !== messageId) {
+        continue;
+      }
+      items.push({ messageId: message.id, edits: publicEdits(message.edits) });
+    }
+    if (!items.length) {
+      return;
+    }
+    this.remote?.broadcast({ type: 'editStats', items });
   }
 
   private startupHints(): { skipGitStatus: boolean; skipProjectLayout: boolean } | undefined {

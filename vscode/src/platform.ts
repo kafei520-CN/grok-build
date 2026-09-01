@@ -88,6 +88,8 @@ export interface Platform {
   focusChat(): void;
   getActiveSelection(): SelectionInfo | undefined;
   getActiveFile(): FileInfo | undefined;
+  /** Workbench chrome colors when Ice/default has no custom background. */
+  hostChrome?(): { background: string; foreground: string };
   showDiff?(opts: {
     locale: string;
     files: FileDiff[];

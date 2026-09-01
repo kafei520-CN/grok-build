@@ -91,7 +91,7 @@ describe('transcript scroll', () => {
     assert.ok(block, 'missing .transcript rule');
     assert.match(block[0], /display:\s*block/);
     assert.doesNotMatch(block[0], /display:\s*flex/);
-    assert.match(block[0], /overflow-anchor:\s*auto/);
+    assert.match(block[0], /overflow-anchor:\s*none/);
     assert.ok(BOTTOM_SLACK_PX > 0);
   });
 });

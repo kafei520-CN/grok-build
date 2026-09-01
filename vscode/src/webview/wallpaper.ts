@@ -19,8 +19,7 @@ export function syncSurface(
   theme: ThemeColors | undefined,
   overlay?: 'settings' | 'drawer',
 ): void {
-  const remote = isRemoteWeb();
-  const surface = remote && theme?.surface === 'glass' ? 'solid' : theme?.surface;
+  const surface = theme?.surface;
   if (surface === 'glass' || surface === 'solid') {
     root.dataset.surface = surface;
     ensureLayer(root, 'grok-frost', ['grok-wallpaper']);
@@ -28,7 +27,7 @@ export function syncSurface(
     delete root.dataset.surface;
     document.getElementById('grok-frost')?.remove();
   }
-  if (!remote && theme?.surface === 'glass' && theme.chromeGlass) {
+  if (theme?.surface === 'glass' && theme.chromeGlass) {
     root.dataset.chromeGlass = 'on';
   } else {
     delete root.dataset.chromeGlass;

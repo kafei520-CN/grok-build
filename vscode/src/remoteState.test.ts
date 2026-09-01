@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { mergeLiveMessages } from './messageMerge';
 import { packRemotePayload, REMOTE_STATE_SOFT, chunkMessages } from './remoteState';
 
 describe('remote state packing', () => {
@@ -81,6 +82,44 @@ describe('remote state packing', () => {
       ids,
       messages.map((row) => row.id),
     );
+  });
+
+  it('live updates of a long chat send a merge tail instead of replaying history', () => {
+    const messages = Array.from({ length: 80 }, (_, i) => ({
+      id: `m${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      text: 'x'.repeat(2000),
+      tools: [],
+    }));
+    const frames = packRemotePayload({ type: 'state', state: { status: 'ready', messages } }, 'update');
+    assert.equal(frames.length, 1);
+    const row = JSON.parse(frames[0] ?? '') as {
+      merge?: boolean;
+      state: { messages: Array<{ id: string }>; restoringSession?: boolean };
+    };
+    assert.equal(row.merge, true);
+    assert.equal(row.state.restoringSession, false);
+    assert.ok(row.state.messages.length < messages.length);
+    assert.equal(row.state.messages.at(-1)?.id, 'm79');
+    const kept = mergeLiveMessages(messages.slice(0, 80), row.state.messages);
+    assert.equal(kept?.at(-1)?.id, 'm79');
+    assert.equal(kept?.length, 80);
+  });
+
+  it('merges a sent tail onto an already-open transcript', () => {
+    const had = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    const tail = [{ id: 'b', text: 'upd' }, { id: 'c' }, { id: 'd' }];
+    const merged = mergeLiveMessages(had, tail);
+    assert.deepEqual(
+      merged?.map((row) => row.id),
+      ['a', 'b', 'c', 'd'],
+    );
+    assert.equal((merged?.[1] as { text?: string }).text, 'upd');
+  });
+
+  it('does not merge when the last live message vanished (rewind / new session)', () => {
+    const had = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    assert.equal(mergeLiveMessages(had, [{ id: 'a' }, { id: 'b' }]), undefined);
   });
 
   it('chunks messages without dropping a oversized single item', () => {

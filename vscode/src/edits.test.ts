@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { applyEditStatsToMessages } from './editStats';
 import {
   applyDiffStats,
   countLineDiff,
@@ -57,16 +58,35 @@ describe('edits', () => {
     assert.ok((merged[0]?.added ?? 0) < 100);
   });
 
-  it('keeps tool edits that the file diff list omitted', () => {
+  it('uses the review file list as the source of truth', () => {
     const next = applyDiffStats(
       [
-        { path: 'src/diff.ts', added: 40, removed: 20 },
-        { path: 'package.json', added: 1, removed: 1 },
+        { path: 'src/webview/main.ts', added: 3, removed: 1 },
+        { path: 'src/webview/composer.ts', added: 4, removed: 1 },
+        { path: 'media/chat.css', added: 16, removed: 25 },
       ],
-      [{ path: 'vscode/package.json', added: 1, removed: 1 }],
+      [
+        { path: 'vscode/src/webview/main.ts', added: 20, removed: 1 },
+        { path: 'vscode/src/webview/composer.ts', added: 4, removed: 1 },
+        { path: 'vscode/media/chat.css', added: 1, removed: 3 },
+      ],
     );
-    assert.equal(next.length, 2);
-    assert.equal(next.some((edit) => edit.path.includes('diff.ts') && edit.added === 40), true);
+    assert.equal(next.length, 3);
+    assert.deepEqual(totals(next), { added: 25, removed: 5 });
+    assert.equal(next[0]?.added, 20);
+    assert.equal(next.some((edit) => edit.path.includes('diff.ts')), false);
+  });
+
+  it('patches edit stats on an old turn that is no longer in the live tail', () => {
+    const messages = [
+      { id: 'old', edits: [{ path: 'a.ts', added: 3, removed: 27 }] },
+      { id: 'new', edits: [{ path: 'b.ts', added: 1, removed: 0 }] },
+    ];
+    const next = applyEditStatsToMessages(messages, [
+      { messageId: 'old', edits: [{ path: 'a.ts', added: 20, removed: 1 }] },
+    ]);
+    assert.deepEqual(next[0]?.edits, [{ path: 'a.ts', added: 20, removed: 1 }]);
+    assert.equal(next[1]?.edits?.[0]?.added, 1);
   });
 
   it('detects windows file paths', () => {

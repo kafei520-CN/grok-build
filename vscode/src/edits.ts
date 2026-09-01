@@ -1,7 +1,11 @@
-import { countChange } from './diff';
+import { countChange, countOps, diffOps, splitLines } from './diff';
 import { isFullFileBaseline } from './snapshots';
 import type { FileEdit } from './types';
 import { asObject, asString } from './wire';
+
+function countFile(before: string, after: string): { added: number; removed: number } {
+  return countOps(diffOps(splitLines(before), splitLines(after)));
+}
 
 export function countUnifiedDiff(text: string): { added: number; removed: number } {
   let added = 0;
@@ -43,7 +47,7 @@ export function mergeEdits(edits: FileEdit[]): FileEdit[] {
         current.next !== undefined &&
         isFullFileBaseline(current.previous, current.next)
       ) {
-        const stats = countChange(current.previous, current.next);
+        const stats = countFile(current.previous, current.next);
         current.added = stats.added;
         current.removed = stats.removed;
       } else if (current.previous === undefined || current.next === undefined) {
@@ -65,26 +69,21 @@ export function applyDiffStats(
   edits: FileEdit[],
   files: Array<{ path: string; added: number; removed: number }>,
 ): FileEdit[] {
-  const unused = [...files];
-  const out: FileEdit[] = [];
-  for (const edit of edits) {
-    const index = unused.findIndex((file) => sameEditPath(edit.path, file.path));
-    if (index >= 0) {
-      const file = unused.splice(index, 1)[0];
-      out.push({
+  if (files.length === 0) {
+    return edits;
+  }
+  return files.map((file) => {
+    const edit = edits.find((item) => sameEditPath(item.path, file.path));
+    if (edit) {
+      return {
         ...edit,
         path: file.path,
         added: file.added,
         removed: file.removed,
-      });
-    } else {
-      out.push(edit);
+      };
     }
-  }
-  for (const file of unused) {
-    out.push({ path: file.path, added: file.added, removed: file.removed });
-  }
-  return out;
+    return { path: file.path, added: file.added, removed: file.removed };
+  });
 }
 
 function sameEditPath(left: string, right: string): boolean {

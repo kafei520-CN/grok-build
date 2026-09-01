@@ -126,4 +126,20 @@ describe('theme', () => {
     assert.equal(props.get('--glass-2-blur'), '38px');
     assert.equal(props.get('--glass-7-blur'), '48px');
   });
+
+  it('uses host chrome when Ice has no background', () => {
+    const props = new Map<string, string>();
+    applyThemeTo(
+      {
+        setProperty: (name, value) => props.set(name, value),
+        removeProperty: (name) => {
+          props.delete(name);
+        },
+      },
+      DEFAULT_THEME,
+      { background: '#2b2d30', foreground: '#ced0d6' },
+    );
+    assert.equal(props.get('--bg'), '#2b2d30');
+    assert.equal(props.get('--fg'), '#ced0d6');
+  });
 });
