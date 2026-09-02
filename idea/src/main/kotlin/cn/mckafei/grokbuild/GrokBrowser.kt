@@ -10,6 +10,8 @@ import com.intellij.ui.jcef.JBCefJSQuery
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
+import org.cef.handler.CefRequestHandlerAdapter
+import org.cef.handler.CefRequestHandler.TerminationStatus
 import java.awt.Component
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -56,6 +58,19 @@ class GrokBrowser(
             },
             browser.cefBrowser,
         )
+        browser.jbCefClient.addRequestHandler(
+            object : CefRequestHandlerAdapter() {
+                override fun onRenderProcessTerminated(cefBrowser: CefBrowser?, status: TerminationStatus?) {
+                    reload()
+                }
+            },
+            browser.cefBrowser,
+        )
+        browser.loadURL(page.toURI().toString())
+    }
+
+    fun reload() {
+        synchronized(lock) { loaded = false }
         browser.loadURL(page.toURI().toString())
     }
 

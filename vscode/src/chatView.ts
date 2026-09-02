@@ -13,6 +13,10 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
   static readonly viewType = VIEW_ID;
   private view?: vscode.WebviewView;
   private readonly disposables: vscode.Disposable[] = [];
+  private lastAlive = 0;
+  private wakeAt = 0;
+  private wired = false;
+  private reviving = false;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -46,17 +50,63 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
         vscode.Uri.file(path.join(os.homedir(), '.grok')),
       ],
     };
+    if (!this.wired) {
+      this.wired = true;
+      const watch = setInterval(() => this.watchdog(), 15_000);
+      this.disposables.push(
+        webview.onDidReceiveMessage((message: WebviewToHost) => {
+          void this.onMessage(message);
+        }),
+        webviewView.onDidChangeVisibility(() => this.onVisibility()),
+        { dispose: () => clearInterval(watch) },
+      );
+    }
     webview.html = this.renderHtml(webview);
-    this.disposables.push(
-      webview.onDidReceiveMessage((message: WebviewToHost) => {
-        void this.onMessage(message);
-      }),
-    );
+    this.lastAlive = Date.now();
     this.postState(this.controller.snapshot());
   }
 
   private async onMessage(message: WebviewToHost): Promise<void> {
+    if (message.type === 'ready' || message.type === 'alive') {
+      this.lastAlive = Date.now();
+    }
     await dispatchUi(this.controller, message);
+  }
+
+  private onVisibility(): void {
+    if (!this.view?.visible) {
+      return;
+    }
+    this.wakeAt = Date.now();
+    void this.view.webview.postMessage({ type: 'wake' });
+    setTimeout(() => {
+      if (this.lastAlive < this.wakeAt) {
+        this.revive('no ping after show');
+      }
+    }, 1600);
+  }
+
+  private watchdog(): void {
+    if (!this.view?.visible || this.lastAlive === 0) {
+      return;
+    }
+    if (Date.now() - this.lastAlive < 45_000) {
+      return;
+    }
+    this.revive('heartbeat stopped');
+  }
+
+  private revive(reason: string): void {
+    const view = this.view;
+    if (!view || this.reviving) {
+      return;
+    }
+    this.reviving = true;
+    logInfo(`webview revive (${reason})`);
+    view.webview.html = this.renderHtml(view.webview);
+    this.lastAlive = Date.now();
+    this.postState(this.controller.snapshot());
+    this.reviving = false;
   }
 
   private postState(state: ChatState): void {

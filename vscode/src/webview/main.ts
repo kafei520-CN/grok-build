@@ -47,6 +47,10 @@ function onHostMessage(data: HostMsg | null | undefined): void {
   if (!data || typeof data !== 'object') {
     return;
   }
+  if (data.type === 'wake') {
+    post({ type: 'alive' });
+    return;
+  }
   if (data.type === 'state' && data.state) {
     if (typeof data.hydrate === 'number') {
       hydrateGen = data.hydrate;
@@ -161,6 +165,13 @@ function applyTail(tail: StreamTail): void {
   ui.state.status = tail.status;
   ui.state.context = tail.context;
   ui.state.queue = tail.queue;
+  if (document.getElementById('transcript') && document.getElementById('grok-body')) {
+    root.dataset.status = ui.state.status;
+    patchBody(root);
+    patchComposer();
+    scrollTranscript();
+    return;
+  }
   render();
 }
 
@@ -234,6 +245,10 @@ function render(): void {
 function boot(): void {
   (window as unknown as { __grokPrime?: () => void }).__grokPrime?.();
   post({ type: 'ready' });
+  post({ type: 'alive' });
+  if (!isRemoteWeb()) {
+    window.setInterval(() => post({ type: 'alive' }), 15_000);
+  }
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') {
       return;

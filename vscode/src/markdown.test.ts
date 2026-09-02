@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { escapeHtml, fileName, renderMarkdown, safeUrl } from './webview/markdown';
+import {
+  escapeHtml,
+  fileName,
+  renderMarkdown,
+  safeUrl,
+  splitStreamingMarkdown,
+} from './webview/markdown';
 
 describe('markdown', () => {
   it('escapes HTML then applies inline marks', () => {
@@ -101,5 +107,14 @@ describe('markdown', () => {
     assert.match(html, /<code>pending<\/code>/);
     assert.match(html, /<code>enqueueWork<\/code>/);
     assert.doesNotMatch(html, /\|--------\|/);
+  });
+
+  it('keeps finished blocks committed while a streaming paragraph is still open', () => {
+    const split = splitStreamingMarkdown('# Title\n\nhello world');
+    assert.equal(split.committed, '# Title\n');
+    assert.equal(split.rest, 'hello world');
+    const fenced = splitStreamingMarkdown('done\n\n```js\nconst x = 1;');
+    assert.equal(fenced.committed, 'done\n');
+    assert.match(fenced.rest, /^```js/);
   });
 });

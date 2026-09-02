@@ -7,6 +7,8 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'ready':
       void controller.start();
       return;
+    case 'alive':
+      return;
     case 'login':
       await controller.login();
       return;

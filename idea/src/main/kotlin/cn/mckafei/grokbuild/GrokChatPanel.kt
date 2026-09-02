@@ -12,6 +12,7 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.SwingConstants
+import javax.swing.Timer
 
 class GrokChatPanel(
     private val session: GrokSession,
@@ -21,11 +22,19 @@ class GrokChatPanel(
     val component: JComponent = GrokDrop.attach(content, this) { session.sendDropped(it) }
     private var browser: GrokBrowser? = null
     private var disposed = false
+    private var lastAlive = 0L
+    private val watch = Timer(20_000) { checkAlive() }
 
     init {
         Disposer.register(parent, this)
+        watch.isRepeats = true
+        watch.start()
         showCenter(JBLabel("Starting Grok…", SwingConstants.CENTER))
         scheduleMount()
+    }
+
+    fun onAlive() {
+        lastAlive = System.currentTimeMillis()
     }
 
     fun postToWebview(json: String) {
@@ -85,6 +94,7 @@ class GrokChatPanel(
             Disposer.register(this, view)
             GrokDrop.install(view.dropTargetComponent) { session.sendDropped(it) }
             showCenter(view.component)
+            lastAlive = System.currentTimeMillis()
             session.attach(this)
         } catch (error: Throwable) {
             showCenter(errorPanel(error.message ?: error.toString()))
@@ -133,8 +143,20 @@ class GrokChatPanel(
         return bar
     }
 
+    private fun checkAlive() {
+        if (disposed || browser == null || lastAlive == 0L) {
+            return
+        }
+        if (System.currentTimeMillis() - lastAlive < 45_000) {
+            return
+        }
+        lastAlive = System.currentTimeMillis()
+        browser?.reload()
+    }
+
     override fun dispose() {
         disposed = true
+        watch.stop()
         browser = null
     }
 

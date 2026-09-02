@@ -1,18 +1,32 @@
 import { execFile } from 'node:child_process';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
-import { buildFileDiff, splitLines, type FileDiff } from './diff';
+import { buildFileDiff, type FileDiff } from './diff';
 import { logError } from './logger';
 import { tr } from './locale';
 import { plat } from './platform';
 import {
+  deleteStoredTurns,
+  editTurnIndex,
+  findTurn,
+  readStoredTurns,
+  removeTurn,
+  storedFileMatches,
+  trimTurns,
+  upsertTurn,
+  writeStoredTurns,
+  type StoredFileDiff,
+  type StoredTurnDiff,
+} from './sessionDiffs';
+import {
   MAX_SNAPSHOT_CHARS,
   addSnapshot,
   alreadyCaptured,
-  isFullFileBaseline,
   isProbablyText,
   normalizeFsPath,
+  pickBeforeAfter,
   planRevert,
+  sameText,
   type FileSnapshot,
 } from './snapshots';
 import type { ChatMessage } from './types';
@@ -22,12 +36,16 @@ const execFileAsync = promisify(execFile);
 export class EditJournal {
   private readonly snapshots = new Map<string, FileSnapshot[]>();
   private readonly remembering = new Map<string, Promise<void>>();
+  private turns: StoredTurnDiff[] = [];
+  private loadedFor?: string;
+  private hydrateJob?: Promise<void>;
 
   constructor(
     private readonly host: {
       messages: () => ChatMessage[];
       replaying: () => boolean;
       cwd: () => string;
+      sessionId: () => string | undefined;
       displayPath: (filePath: string) => string;
       emit: () => void;
     },
@@ -35,6 +53,8 @@ export class EditJournal {
 
   clear(): void {
     this.snapshots.clear();
+    this.turns = [];
+    this.loadedFor = undefined;
   }
 
   resolvePath(filePath: string): string | undefined {
@@ -162,34 +182,86 @@ export class EditJournal {
   }
 
   async hydrateFromGit(): Promise<void> {
-    for (const message of this.host.messages()) {
-      if (message.role !== 'assistant') {
+    if (!this.hydrateJob) {
+      this.hydrateJob = this.hydrateTurns().finally(() => {
+        this.hydrateJob = undefined;
+      });
+    }
+    await this.hydrateJob;
+  }
+
+  private async hydrateTurns(): Promise<void> {
+    await this.ensureLoaded();
+    const assistants = this.host
+      .messages()
+      .filter((message) => message.role === 'assistant' && (message.edits?.length ?? 0) > 0);
+    let dirty = false;
+    for (let ordinal = 0; ordinal < assistants.length; ordinal += 1) {
+      const message = assistants[ordinal];
+      if (!message) {
         continue;
       }
+      const stored = findTurn(this.turns, ordinal);
+      if (stored) {
+        this.installTurnSnapshots(message, stored);
+        continue;
+      }
+      const files: StoredFileDiff[] = [];
       for (const edit of message.edits ?? []) {
         const abs = this.resolvePath(edit.path);
         if (!abs) {
           continue;
         }
         const current = this.snapshots.get(message.id) ?? [];
-        if (alreadyCaptured(current, abs)) {
-          continue;
-        }
         const previous = await this.readGitHead(abs);
-        if (previous === undefined) {
+        if (
+          previous !== undefined &&
+          !current.some(
+            (item) =>
+              normalizeFsPath(item.absPath) === normalizeFsPath(abs) && item.source === 'git',
+          )
+        ) {
+          this.snapshots.set(
+            message.id,
+            addSnapshot(current, {
+              absPath: abs,
+              displayPath: this.host.displayPath(abs),
+              existed: true,
+              previous,
+              source: 'git',
+            }),
+          );
+        }
+        const after = (await this.readCurrentText(abs)) ?? '';
+        if (previous === undefined && after === '') {
           continue;
         }
-        this.snapshots.set(
-          message.id,
-          addSnapshot(current, {
-            absPath: abs,
-            displayPath: this.host.displayPath(abs),
-            existed: true,
-            previous,
-            source: 'disk',
-          }),
-        );
+        const before = previous ?? '';
+        if (sameText(before, after)) {
+          continue;
+        }
+        if (before.length > MAX_SNAPSHOT_CHARS || after.length > MAX_SNAPSHOT_CHARS) {
+          continue;
+        }
+        files.push({
+          path: this.host.displayPath(abs),
+          absPath: abs,
+          before,
+          after,
+        });
       }
+      if (files.length === 0) {
+        continue;
+      }
+      this.turns = upsertTurn(this.turns, ordinal, files);
+      const next = findTurn(this.turns, ordinal);
+      if (next) {
+        this.installTurnSnapshots(message, next);
+      }
+      dirty = true;
+    }
+    if (dirty) {
+      await this.flushTurns();
     }
   }
 
@@ -235,6 +307,7 @@ export class EditJournal {
     const restored = outcomes.filter((item) => item.ok).length;
     const failed = outcomes.filter((item) => !item.ok).length;
     if (assistant) {
+      const ordinal = editTurnIndex(this.host.messages(), assistant.id);
       const failedPaths = new Set(
         outcomes.filter((item) => !item.ok).map((item) => normalizeFsPath(item.absPath)),
       );
@@ -247,9 +320,22 @@ export class EditJournal {
           const abs = this.resolvePath(edit.path) ?? edit.path;
           return failedPaths.has(normalizeFsPath(abs));
         });
+        const turn = findTurn(this.turns, ordinal);
+        if (turn) {
+          this.turns = upsertTurn(
+            this.turns,
+            ordinal,
+            turn.files.filter((file) => failedPaths.has(normalizeFsPath(file.absPath))),
+          );
+          void this.flushTurns();
+        }
       } else {
         this.snapshots.delete(assistant.id);
         assistant.edits = undefined;
+        if (ordinal >= 0) {
+          this.turns = removeTurn(this.turns, ordinal);
+          void this.flushTurns();
+        }
       }
       this.host.emit();
     }
@@ -264,10 +350,23 @@ export class EditJournal {
   }
 
   async diffs(messageId?: string, onlyPath?: string): Promise<FileDiff[]> {
+    await this.ensureLoaded();
     const assistant = this.assistant(messageId);
+    if (assistant && !this.hasDiskSnapshot(assistant.id)) {
+      const ordinal = editTurnIndex(this.host.messages(), assistant.id);
+      let stored = findTurn(this.turns, ordinal);
+      if (!stored && !assistant.streaming) {
+        await this.hydrateFromGit();
+        stored = findTurn(this.turns, ordinal);
+      }
+      if (stored) {
+        return this.diffsFromStored(stored, onlyPath);
+      }
+    }
     const edits = assistant?.edits ?? [];
     const paths = onlyPath ? [onlyPath] : edits.map((edit) => edit.path);
     const files: FileDiff[] = [];
+    const captured: StoredFileDiff[] = [];
     const seen = new Set<string>();
     for (const filePath of paths) {
       const pair = await this.readBeforeAfter(assistant, filePath);
@@ -289,8 +388,45 @@ export class EditJournal {
         continue;
       }
       files.push(file);
+      captured.push({
+        path: file.path,
+        absPath: file.absPath,
+        before: pair.before,
+        after: pair.after,
+      });
+    }
+    if (assistant && !onlyPath && captured.length > 0 && this.hasDiskSnapshot(assistant.id)) {
+      const ordinal = editTurnIndex(this.host.messages(), assistant.id);
+      this.turns = upsertTurn(this.turns, ordinal, captured);
+      void this.flushTurns();
     }
     return files;
+  }
+
+  async dropSession(sessionId: string): Promise<void> {
+    if (this.loadedFor === sessionId) {
+      this.turns = [];
+      this.loadedFor = undefined;
+    }
+    await deleteStoredTurns(sessionId);
+  }
+
+  trimStoredTurns(): void {
+    const count = this.host
+      .messages()
+      .filter((item) => item.role === 'assistant' && (item.edits?.length ?? 0) > 0).length;
+    const next = trimTurns(this.turns, count);
+    if (next === this.turns) {
+      return;
+    }
+    this.turns = next;
+    void this.flushTurns();
+  }
+
+  hasDiskSnapshot(messageId: string): boolean {
+    return (this.snapshots.get(messageId) ?? []).some(
+      (item) => item.source === 'disk' || item.source === undefined,
+    );
   }
 
   private async readBeforeAfter(
@@ -304,33 +440,23 @@ export class EditJournal {
     const pool = assistant
       ? (this.snapshots.get(assistant.id) ?? [])
       : [...this.snapshots.values()].flat();
-    const snap = pool.find((item) => normalizeFsPath(item.absPath) === normalizeFsPath(abs));
+    const snapshots = pool.filter(
+      (item) => normalizeFsPath(item.absPath) === normalizeFsPath(abs),
+    );
     const edit = assistant?.edits?.find(
       (item) => normalizeFsPath(this.resolvePath(item.path) ?? item.path) === normalizeFsPath(abs),
     );
     const afterDisk = (await this.readCurrentText(abs)) ?? '';
-    if (snap && !snap.existed) {
-      return { absPath: abs, before: '', after: afterDisk };
+    const pair = pickBeforeAfter({
+      snapshots,
+      previous: edit?.previous,
+      next: edit?.next,
+      afterDisk,
+    });
+    if (!pair) {
+      return undefined;
     }
-    if (
-      snap?.source !== 'tool' &&
-      snap?.previous !== undefined &&
-      !textEqual(snap.previous, afterDisk) &&
-      isFullFileBaseline(snap.previous, afterDisk)
-    ) {
-      return { absPath: abs, before: snap.previous, after: afterDisk };
-    }
-    if (edit?.previous !== undefined && edit.next !== undefined) {
-      return { absPath: abs, before: edit.previous, after: edit.next };
-    }
-    if (
-      edit?.previous !== undefined &&
-      !textEqual(edit.previous, afterDisk) &&
-      isFullFileBaseline(edit.previous, afterDisk)
-    ) {
-      return { absPath: abs, before: edit.previous, after: afterDisk };
-    }
-    return undefined;
+    return { absPath: abs, before: pair.before, after: pair.after };
   }
 
   private async readCurrentText(abs: string): Promise<string | undefined> {
@@ -369,6 +495,68 @@ export class EditJournal {
     }
   }
 
+  private diffsFromStored(stored: StoredTurnDiff, onlyPath?: string): FileDiff[] {
+    const files: FileDiff[] = [];
+    const seen = new Set<string>();
+    for (const item of stored.files) {
+      if (onlyPath && !storedFileMatches(item, onlyPath)) {
+        continue;
+      }
+      const key = normalizeFsPath(item.absPath || item.path);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const file = buildFileDiff({
+        path: item.path,
+        absPath: item.absPath,
+        before: item.before,
+        after: item.after,
+      });
+      if (file.added === 0 && file.removed === 0 && !file.created && !file.deleted) {
+        continue;
+      }
+      files.push(file);
+    }
+    return files;
+  }
+
+  private installTurnSnapshots(assistant: ChatMessage, turn: StoredTurnDiff): void {
+    let current = this.snapshots.get(assistant.id) ?? [];
+    for (const file of turn.files) {
+      current = addSnapshot(current, {
+        absPath: file.absPath,
+        displayPath: file.path,
+        existed: file.before.length > 0,
+        previous: file.before,
+        source: 'session',
+      });
+    }
+    this.snapshots.set(assistant.id, current);
+  }
+
+  private async ensureLoaded(): Promise<void> {
+    const sessionId = this.host.sessionId();
+    if (!sessionId) {
+      this.loadedFor = undefined;
+      this.turns = [];
+      return;
+    }
+    if (this.loadedFor === sessionId) {
+      return;
+    }
+    this.loadedFor = sessionId;
+    this.turns = await readStoredTurns(sessionId);
+  }
+
+  private async flushTurns(): Promise<void> {
+    const sessionId = this.host.sessionId();
+    if (!sessionId) {
+      return;
+    }
+    await writeStoredTurns(sessionId, this.turns);
+  }
+
   private async restoreFile(absPath: string, previous: string): Promise<void> {
     const applied = await plat().applyText?.(absPath, previous);
     if (applied) {
@@ -376,10 +564,6 @@ export class EditJournal {
     }
     await plat().writeFile(absPath, Buffer.from(previous, 'utf8'));
   }
-}
-
-function textEqual(left: string, right: string): boolean {
-  return splitLines(left).join('\n') === splitLines(right).join('\n');
 }
 
 function isInside(root: string, filePath: string): boolean {

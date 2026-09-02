@@ -1,6 +1,7 @@
 package cn.mckafei.grokbuild
 
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.intellij.execution.filters.TextConsoleBuilderFactory
 import com.intellij.execution.ui.ConsoleView
 import com.intellij.execution.ui.ConsoleViewContentType
@@ -94,6 +95,14 @@ class GrokSession(val project: Project) : Disposable {
     }
 
     fun sendUi(messageJson: String) {
+        try {
+            val type = JsonParser.parseString(messageJson).asJsonObject.get("type")?.asString
+            if (type == "alive") {
+                panel?.onAlive()
+                return
+            }
+        } catch (_: Exception) {
+        }
         try {
             context?.pushNow()
         } catch (error: Throwable) {

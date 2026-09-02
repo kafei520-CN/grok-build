@@ -242,6 +242,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       messages: () => this.messages,
       replaying: () => this.replaying,
       cwd: () => this.cwd(),
+      sessionId: () => this.currentSessionId,
       displayPath: (filePath) => this.displayPath(filePath),
       emit: () => this.emit(),
     });
@@ -994,6 +995,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     try {
       await this.agent?.deleteSession(sessionId);
+      await this.journal.dropSession(sessionId);
       if (sessionId === this.currentSessionId) {
         await this.newSession();
       }
@@ -1006,6 +1008,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   async rewindTo(index: number): Promise<void> {
     await this.agent?.rewindTo(index);
     this.messages = this.messages.slice(0, Math.max(0, index * 2));
+    this.journal.trimStoredTurns();
     this.note(`Rewound to turn ${index}.`);
   }
 
@@ -1155,7 +1158,12 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   async reviewEdits(messageId?: string, onlyPath?: string): Promise<void> {
     const assistant = this.journal.assistant(messageId);
     const files = await this.journal.diffs(messageId, onlyPath);
-    if (assistant && files.length > 0 && !onlyPath) {
+    if (
+      assistant &&
+      files.length > 0 &&
+      !onlyPath &&
+      this.journal.hasDiskSnapshot(assistant.id)
+    ) {
       assistant.edits = applyDiffStats(assistant.edits ?? [], files);
       this.emit();
       this.pushEditStats(assistant.id);
@@ -1982,6 +1990,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   ): Promise<void> {
     const files = await this.journal.diffs(assistant.id);
     if (!files.length || !this.messages.includes(assistant)) {
+      return;
+    }
+    if (!this.journal.hasDiskSnapshot(assistant.id)) {
       return;
     }
     assistant.edits = applyDiffStats(assistant.edits ?? [], files);

@@ -574,6 +574,7 @@ export interface StreamTail {
 
 export type WebviewToHost =
   | { type: 'ready' }
+  | { type: 'alive' }
   | { type: 'login' }
   | { type: 'skipLogin' }
   | { type: 'openLoginUrl' }

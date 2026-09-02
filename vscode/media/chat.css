@@ -800,6 +800,11 @@ textarea:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.md-stable,
+.md-live {
+  display: contents;
+}
+
 .md > :first-child {
   margin-top: 0;
 }

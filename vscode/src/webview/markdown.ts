@@ -111,6 +111,44 @@ function fenceClose(line: string, marker: string): boolean {
   return Boolean(match && match[1][0] === marker[0] && match[1].length >= marker.length);
 }
 
+/** Commit finished blocks; keep the open paragraph/fence as a cheap live tail. */
+export function splitStreamingMarkdown(src: string): { committed: string; rest: string } {
+  const lines = src.replace(/\r\n/g, '\n').split('\n');
+  let fence: string | undefined;
+  let fenceStart = -1;
+  let committedLines = 0;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (fence) {
+      if (fenceClose(line, fence)) {
+        fence = undefined;
+        fenceStart = -1;
+        committedLines = i + 1;
+      }
+      continue;
+    }
+    const open = fenceOpen(line);
+    if (open) {
+      fence = open.marker;
+      fenceStart = i;
+      continue;
+    }
+    if (!line.trim()) {
+      committedLines = i + 1;
+    }
+  }
+  if (fence && fenceStart >= 0) {
+    committedLines = Math.min(committedLines, fenceStart);
+  }
+  if (committedLines >= lines.length) {
+    committedLines = Math.max(0, lines.length - 1);
+  }
+  return {
+    committed: lines.slice(0, committedLines).join('\n'),
+    rest: lines.slice(committedLines).join('\n'),
+  };
+}
+
 function isHr(line: string): boolean {
   const trimmed = line.trim();
   return /^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed);

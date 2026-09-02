@@ -71,6 +71,7 @@ const tests = {
     'src/edits.test.ts',
     'src/i18n.test.ts',
     'src/snapshots.test.ts',
+    'src/sessionDiffs.test.ts',
     'src/diff.test.ts',
     'src/context.test.ts',
     'src/clipboard.test.ts',

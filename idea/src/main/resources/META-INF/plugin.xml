@@ -12,7 +12,10 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.38: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.41: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.41 — Each session keeps its own review diffs on disk. Restarting the IDE no longer drops files from Grok Diff or rebuilds them from git HEAD.</p>
+<p>0.2.40 — Plugin chat webview recovers from idle white screens: heartbeat plus reload if the renderer died. Restored sessions keep original edit line counts instead of shrinking them against git HEAD.</p>
+<p>0.2.39 — Long streaming replies no longer freeze the IDE: finished markdown stays put and only the live tail is redrawn.</p>
 <p>0.2.38 — Remote web uses the host workbench colors so IDEA Ice/default is not white. Settings cards and menus keep a translucent frosted background.</p>
 <p>0.2.37 — Ask cards close immediately on X and reuse the same card for the next question. Remote web copy writes to the browser device clipboard, not the host IDE.</p>
 <p>0.2.36 — Chat edit chips use the same file diffs as Grok Diff. Old sessions get a stats patch so a long chat tail no longer leaves earlier turns showing tool-hunk counts.</p>

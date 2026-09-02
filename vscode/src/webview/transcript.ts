@@ -28,7 +28,7 @@ import {
   iconStar,
   toolIcon,
 } from './icons';
-import { fileName, renderMarkdown } from './markdown';
+import { escapeHtml, fileName, renderMarkdown, splitStreamingMarkdown } from './markdown';
 
 type Turn = { user?: ChatMessage; assistant?: ChatMessage };
 
@@ -322,7 +322,13 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
     }
     el.dataset.len = len;
     el.dataset.md = mode;
-    el.innerHTML = renderMarkdown(text);
+    if (mode === 'd') {
+      el.replaceChildren();
+      delete el.dataset.committed;
+      el.innerHTML = renderMarkdown(text);
+      return;
+    }
+    paintStreamingMarkdown(el, text);
   };
   const cancel = (): void => {
     const hold = pendingMarkdown.get(el);
@@ -344,6 +350,7 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
   if (!el.dataset.len) {
     flush(src, 's');
   }
+  const delay = Math.min(280, STREAM_MD_MS + Math.floor(src.length / 50));
   pendingMarkdown.set(el, {
     src,
     timer: setTimeout(() => {
@@ -352,8 +359,38 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
       if (next) {
         flush(next.src, 's');
       }
-    }, STREAM_MD_MS),
+    }, delay),
   });
+}
+
+function paintStreamingMarkdown(el: HTMLElement, text: string): void {
+  const { committed, rest } = splitStreamingMarkdown(text);
+  let stable = el.querySelector(':scope > .md-stable') as HTMLElement | null;
+  let live = el.querySelector(':scope > .md-live') as HTMLElement | null;
+  if (!stable || !live) {
+    stable = document.createElement('div');
+    stable.className = 'md-stable';
+    live = document.createElement('div');
+    live.className = 'md-live';
+    el.replaceChildren(stable, live);
+  }
+  if (stable.dataset.len !== String(committed.length)) {
+    stable.dataset.len = String(committed.length);
+    stable.innerHTML = committed ? renderMarkdown(committed) : '';
+  }
+  const cheap = rest.length > 1200;
+  const liveKey = `${cheap ? 't' : 'm'}:${rest.length}`;
+  if (live.dataset.key === liveKey) {
+    return;
+  }
+  live.dataset.key = liveKey;
+  if (!rest) {
+    live.replaceChildren();
+    return;
+  }
+  live.innerHTML = cheap
+    ? `<p>${escapeHtml(rest).replace(/\n/g, '<br />')}</p>`
+    : renderMarkdown(rest);
 }
 
 function visibleAsk(): ChatState['ask'] {
