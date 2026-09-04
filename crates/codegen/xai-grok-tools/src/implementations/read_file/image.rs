@@ -226,6 +226,63 @@ fn compress_image_for_conversation_with_caps(
     Ok((buf, mime.to_string()))
 }
 
+/// MIME type for a well-known image extension. Used when magic-byte sniffing
+/// fails because ACP delivered base64 or UTF-8-mangled bytes.
+pub fn image_mime_from_extension(ext: &str) -> Option<&'static str> {
+    Some(match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "avif" => "image/avif",
+        "tif" | "tiff" => "image/tiff",
+        _ => return None,
+    })
+}
+
+fn looks_like_media(bytes: &[u8]) -> bool {
+    infer::get(bytes).is_some_and(|kind| {
+        let mime = kind.mime_type();
+        mime.starts_with("image/") || mime == "application/pdf"
+    })
+}
+
+fn decode_base64_payload(raw: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(raw).ok()?.trim();
+    let payload = text
+        .rsplit_once("base64,")
+        .map(|(_, rest)| rest.trim())
+        .unwrap_or(text);
+    if payload.len() < 12 {
+        return None;
+    }
+    let compact: String = payload.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    if !compact
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
+    {
+        return None;
+    }
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(compact).ok()
+}
+
+/// ACP `fs/read_text_file` cannot carry raw PNG bytes. Clients send base64;
+/// if `_meta.encoding` is dropped, the tool still sees ASCII. Undo that.
+pub fn coerce_media_bytes(bytes: Vec<u8>) -> Vec<u8> {
+    if looks_like_media(&bytes) {
+        return bytes;
+    }
+    if let Some(decoded) = decode_base64_payload(&bytes)
+        && looks_like_media(&decoded)
+    {
+        return decoded;
+    }
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +311,25 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn coerce_restores_png_from_acp_base64() {
+        use base64::Engine as _;
+        let png = make_small_png(2, 2);
+        assert!(coerce_media_bytes(png.clone()) == png);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        assert_eq!(coerce_media_bytes(b64.into_bytes()), png);
+        let data_url = format!("data:image/png;base64,{b64}");
+        assert_eq!(coerce_media_bytes(data_url.into_bytes()), png);
+    }
+
+    #[test]
+    fn image_extension_map() {
+        assert_eq!(image_mime_from_extension("png"), Some("image/png"));
+        assert_eq!(image_mime_from_extension("JPEG"), None);
+        assert_eq!(image_mime_from_extension("jpg"), Some("image/jpeg"));
+        assert_eq!(image_mime_from_extension("rs"), None);
+    }
+
     fn compress_small_image_returns_unchanged() {
         let png = make_small_png(16, 16);
         let (result, mime) =

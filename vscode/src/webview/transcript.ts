@@ -28,12 +28,19 @@ import {
   iconStar,
   toolIcon,
 } from './icons';
-import { escapeHtml, fileName, renderMarkdown, splitStreamingMarkdown } from './markdown';
+import {
+  fileName,
+  renderMarkdown,
+  splitStreamingMarkdown,
+  STREAM_LIVE_KEEP,
+  streamingMarkdownPatch,
+} from './markdown';
 
 type Turn = { user?: ChatMessage; assistant?: ChatMessage };
 
 const STREAM_MD_MS = 80;
 const pendingMarkdown = new WeakMap<HTMLElement, { src: string; timer: ReturnType<typeof setTimeout> }>();
+const streamCommitted = new WeakMap<HTMLElement, string>();
 
 export function renderBody(): HTMLElement {
   const el = document.createElement('main');
@@ -324,7 +331,7 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
     el.dataset.md = mode;
     if (mode === 'd') {
       el.replaceChildren();
-      delete el.dataset.committed;
+      streamCommitted.delete(el);
       el.innerHTML = renderMarkdown(text);
       return;
     }
@@ -339,6 +346,10 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
   };
   if (!streaming) {
     cancel();
+    if (src.length > 48_000) {
+      setTimeout(() => flush(src, 'd'), 0);
+      return;
+    }
     flush(src, 'd');
     return;
   }
@@ -350,7 +361,7 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
   if (!el.dataset.len) {
     flush(src, 's');
   }
-  const delay = Math.min(280, STREAM_MD_MS + Math.floor(src.length / 50));
+  const delay = Math.min(320, STREAM_MD_MS + Math.floor(src.length / 40));
   pendingMarkdown.set(el, {
     src,
     timer: setTimeout(() => {
@@ -364,7 +375,8 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
 }
 
 function paintStreamingMarkdown(el: HTMLElement, text: string): void {
-  const { committed, rest } = splitStreamingMarkdown(text);
+  const prev = streamCommitted.get(el) ?? '';
+  const { committed, rest } = splitStreamingMarkdown(text, prev);
   let stable = el.querySelector(':scope > .md-stable') as HTMLElement | null;
   let live = el.querySelector(':scope > .md-live') as HTMLElement | null;
   if (!stable || !live) {
@@ -373,24 +385,68 @@ function paintStreamingMarkdown(el: HTMLElement, text: string): void {
     live = document.createElement('div');
     live.className = 'md-live';
     el.replaceChildren(stable, live);
+    streamCommitted.delete(el);
   }
-  if (stable.dataset.len !== String(committed.length)) {
-    stable.dataset.len = String(committed.length);
-    stable.innerHTML = committed ? renderMarkdown(committed) : '';
+  const patch = streamingMarkdownPatch(streamCommitted.get(el) ?? '', committed);
+  if (patch.replace !== undefined) {
+    stable.replaceChildren();
+    if (patch.replace) {
+      appendCommitted(stable, patch.replace);
+    }
+    streamCommitted.set(el, committed);
+  } else if (patch.append) {
+    appendCommitted(stable, patch.append);
+    streamCommitted.set(el, committed);
   }
-  const cheap = rest.length > 1200;
-  const liveKey = `${cheap ? 't' : 'm'}:${rest.length}`;
+  paintLiveMarkdown(live, rest, rest.length > 800 || text.length > 8_000);
+}
+
+function appendCommitted(stable: HTMLElement, added: string): void {
+  if (added.length > 16_000) {
+    const p = document.createElement('p');
+    p.className = 'md-chunk-plain';
+    p.textContent = added;
+    stable.append(p);
+    return;
+  }
+  stable.insertAdjacentHTML('beforeend', renderMarkdown(added));
+}
+
+function paintLiveMarkdown(live: HTMLElement, rest: string, cheap: boolean): void {
+  if (!rest) {
+    live.classList.remove('md-live-plain');
+    live.replaceChildren();
+    delete live.dataset.key;
+    return;
+  }
+  if (cheap) {
+    const shown = rest.length > STREAM_LIVE_KEEP ? rest.slice(-STREAM_LIVE_KEEP) : rest;
+    const key = `t:${shown.length}:${rest.length}`;
+    if (live.dataset.key === key) {
+      return;
+    }
+    live.dataset.key = key;
+    live.classList.add('md-live-plain');
+    const node = live.firstChild;
+    if (node && node.nodeType === Node.TEXT_NODE) {
+      const prev = (node as Text).data;
+      if (shown.startsWith(prev)) {
+        (node as Text).appendData(shown.slice(prev.length));
+        return;
+      }
+      (node as Text).data = shown;
+      return;
+    }
+    live.replaceChildren(document.createTextNode(shown));
+    return;
+  }
+  const liveKey = `m:${rest.length}`;
   if (live.dataset.key === liveKey) {
     return;
   }
   live.dataset.key = liveKey;
-  if (!rest) {
-    live.replaceChildren();
-    return;
-  }
-  live.innerHTML = cheap
-    ? `<p>${escapeHtml(rest).replace(/\n/g, '<br />')}</p>`
-    : renderMarkdown(rest);
+  live.classList.remove('md-live-plain');
+  live.innerHTML = renderMarkdown(rest);
 }
 
 function visibleAsk(): ChatState['ask'] {
@@ -499,12 +555,15 @@ const scrollState: TranscriptScroll = {
   pinLock: false,
 };
 
-export function scrollTranscript(): void {
+export function scrollTranscript(force = false): void {
   const el = document.getElementById('transcript');
   if (!el) {
     return;
   }
   bindTranscriptScroll(el);
+  if (force) {
+    scrollState.lastUserScroll = 0;
+  }
   scrollState.stickToBottom = ui.stickToBottom;
   scrollState.transcriptScroll = ui.transcriptScroll;
   if (
@@ -513,16 +572,32 @@ export function scrollTranscript(): void {
       lightbox: Boolean(ui.lightboxSrc),
       now: Date.now(),
       lastUserScroll: scrollState.lastUserScroll,
+      force,
     })
   ) {
     return;
   }
+  pinTranscript(el);
+  if (force) {
+    requestAnimationFrame(() => {
+      if (!ui.stickToBottom) {
+        return;
+      }
+      const node = document.getElementById('transcript');
+      if (node) {
+        pinTranscript(node);
+      }
+    });
+  }
+  patchJumpBottom();
+}
+
+function pinTranscript(el: HTMLElement): void {
   scrollState.pinLock = true;
   el.scrollTop = el.scrollHeight;
   ui.transcriptScroll = el.scrollTop;
   scrollState.transcriptScroll = el.scrollTop;
   scrollState.pinLock = false;
-  patchJumpBottom();
 }
 
 function bindTranscriptScroll(el?: HTMLElement | null): void {

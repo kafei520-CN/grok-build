@@ -379,7 +379,7 @@ pub(crate) async fn run_read_file(
         }
     }
     let file_bytes = match fs.read_file(&path).await {
-        Ok(bytes) => bytes,
+        Ok(bytes) => crate::implementations::read_file::image::coerce_media_bytes(bytes),
         Err(e) => {
             tracing::debug!(?e, "Failed to read file");
             if is_legacy {
@@ -463,6 +463,16 @@ pub(crate) async fn run_read_file(
     }
     if extension == "pptx" {
         return handle_pptx(file_bytes, &path).await;
+    }
+    // png/jpg/… are in BINARY_EXTENSIONS. Do not reject them as unreadable;
+    // the tool advertises image reads. Magic sniffing already ran above.
+    if let Some(mime) = crate::implementations::read_file::image::image_mime_from_extension(&extension)
+    {
+        return Ok(crate::implementations::read_file::image::image_read_output(
+            file_bytes,
+            mime.to_string(),
+        )
+        .await);
     }
     if crate::util::binary::is_binary(&extension, &file_bytes) {
         tracing::info!(
@@ -2122,6 +2132,25 @@ pub fn verify(req: &HttpRequest) -> Result<Claims, Error> {
             .await
             .unwrap()
     }
+    #[tokio::test]
+    async fn read_file_png_from_acp_base64_is_an_image() {
+        use base64::Engine as _;
+        use image::{ImageBuffer, Rgba};
+        let img = ImageBuffer::from_pixel(2, 2, Rgba([0u8, 0, 0, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let png = png.into_inner();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+        let result = run_read_file_on("shot.png", b64.as_bytes()).await;
+        match result {
+            ReadFileOutput::ImageContent(image) => {
+                assert_eq!(image.mime_type, "image/png");
+                assert!(!image.data.is_empty());
+            }
+            other => panic!("expected ImageContent for base64 PNG, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn read_file_binary_rejected() {
         let result = run_read_file_on("archive.zip", b"PK\x03\x04fake zip content").await;

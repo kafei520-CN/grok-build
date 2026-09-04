@@ -1,4 +1,4 @@
-import { applyThemeTo, normalizeTheme } from '../theme';
+import { applyThemeTo, normalizeTheme, themeMessage } from '../theme';
 import type { ThemeColors } from '../types';
 import {
   DEFAULT_WALLPAPER_OPACITY,
@@ -14,7 +14,7 @@ import {
   wallpaperScaleFromPainted,
 } from '../wallpaper';
 import { post, tr, ui } from './app';
-import { fillWallpaperLayer, overlayKind, placeWallpaperMedia, syncSurface, syncWallpaper, wallpaperMediaEl } from './wallpaper';
+import { fillWallpaperLayer, overlayKind, placeWallpaperMedia, syncSurface, syncThemeFontFace, syncWallpaper, wallpaperMediaEl } from './wallpaper';
 
 let liveX = 50;
 let liveY = 50;
@@ -232,6 +232,7 @@ function readNatural(layer: HTMLElement): { w: number; h: number } | undefined {
 
 function applyPreview(theme: ThemeColors): void {
   applyThemeTo(document.documentElement.style, theme);
+  syncThemeFontFace(document, theme.fontUrl ?? ui.state.theme?.fontUrl);
   const app = document.getElementById('app') ?? document.body;
   syncSurface(
     app,
@@ -246,23 +247,11 @@ function applyPreview(theme: ThemeColors): void {
 }
 
 function persistPreview(theme: ThemeColors): void {
-  const base = normalizeTheme(theme);
   post({
-    type: 'setTheme',
-    primary: base.primary,
-    secondary: base.secondary,
-    background: base.background ?? '',
-    wallpaper: base.wallpaper ?? '',
-    wallpaperOpacity: base.wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY,
+    ...themeMessage(theme),
     wallpaperScale: clampWallpaperScale(theme.wallpaperScale),
     wallpaperX: clampWallpaperAxis(theme.wallpaperX),
     wallpaperY: clampWallpaperAxis(theme.wallpaperY),
-    surface: base.surface ?? '',
-    glassOpacity: base.glassOpacity,
-    glassBlur: base.glassBlur,
-    chromeBlur: base.chromeBlur,
-    chromeGlass: base.chromeGlass === true,
-    chromeGlassOpacity: base.chromeGlassOpacity,
   });
 }
 

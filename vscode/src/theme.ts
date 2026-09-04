@@ -1,4 +1,4 @@
-import type { ThemeColors } from './types';
+import type { ThemeColors, WebviewToHost } from './types';
 import {
   clampChromeBlur,
   clampChromeGlassOpacity,
@@ -12,9 +12,20 @@ import {
   DEFAULT_CHROME_GLASS_OPACITY,
   DEFAULT_GLASS_BLUR,
   DEFAULT_GLASS_OPACITY,
+  DEFAULT_WALLPAPER_OPACITY,
   surfaceKind,
+  wallpaperExt,
   wallpaperKind,
 } from './wallpaper';
+
+export const DEFAULT_FONT_SIZE = 13;
+export const MIN_FONT_SIZE = 10;
+export const MAX_FONT_SIZE = 22;
+export const DEFAULT_LETTER_SPACING = 0;
+export const MIN_LETTER_SPACING = -4;
+export const MAX_LETTER_SPACING = 8;
+export const THEME_FONT_FAMILY = 'Grok Custom';
+export const FONT_EXTS = ['ttf', 'otf', 'woff', 'woff2'] as const;
 
 export const DEFAULT_THEME: ThemeColors = {
   primary: '#b9d4ff',
@@ -105,6 +116,64 @@ export function normalizeTheme(raw: unknown): ThemeColors {
     ...(value.chromeGlass === true || value.chromeGlassOpacity != null
       ? { chromeGlassOpacity: clampChromeGlassOpacity(value.chromeGlassOpacity) }
       : {}),
+    ...(typeof value.fontPath === 'string' && value.fontPath.trim() && isFontFile(value.fontPath)
+      ? { fontPath: value.fontPath.trim() }
+      : {}),
+    ...(value.fontSize != null ? { fontSize: clampFontSize(value.fontSize) } : {}),
+    ...(value.letterSpacing != null ? { letterSpacing: clampLetterSpacing(value.letterSpacing) } : {}),
+    ...(parseHex(value.fontColor) ? { fontColor: parseHex(value.fontColor) } : {}),
+    ...(value.lockContrast === false ? { lockContrast: false } : {}),
+  };
+}
+
+export function isFontFile(raw: string | undefined): boolean {
+  return (FONT_EXTS as readonly string[]).includes(wallpaperExt(raw));
+}
+
+export function clampFontSize(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(n)) {
+    return DEFAULT_FONT_SIZE;
+  }
+  return Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(n)));
+}
+
+export function clampLetterSpacing(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(n)) {
+    return DEFAULT_LETTER_SPACING;
+  }
+  return Math.max(MIN_LETTER_SPACING, Math.min(MAX_LETTER_SPACING, Math.round(n)));
+}
+
+/** Default on: custom fontColor does not change --fg. */
+export function lockContrastEnabled(theme: Pick<ThemeColors, 'lockContrast'>): boolean {
+  return theme.lockContrast !== false;
+}
+
+export function themeMessage(theme: ThemeColors): Extract<WebviewToHost, { type: 'setTheme' }> {
+  const base = normalizeTheme(theme);
+  return {
+    type: 'setTheme',
+    primary: base.primary,
+    secondary: base.secondary,
+    background: base.background ?? '',
+    wallpaper: base.wallpaper ?? '',
+    wallpaperOpacity: base.wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY,
+    wallpaperScale: base.wallpaperScale,
+    wallpaperX: base.wallpaperX,
+    wallpaperY: base.wallpaperY,
+    surface: base.surface ?? '',
+    glassOpacity: base.glassOpacity ?? DEFAULT_GLASS_OPACITY,
+    glassBlur: base.glassBlur ?? DEFAULT_GLASS_BLUR,
+    chromeBlur: base.chromeBlur ?? DEFAULT_CHROME_BLUR,
+    chromeGlass: base.chromeGlass === true,
+    chromeGlassOpacity: base.chromeGlassOpacity ?? DEFAULT_CHROME_GLASS_OPACITY,
+    fontPath: base.fontPath ?? '',
+    fontSize: base.fontSize ?? DEFAULT_FONT_SIZE,
+    letterSpacing: base.letterSpacing ?? DEFAULT_LETTER_SPACING,
+    fontColor: base.fontColor ?? '',
+    lockContrast: lockContrastEnabled(base),
   };
 }
 
@@ -126,10 +195,10 @@ export function applyThemeTo(
   const theme = normalizeTheme(raw);
   const background = theme.background ?? parseHex(chrome?.background);
   const hostFg = parseHex(chrome?.foreground);
+  const fg = resolveFg(theme, background, hostFg);
   if (background) {
-    const fg = hostFg ?? contrastFg(background);
     style.setProperty('--bg', background);
-    style.setProperty('--fg', fg);
+    style.setProperty('--fg', fg ?? contrastFg(background));
     style.setProperty('--muted', 'color-mix(in srgb, var(--fg) 55%, transparent)');
     style.setProperty('--elev', 'color-mix(in srgb, var(--fg) 6%, var(--bg))');
     style.setProperty('--line', 'color-mix(in srgb, var(--fg) 12%, transparent)');
@@ -138,6 +207,16 @@ export function applyThemeTo(
     for (const name of SURFACE_VARS) {
       style.removeProperty?.(name);
     }
+    if (fg) {
+      style.setProperty('--fg', fg);
+    }
+  }
+  style.setProperty('--font-size', `${theme.fontSize ?? DEFAULT_FONT_SIZE}px`);
+  style.setProperty('--letter-spacing', `${theme.letterSpacing ?? DEFAULT_LETTER_SPACING}px`);
+  if (theme.fontPath || theme.fontUrl) {
+    style.setProperty('--font', `'${THEME_FONT_FAMILY}', var(--vscode-font-family, sans-serif)`);
+  } else {
+    style.removeProperty?.('--font');
   }
   style.setProperty('--ice', `color-mix(in srgb, ${theme.primary} 72%, var(--fg))`);
   style.setProperty('--ice-dim', 'color-mix(in srgb, var(--ice) 28%, transparent)');
@@ -153,6 +232,20 @@ export function applyThemeTo(
   }
   const chromeFill = theme.chromeGlassOpacity ?? DEFAULT_CHROME_GLASS_OPACITY;
   style.setProperty('--chrome-fill', `${chromeFill}%`);
+}
+
+function resolveFg(
+  theme: ThemeColors,
+  background: string | undefined,
+  hostFg: string | undefined,
+): string | undefined {
+  if (!lockContrastEnabled(theme) && theme.fontColor) {
+    return theme.fontColor;
+  }
+  if (background) {
+    return hostFg ?? contrastFg(background);
+  }
+  return hostFg;
 }
 
 function toHex(r: number, g: number, b: number): string | undefined {

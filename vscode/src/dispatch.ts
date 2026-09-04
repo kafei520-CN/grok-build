@@ -249,10 +249,18 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
         chromeBlur: message.chromeBlur,
         chromeGlass: message.chromeGlass,
         chromeGlassOpacity: message.chromeGlassOpacity,
+        fontPath: message.fontPath,
+        fontSize: message.fontSize,
+        letterSpacing: message.letterSpacing,
+        fontColor: message.fontColor,
+        lockContrast: message.lockContrast,
       });
       return;
     case 'pickThemeWallpaper':
       await controller.pickThemeWallpaper();
+      return;
+    case 'pickThemeFont':
+      await controller.pickThemeFont();
       return;
     case 'openThemePreview':
       controller.openThemePreview();

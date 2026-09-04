@@ -541,6 +541,11 @@ export class GrokAgent {
     return unwrapExt(raw);
   }
 
+  async billing(): Promise<Record<string, unknown>> {
+    const raw = await this.extMethod(EXT.billing, {});
+    return unwrapExt(raw);
+  }
+
   async rewindPoints(): Promise<Array<{ index: number; preview?: string }>> {
     if (!this.sessionId) {
       return [];
@@ -638,13 +643,24 @@ export class GrokAgent {
     return JSON.stringify(unwrapExt(raw), null, 2);
   }
 
-  async interject(text: string): Promise<void> {
+  async interject(
+    text: string,
+    images?: Array<{ mimeType: string; data: string }>,
+  ): Promise<void> {
     if (!this.sessionId) {
       return;
+    }
+    const content: Array<Record<string, string>> = [];
+    if (text.trim()) {
+      content.push({ type: 'text', text });
+    }
+    for (const image of images ?? []) {
+      content.push({ type: 'image', mimeType: image.mimeType, data: image.data });
     }
     await this.extMethod(EXT.interject, {
       sessionId: this.sessionId,
       text,
+      ...(content.length ? { content } : {}),
     });
   }
 

@@ -277,3 +277,19 @@ export function withWallpaperUrl(
   delete next.wallpaperUrl;
   return next;
 }
+
+export function withFontUrl(
+  theme: ThemeColors,
+  io: { toResourceUrl?: (filePath: string) => string | undefined },
+): ThemeColors {
+  const url = theme.fontPath ? io.toResourceUrl?.(theme.fontPath) : undefined;
+  if (url) {
+    return { ...theme, fontUrl: url };
+  }
+  if (!theme.fontUrl) {
+    return theme;
+  }
+  const next = { ...theme };
+  delete next.fontUrl;
+  return next;
+}

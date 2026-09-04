@@ -17,6 +17,21 @@ export interface AccountInfo {
   methodId?: string;
 }
 
+export interface BillingProduct {
+  id: string;
+  label: string;
+  usagePercent: number;
+}
+
+/** grok.com 订阅余量，仅官方登录。 */
+export interface BillingQuota {
+  usagePercent: number;
+  periodType?: 'weekly' | 'monthly';
+  periodEnd?: string;
+  subscriptionTier?: string;
+  products: BillingProduct[];
+}
+
 export interface ModelOption {
   id: string;
   name: string;
@@ -90,7 +105,42 @@ export interface ThemeColors {
   chromeGlass?: boolean;
   /** 0–100 mix of --bg into frosted cards/buttons. */
   chromeGlassOpacity?: number;
+  /** Copied into ~/.grok. Host fills fontUrl for the webview. */
+  fontPath?: string;
+  /** Host-resolved webview / file URL. Not persisted. */
+  fontUrl?: string;
+  /** Chat UI font size in px, 10–22. Default 13. */
+  fontSize?: number;
+  /** letter-spacing in px, -4–8. Default 0. */
+  letterSpacing?: number;
+  /** Custom text color. Ignored while lockContrast is on. */
+  fontColor?: string;
+  /**
+   * When not false, --fg stays auto contrast (or the editor chrome).
+   * Custom fontColor does not apply.
+   */
+  lockContrast?: boolean;
 }
+
+/** Fields the webview may patch on setTheme besides primary/secondary/background. */
+export type ThemePatch = {
+  wallpaper?: 'icon' | 'custom' | '';
+  wallpaperOpacity?: number;
+  wallpaperScale?: number;
+  wallpaperX?: number;
+  wallpaperY?: number;
+  surface?: 'glass' | 'solid' | '';
+  glassOpacity?: number;
+  glassBlur?: number;
+  chromeBlur?: number;
+  chromeGlass?: boolean;
+  chromeGlassOpacity?: number;
+  fontPath?: string;
+  fontSize?: number;
+  letterSpacing?: number;
+  fontColor?: string;
+  lockContrast?: boolean;
+};
 
 export type ApiBackend = 'chat_completions' | 'responses' | 'messages';
 
@@ -414,6 +464,8 @@ export interface ChatState {
   cliPath?: string;
   cliInstallHint?: string;
   account?: AccountInfo;
+  billing?: BillingQuota;
+  billingLoading?: boolean;
   login?: LoginView;
   models?: { currentId: string; available: ModelOption[] };
   modeId?: string;
@@ -567,6 +619,12 @@ export interface HostToWebview {
 export interface StreamTail {
   type: 'tail';
   message: ChatMessage;
+  /** Suffix of message.text when the host only sends the new bytes. */
+  appendText?: string;
+  /** Suffix of thinking when the host only sends the new bytes. */
+  appendThinking?: string;
+  /** Suffix of plan when the host only sends the new bytes. */
+  appendPlan?: string;
   status: ChatStatus;
   context?: ContextUsage;
   queue?: string[];
@@ -661,24 +719,14 @@ export type WebviewToHost =
       forwardPort?: number;
       publicUrl?: string;
     }
-  | {
+  | ({
       type: 'setTheme';
       primary: string;
       secondary: string;
       background?: string;
-      wallpaper?: 'icon' | 'custom' | '';
-      wallpaperOpacity?: number;
-      wallpaperScale?: number;
-      wallpaperX?: number;
-      wallpaperY?: number;
-      surface?: 'glass' | 'solid' | '';
-      glassOpacity?: number;
-      glassBlur?: number;
-      chromeBlur?: number;
-      chromeGlass?: boolean;
-      chromeGlassOpacity?: number;
-    }
+    } & ThemePatch)
   | { type: 'pickThemeWallpaper' }
+  | { type: 'pickThemeFont' }
   | { type: 'openThemePreview' }
   | { type: 'closeThemePreview' }
   | { type: 'openMcps' }

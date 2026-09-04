@@ -195,30 +195,35 @@ export function renderDrawer(): HTMLElement {
   el.append(head);
   if (ui.state.drawer === 'sessions') {
     mountSessionsDrawer(el);
-  } else if (ui.state.drawer === 'dashboard') {
-    mountDashboard(el);
-  } else if (ui.state.drawer === 'tasks') {
-    mountTasks(el);
-  } else if (ui.state.drawer === 'plan') {
-    const pre = document.createElement('pre');
-    pre.className = 'code';
-    pre.textContent = ui.state.drawerBody ?? '';
-    el.append(pre);
-  } else if (ui.state.drawer === 'history') {
-    for (const prompt of ui.state.history ?? []) {
-      const item = button(prompt.slice(0, 80), () => {
-        ui.draft = prompt;
-        ui.wantFocus = true;
-        post({ type: 'closeDrawer' });
-      });
-      item.className = 'idea';
-      el.append(item);
-    }
   } else {
-    const pre = document.createElement('pre');
-    pre.className = 'code';
-    pre.textContent = ui.state.drawerBody ?? '';
-    el.append(pre);
+    const scroll = document.createElement('div');
+    scroll.className = 'drawer-scroll';
+    if (ui.state.drawer === 'dashboard') {
+      mountDashboard(scroll);
+    } else if (ui.state.drawer === 'tasks') {
+      mountTasks(scroll);
+    } else if (ui.state.drawer === 'plan') {
+      const pre = document.createElement('pre');
+      pre.className = 'code';
+      pre.textContent = ui.state.drawerBody ?? '';
+      scroll.append(pre);
+    } else if (ui.state.drawer === 'history') {
+      for (const prompt of ui.state.history ?? []) {
+        const item = button(prompt.slice(0, 80), () => {
+          ui.draft = prompt;
+          ui.wantFocus = true;
+          post({ type: 'closeDrawer' });
+        });
+        item.className = 'idea';
+        scroll.append(item);
+      }
+    } else {
+      const pre = document.createElement('pre');
+      pre.className = 'code';
+      pre.textContent = ui.state.drawerBody ?? '';
+      scroll.append(pre);
+    }
+    el.append(scroll);
   }
   layer.append(scrim, el);
   return layer;

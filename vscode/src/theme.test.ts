@@ -5,6 +5,8 @@ import {
   THEME_PRESETS,
   applyThemeTo,
   contrastFg,
+  isFontFile,
+  lockContrastEnabled,
   matchingPresetId,
   normalizeTheme,
   parseHex,
@@ -56,6 +58,18 @@ describe('theme', () => {
     assert.equal(normalizeTheme({ chromeGlass: true }).chromeGlass, true);
     assert.equal(normalizeTheme({ chromeGlass: true }).chromeGlassOpacity, 72);
     assert.equal(normalizeTheme({ chromeGlass: true, chromeGlassOpacity: 88 }).chromeGlassOpacity, 88);
+    assert.equal(normalizeTheme({ fontPath: 'E:/a.ttf' }).fontPath, 'E:/a.ttf');
+    assert.equal(normalizeTheme({ fontPath: 'notes.txt' }).fontPath, undefined);
+    assert.equal(normalizeTheme({ fontSize: 18 }).fontSize, 18);
+    assert.equal(normalizeTheme({ fontSize: 3 }).fontSize, 10);
+    assert.equal(normalizeTheme({ letterSpacing: 2 }).letterSpacing, 2);
+    assert.equal(normalizeTheme({ fontColor: '#ABC' }).fontColor, '#aabbcc');
+    assert.equal(normalizeTheme({ lockContrast: false }).lockContrast, false);
+    assert.equal(normalizeTheme({ lockContrast: true }).lockContrast, undefined);
+    assert.equal(lockContrastEnabled({}), true);
+    assert.equal(lockContrastEnabled({ lockContrast: false }), false);
+    assert.equal(isFontFile('a.woff2'), true);
+    assert.equal(isFontFile('a.png'), false);
   });
 
   it('matches presets including background', () => {
@@ -141,5 +155,40 @@ describe('theme', () => {
     );
     assert.equal(props.get('--bg'), '#2b2d30');
     assert.equal(props.get('--fg'), '#ced0d6');
+  });
+
+  it('keeps auto contrast when lock is on and uses fontColor when off', () => {
+    const props = new Map<string, string>();
+    const style = {
+      setProperty: (name: string, value: string) => props.set(name, value),
+      removeProperty: (name: string) => {
+        props.delete(name);
+      },
+    };
+    applyThemeTo(style, {
+      primary: '#b9d4ff',
+      secondary: '#3fb950',
+      background: '#0b1620',
+      fontColor: '#ff0000',
+    });
+    assert.equal(props.get('--fg'), '#e8e8e8');
+    applyThemeTo(style, {
+      primary: '#b9d4ff',
+      secondary: '#3fb950',
+      background: '#0b1620',
+      fontColor: '#ff0000',
+      lockContrast: false,
+    });
+    assert.equal(props.get('--fg'), '#ff0000');
+    applyThemeTo(style, {
+      primary: '#b9d4ff',
+      secondary: '#3fb950',
+      fontPath: 'E:/a.ttf',
+      fontSize: 16,
+      letterSpacing: 2,
+    });
+    assert.equal(props.get('--font-size'), '16px');
+    assert.equal(props.get('--letter-spacing'), '2px');
+    assert.match(props.get('--font') ?? '', /Grok Custom/);
   });
 });

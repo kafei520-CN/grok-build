@@ -1,24 +1,26 @@
 import type { StringKey } from '../i18n';
 import {
+  DEFAULT_FONT_SIZE,
+  DEFAULT_LETTER_SPACING,
   DEFAULT_THEME,
   THEME_PRESETS,
   applyThemeTo,
+  lockContrastEnabled,
   matchingPresetId,
   normalizeTheme,
   parseHex,
   rgbToHex,
+  themeMessage,
 } from '../theme';
 import type { ThemeColors } from '../types';
 import {
   DEFAULT_CHROME_BLUR,
-  DEFAULT_CHROME_GLASS_OPACITY,
   DEFAULT_GLASS_BLUR,
-  DEFAULT_GLASS_OPACITY,
   DEFAULT_WALLPAPER_OPACITY,
 } from '../wallpaper';
 import { isRemoteWeb, post, tr, ui } from './app';
 import { iconChevron } from './icons';
-import { overlayKind, syncSurface, syncWallpaper } from './wallpaper';
+import { overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './wallpaper';
 
 const PRESET_KEYS: Record<string, StringKey> = {
   ice: 'themePresetIce',
@@ -55,7 +57,9 @@ let live = DEFAULT_THEME;
 let primaryInputs: { set: (hex: string) => void } | undefined;
 let secondaryInputs: { set: (hex: string) => void } | undefined;
 let backgroundInputs: { set: (hex: string) => void } | undefined;
+let fontColorInputs: { set: (hex: string) => void } | undefined;
 let autoBtn: HTMLButtonElement | undefined;
+let previewRaf = 0;
 
 export function mountThemeBody(): HTMLElement {
   const body = document.createElement('div');
@@ -69,6 +73,7 @@ export function mountThemeBody(): HTMLElement {
     previewCard(),
     block(tr('themePresets'), presetGrid(live)),
     block(tr('themeCustom'), pickerCard(live)),
+    block(tr('themeFont'), fontCard(live)),
     block(tr('themeSurface'), surfaceCard(live)),
     block(tr('themeWallpaper'), wallpaperCard(live)),
   );
@@ -378,6 +383,127 @@ function wallpaperCard(initial: ThemeColors): HTMLElement {
   return card;
 }
 
+function fontCard(initial: ThemeColors): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'settings-card';
+  const hint = document.createElement('div');
+  hint.className = 'settings-hint';
+  hint.textContent = tr('themeFontHint');
+  const status = document.createElement('div');
+  status.className = 'settings-hint';
+  status.dataset.font = 'status';
+  status.textContent = fontStatusText(initial);
+  const actions = document.createElement('div');
+  actions.className = 'settings-actions';
+  const pick = document.createElement('button');
+  pick.type = 'button';
+  pick.className = 'btn';
+  pick.textContent = tr('themeFontPick');
+  pick.addEventListener('click', () => post({ type: 'pickThemeFont' }));
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'btn';
+  clear.textContent = tr('themeFontClear');
+  clear.addEventListener('click', () => {
+    const next = { ...live };
+    delete next.fontPath;
+    delete next.fontUrl;
+    commit(next, true);
+  });
+  actions.append(pick, clear);
+  const lock = document.createElement('div');
+  lock.className = 'settings-row';
+  lock.dataset.key = 'lockContrast';
+  const lockCopy = document.createElement('div');
+  lockCopy.className = 'settings-copy';
+  const lockName = document.createElement('div');
+  lockName.className = 'settings-label';
+  lockName.textContent = tr('themeLockContrast');
+  const lockHelp = document.createElement('div');
+  lockHelp.className = 'settings-hint';
+  lockHelp.textContent = tr('themeLockContrastHint');
+  lockCopy.append(lockName, lockHelp);
+  const lockBtn = document.createElement('button');
+  lockBtn.type = 'button';
+  lockBtn.className = lockContrastEnabled(initial) ? 'switch on' : 'switch';
+  lockBtn.setAttribute('role', 'switch');
+  lockBtn.setAttribute('aria-checked', lockContrastEnabled(initial) ? 'true' : 'false');
+  const knob = document.createElement('span');
+  knob.className = 'knob';
+  lockBtn.append(knob);
+  lockBtn.addEventListener('click', () => {
+    const next = { ...live };
+    if (lockContrastEnabled(next)) {
+      next.lockContrast = false;
+    } else {
+      delete next.lockContrast;
+    }
+    commit(next, true);
+  });
+  lock.append(lockCopy, lockBtn);
+  const color = colorRow(
+    tr('themeFontColor'),
+    initial.fontColor ?? computedFgHex(),
+    (hex, persist) => {
+      commit({ ...live, fontColor: hex }, persist);
+    },
+  );
+  color.row.dataset.key = 'fontColor';
+  fontColorInputs = color;
+  card.append(
+    hint,
+    status,
+    actions,
+    sliderRow(
+      'font-size',
+      tr('themeFontSize'),
+      10,
+      22,
+      initial.fontSize ?? DEFAULT_FONT_SIZE,
+      false,
+      (n, persist) => {
+        live = { ...live, fontSize: n };
+        if (persist) {
+          commit(live, true);
+        } else {
+          previewChrome();
+        }
+      },
+      'px',
+    ),
+    sliderRow(
+      'letter-spacing',
+      tr('themeFontTracking'),
+      -4,
+      8,
+      initial.letterSpacing ?? DEFAULT_LETTER_SPACING,
+      false,
+      (n, persist) => {
+        live = { ...live, letterSpacing: n };
+        if (persist) {
+          commit(live, true);
+        } else {
+          previewChrome();
+        }
+      },
+      'px',
+    ),
+    lock,
+    color.row,
+  );
+  syncFontControls();
+  return card;
+}
+
+function fontStatusText(theme: ThemeColors): string {
+  const file = theme.fontPath;
+  if (!file) {
+    return tr('themeFontNone');
+  }
+  const base = file.replace(/\\/g, '/').split('/').pop() ?? file;
+  return tr('themeFontFile', { name: base });
+}
+
 function sliderRow(
   key: string,
   label: string,
@@ -481,11 +607,7 @@ function colorRow(
 }
 
 function applyLive(): void {
-  applyThemeTo(
-    document.documentElement.style,
-    live,
-    isRemoteWeb() ? ui.state.hostChrome : undefined,
-  );
+  applyThemeVars();
   const app = document.getElementById('app') ?? document.body;
   syncSurface(
     app,
@@ -503,8 +625,32 @@ function applyLive(): void {
   });
 }
 
+/** Color/font drag: CSS vars only. Wallpaper/DOM sync is what made the picker hitch. */
+function previewChrome(): void {
+  if (previewRaf) {
+    return;
+  }
+  previewRaf = requestAnimationFrame(() => {
+    previewRaf = 0;
+    applyThemeVars();
+  });
+}
+
+function applyThemeVars(): void {
+  applyThemeTo(
+    document.documentElement.style,
+    live,
+    isRemoteWeb() ? ui.state.hostChrome : undefined,
+  );
+  syncThemeFontFace(document, ui.state.theme?.fontUrl ?? live.fontUrl);
+}
+
 function commit(theme: ThemeColors, persist: boolean): void {
   live = normalizeTheme(theme);
+  if (!persist) {
+    previewChrome();
+    return;
+  }
   applyLive();
   const selected = matchingPresetId(live);
   for (const btn of document.querySelectorAll<HTMLButtonElement>('.theme-preset')) {
@@ -514,29 +660,20 @@ function commit(theme: ThemeColors, persist: boolean): void {
     btn.classList.toggle('on', (btn.dataset.surface || 'flat') === (live.surface ?? 'flat'));
   }
   syncGlassControls();
+  syncFontControls();
   primaryInputs?.set(live.primary);
   secondaryInputs?.set(live.secondary);
   backgroundInputs?.set(live.background ?? computedBgHex());
-  syncAuto();
-  if (persist) {
-    post({
-      type: 'setTheme',
-      primary: live.primary,
-      secondary: live.secondary,
-      background: live.background ?? '',
-      wallpaper: live.wallpaper ?? '',
-      wallpaperOpacity: live.wallpaperOpacity ?? DEFAULT_WALLPAPER_OPACITY,
-      wallpaperScale: live.wallpaperScale,
-      wallpaperX: live.wallpaperX,
-      wallpaperY: live.wallpaperY,
-      surface: live.surface ?? '',
-      glassOpacity: live.glassOpacity ?? DEFAULT_GLASS_OPACITY,
-      glassBlur: live.glassBlur ?? DEFAULT_GLASS_BLUR,
-      chromeBlur: live.chromeBlur ?? DEFAULT_CHROME_BLUR,
-      chromeGlass: live.chromeGlass === true,
-      chromeGlassOpacity: live.chromeGlassOpacity ?? DEFAULT_CHROME_GLASS_OPACITY,
+  fontColorInputs?.set(live.fontColor ?? computedFgHex());
+  const fontStatus = document.querySelector('[data-font="status"]');
+  if (fontStatus) {
+    fontStatus.textContent = fontStatusText({
+      ...live,
+      fontPath: live.fontPath ?? ui.state.theme?.fontPath,
     });
   }
+  syncAuto();
+  post(themeMessage(live));
 }
 
 function syncGlassControls(): void {
@@ -558,10 +695,31 @@ function syncGlassControls(): void {
   }
 }
 
+function syncFontControls(): void {
+  const locked = lockContrastEnabled(live);
+  const sw = document.querySelector<HTMLButtonElement>('[data-key="lockContrast"] .switch');
+  if (sw) {
+    sw.classList.toggle('on', locked);
+    sw.setAttribute('aria-checked', locked ? 'true' : 'false');
+  }
+  const picker = document.querySelector<HTMLInputElement>('[data-key="fontColor"] input[type="color"]');
+  const hex = document.querySelector<HTMLInputElement>('[data-key="fontColor"] input[type="text"]');
+  if (picker) {
+    picker.disabled = locked;
+  }
+  if (hex) {
+    hex.disabled = locked;
+  }
+}
+
 function syncAuto(): void {
   autoBtn?.classList.toggle('primary', !live.background);
 }
 
 function computedBgHex(): string {
   return rgbToHex(getComputedStyle(document.body).backgroundColor) ?? '#1e1e1e';
+}
+
+function computedFgHex(): string {
+  return rgbToHex(getComputedStyle(document.body).color) ?? '#e8e8e8';
 }

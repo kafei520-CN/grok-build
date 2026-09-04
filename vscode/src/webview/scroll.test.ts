@@ -58,6 +58,16 @@ describe('transcript scroll', () => {
       }),
       true,
     );
+    assert.equal(
+      shouldPinToBottom({
+        stickToBottom: true,
+        lightbox: false,
+        now,
+        lastUserScroll: now,
+        force: true,
+      }),
+      true,
+    );
   });
 
   it('keeps stick-to-bottom only near the end and ignores programmatic pin', () => {

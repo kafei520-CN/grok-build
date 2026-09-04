@@ -1,6 +1,7 @@
 import { parseSessionUpdate } from './agent';
 import { handleTerminalMethod, isTerminalMethod } from './acpTerminal';
 import { readWorkspaceFile, writeWorkspaceFile } from './clientHandlers';
+import { handleMcpSdkCall } from './imageTool';
 import { logInfo } from './logger';
 import { RpcError } from './rpc';
 import type { PermissionOption, SessionUpdate } from './types';
@@ -12,6 +13,7 @@ export interface IncomingHost {
   applyIncomingUpdate(update: SessionUpdate, isReplay: boolean, sessionId?: string): void;
   requestToolPermission(params: unknown): Promise<unknown>;
   journal: { remember(filePath: string): Promise<void> };
+  rememberWorkspaceImage?(filePath: string, data: string): void;
   applyModelsUpdate?(params: unknown): void;
   refreshMcps?(): void;
   refreshDashboard?(): void;
@@ -59,6 +61,11 @@ export async function handleIncoming(
     }
     return controller.reviewPlan(params);
   }
+  if (name === 'x.ai/mcp/sdk_call') {
+    return handleMcpSdkCall(params, (filePath, data) => {
+      controller.rememberWorkspaceImage?.(filePath, data);
+    });
+  }
   if (name === 'x.ai/mcp/elicit') {
     // Headless Cancel: keep the turn alive instead of Method not found.
     return { outcome: 'cancel' };
@@ -67,7 +74,12 @@ export async function handleIncoming(
     return {};
   }
   if (name === 'fs/read_text_file') {
-    return readWorkspaceFile(params);
+    const result = await readWorkspaceFile(params);
+    const filePath = asString(asObject(params)['path']);
+    if (filePath && result._meta?.encoding === 'base64') {
+      controller.rememberWorkspaceImage?.(filePath, result.content);
+    }
+    return result;
   }
   if (name === 'fs/write_text_file') {
     if (controller.allowsFileWrites && !controller.allowsFileWrites()) {

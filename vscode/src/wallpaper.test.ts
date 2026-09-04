@@ -31,6 +31,7 @@ import {
   panWallpaperPct,
   centerWallpaperPct,
   withWallpaperUrl,
+  withFontUrl,
 } from './wallpaper';
 
 describe('wallpaper fit', () => {
@@ -106,6 +107,11 @@ describe('wallpaper fields', () => {
       { toResourceUrl: (file) => `vscode-webview://x/${file}` },
     );
     assert.equal(custom.wallpaperUrl, 'vscode-webview://x/E:/pic.png');
+    const withFont = withFontUrl(
+      { primary: '#000', secondary: '#000', fontPath: 'E:/a.ttf' },
+      { toResourceUrl: (file) => `vscode-webview://x/${file}` },
+    );
+    assert.equal(withFont.fontUrl, 'vscode-webview://x/E:/a.ttf');
     const placed = wallpaperLayerStyle(
       { primary: '#000', secondary: '#000', wallpaperScale: 140, wallpaperX: 20, wallpaperY: 80 },
       100,

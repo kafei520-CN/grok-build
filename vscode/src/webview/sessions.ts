@@ -31,20 +31,24 @@ export function mountSessionsDrawer(parent: HTMLElement): void {
   }
   modes.append(seg);
   parent.append(modes);
+  const scroll = document.createElement('div');
+  scroll.className = 'drawer-scroll';
   const sessions = listedSessions();
   if (!sessions.length) {
     const empty = document.createElement('p');
     empty.textContent = tr('sessionsEmpty');
-    parent.append(empty);
+    scroll.append(empty);
+    parent.append(scroll);
     return;
   }
   if (ui.sessionsMode === 'workspace') {
-    parent.append(workspaceOverview(sessions));
-    return;
+    scroll.append(workspaceOverview(sessions));
+  } else {
+    for (const row of sessions) {
+      scroll.append(sessionButton(row));
+    }
   }
-  for (const row of sessions) {
-    parent.append(sessionButton(row));
-  }
+  parent.append(scroll);
 }
 
 function setSessionsMode(mode: SessionListMode): void {

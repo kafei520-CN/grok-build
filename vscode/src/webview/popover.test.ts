@@ -51,6 +51,17 @@ describe('placeFloating', () => {
     assert.ok(placed.left >= 8);
   });
 
+  it('keeps a menu as wide as its trigger', () => {
+    const placed = placeFloating({
+      view,
+      anchor: { left: 200, top: 500, right: 292, bottom: 530 },
+      size: { width: 92, height: 120 },
+      prefer: 'above',
+    });
+    assert.equal(placed.left, 200);
+    assert.ok(placed.maxWidth >= 92);
+  });
+
   it('clamps a wide panel to the viewport', () => {
     const placed = placeFloating({
       view: { left: 0, top: 0, width: 120, height: 400 },

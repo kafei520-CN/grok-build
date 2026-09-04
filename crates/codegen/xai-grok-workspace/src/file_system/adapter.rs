@@ -86,20 +86,48 @@ fn acp_error_to_computer_error(err: acp::Error) -> ComputerError {
 /// Reconstruct file bytes from `fs/read_text_file`.
 ///
 /// JSON cannot carry raw binary, so clients send images as base64 with
-/// `_meta.encoding = "base64"`. Text files stay as UTF-8 `content`.
+/// `_meta.encoding = "base64"`. Some ACP hops drop `_meta`; if the payload
+/// still decodes to an image/PDF, restore those bytes anyway.
 pub(crate) fn bytes_from_read_text_file(response: acp::ReadTextFileResponse) -> Vec<u8> {
     let encoding = response
         .meta
         .as_ref()
         .and_then(|meta| meta.get("encoding"))
         .and_then(|value| value.as_str());
+    let content = response.content;
     if encoding == Some("base64") {
-        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(response.content.trim())
-        {
+        if let Some(bytes) = decode_base64_payload(&content) {
+            return bytes;
+        }
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(content.trim()) {
             return bytes;
         }
     }
-    response.content.into_bytes()
+    if let Some(bytes) = decode_base64_payload(&content)
+        && bytes_look_like_media(&bytes)
+    {
+        return bytes;
+    }
+    content.into_bytes()
+}
+
+fn decode_base64_payload(content: &str) -> Option<Vec<u8>> {
+    let trimmed = content.trim();
+    let payload = trimmed
+        .rsplit_once("base64,")
+        .map(|(_, rest)| rest.trim())
+        .unwrap_or(trimmed);
+    if payload.len() < 12 {
+        return None;
+    }
+    let compact: String = payload.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    if !compact
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
+    {
+        return None;
+    }
+    base64::engine::general_purpose::STANDARD.decode(compact).ok()
 }
 
 fn path_looks_like_media(path: &Path) -> bool {
@@ -178,5 +206,21 @@ mod tests {
         let recovered = bytes_from_read_text_file(response);
         assert_ne!(recovered, raw);
         assert_ne!(recovered.first().copied(), Some(0x89));
+    }
+
+    #[test]
+    fn base64_without_meta_restores_png_when_magic_matches() {
+        let raw = png_header();
+        let response = acp::ReadTextFileResponse::new(base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &raw,
+        ));
+        assert_eq!(bytes_from_read_text_file(response), raw);
+    }
+
+    #[test]
+    fn ordinary_text_is_not_treated_as_base64() {
+        let response = acp::ReadTextFileResponse::new("fn main() {}\n");
+        assert_eq!(bytes_from_read_text_file(response), b"fn main() {}\n");
     }
 }

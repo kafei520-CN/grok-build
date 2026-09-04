@@ -89,6 +89,21 @@ describe('attachments', () => {
     assert.equal(host.attachments[0]?.text, 'export const n = 1;\n');
   });
 
+  it('attaches a workspace png as image data, not utf8 text', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
+    bindPlatform(
+      fakePlat({
+        readFile: async () => png,
+      }),
+    );
+    const host: AttachmentHost = { attachments: [], emit() {} };
+    await pasteClipboard(host, { uris: ['file:///E:/shots/block.png'] });
+    assert.equal(host.attachments.length, 1);
+    assert.equal(host.attachments[0]?.mimeType, 'image/png');
+    assert.equal(host.attachments[0]?.data, Buffer.from(png).toString('base64'));
+    assert.equal(host.attachments[0]?.text, undefined);
+  });
+
   it('attaches browser-picked text files without a workspace path', async () => {
     bindPlatform(fakePlat());
     const host: AttachmentHost = { attachments: [], emit() {} };

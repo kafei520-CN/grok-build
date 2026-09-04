@@ -36,8 +36,13 @@ export function shouldPinToBottom(opts: {
   lightbox: boolean;
   now: number;
   lastUserScroll: number;
+  /** Jump-to-bottom button: ignore the post-drag hold. */
+  force?: boolean;
 }): boolean {
-  if (opts.lightbox || userHeldScroll(opts.now, opts.lastUserScroll)) {
+  if (opts.lightbox) {
+    return false;
+  }
+  if (!opts.force && userHeldScroll(opts.now, opts.lastUserScroll)) {
     return false;
   }
   return opts.stickToBottom;

@@ -111,8 +111,30 @@ function fenceClose(line: string, marker: string): boolean {
   return Boolean(match && match[1][0] === marker[0] && match[1].length >= marker.length);
 }
 
+/** Live tail kept as plain text so a giant open paragraph does not reparse. */
+export const STREAM_LIVE_KEEP = 4_000;
+/** Force-commit a long unfenced tail so split() does not rescan the whole body. */
+export const STREAM_FORCE_COMMIT = 12_000;
+
 /** Commit finished blocks; keep the open paragraph/fence as a cheap live tail. */
-export function splitStreamingMarkdown(src: string): { committed: string; rest: string } {
+export function splitStreamingMarkdown(
+  src: string,
+  prevCommitted = '',
+): { committed: string; rest: string } {
+  const prefix = prevCommitted && src.startsWith(prevCommitted) ? prevCommitted : '';
+  const working = prefix ? src.slice(prefix.length) : src;
+  const split = splitStreamingTail(working);
+  let committed = prefix + split.committed;
+  let rest = split.rest;
+  if (!split.openFence && rest.length > STREAM_FORCE_COMMIT) {
+    const cut = rest.length - STREAM_LIVE_KEEP;
+    committed += rest.slice(0, cut);
+    rest = rest.slice(cut);
+  }
+  return { committed, rest };
+}
+
+function splitStreamingTail(src: string): { committed: string; rest: string; openFence: boolean } {
   const lines = src.replace(/\r\n/g, '\n').split('\n');
   let fence: string | undefined;
   let fenceStart = -1;
@@ -146,7 +168,22 @@ export function splitStreamingMarkdown(src: string): { committed: string; rest: 
   return {
     committed: lines.slice(0, committedLines).join('\n'),
     rest: lines.slice(committedLines).join('\n'),
+    openFence: Boolean(fence),
   };
+}
+
+/** Append-only patch so streaming does not reparse the whole committed prefix. */
+export function streamingMarkdownPatch(
+  prevCommitted: string,
+  committed: string,
+): { replace?: string; append?: string } {
+  if (committed === prevCommitted) {
+    return {};
+  }
+  if (committed.startsWith(prevCommitted)) {
+    return { append: committed.slice(prevCommitted.length) };
+  }
+  return { replace: committed };
 }
 
 function isHr(line: string): boolean {

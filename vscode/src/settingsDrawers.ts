@@ -43,11 +43,19 @@ import {
 import { mergeModelCatalog } from './sessionUpdates';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { normalizeTheme } from './theme';
+import {
+  DEFAULT_FONT_SIZE,
+  DEFAULT_LETTER_SPACING,
+  FONT_EXTS,
+  isFontFile,
+  lockContrastEnabled,
+  normalizeTheme,
+} from './theme';
 import {
   isWallpaperFile,
   WALLPAPER_IMAGE_EXTS,
   WALLPAPER_VIDEO_EXTS,
+  withFontUrl,
   withWallpaperUrl,
 } from './wallpaper';
 import type {
@@ -72,6 +80,7 @@ import type {
   SubagentLive,
   TaskItem,
   ThemeColors,
+  ThemePatch,
   WorkflowItem,
   WorktreeItem,
 } from './types';
@@ -116,6 +125,7 @@ export interface SettingsHost {
   modelsReloadSeq: number;
   lastApiMutation?: { id: string; at: number };
   emit(): void;
+  refreshBilling(): void;
   fail(message: string, error?: unknown): void;
   loadSession(sessionId: string, sessionCwd?: string): Promise<void>;
   send(text: string): Promise<void>;
@@ -242,6 +252,7 @@ export function openSettings(host: SettingsHost): void {
   stopDashboardPoll(host);
   host.settingsOpen = true;
   host.settingsPage = 'main';
+  host.refreshBilling();
   host.emit();
   void refreshRules(host);
   void refreshSkills(host);
@@ -938,7 +949,7 @@ export async function refreshMcpsInner(host: SettingsHost): Promise<void> {
 }
 
 export function themeForUi(theme: ThemeColors): ThemeColors {
-  return withWallpaperUrl(theme, plat());
+  return withFontUrl(withWallpaperUrl(theme, plat()), plat());
 }
 
 export function setTheme(
@@ -946,19 +957,7 @@ export function setTheme(
   primary: string,
   secondary: string,
   background?: string,
-  patch?: {
-    wallpaper?: 'icon' | 'custom' | '';
-    wallpaperOpacity?: number;
-    wallpaperScale?: number;
-    wallpaperX?: number;
-    wallpaperY?: number;
-    surface?: 'glass' | 'solid' | '';
-    glassOpacity?: number;
-    glassBlur?: number;
-    chromeBlur?: number;
-    chromeGlass?: boolean;
-    chromeGlassOpacity?: number;
-  },
+  patch?: ThemePatch,
 ): void {
   const next = normalizeTheme({
     ...host.theme,
@@ -977,6 +976,11 @@ export function setTheme(
     chromeGlass: patch && 'chromeGlass' in patch ? patch.chromeGlass : host.theme.chromeGlass,
     chromeGlassOpacity:
       patch && 'chromeGlassOpacity' in patch ? patch.chromeGlassOpacity : host.theme.chromeGlassOpacity,
+    fontPath: patch && 'fontPath' in patch ? patch.fontPath || undefined : host.theme.fontPath,
+    fontSize: patch && 'fontSize' in patch ? patch.fontSize : host.theme.fontSize,
+    letterSpacing: patch && 'letterSpacing' in patch ? patch.letterSpacing : host.theme.letterSpacing,
+    fontColor: patch && 'fontColor' in patch ? patch.fontColor || undefined : host.theme.fontColor,
+    lockContrast: patch && 'lockContrast' in patch ? patch.lockContrast : host.theme.lockContrast,
   });
   if (
     next.primary === host.theme.primary &&
@@ -993,7 +997,13 @@ export function setTheme(
     (next.glassBlur ?? 0) === (host.theme.glassBlur ?? 0) &&
     (next.chromeBlur ?? 0) === (host.theme.chromeBlur ?? 0) &&
     Boolean(next.chromeGlass) === Boolean(host.theme.chromeGlass) &&
-    (next.chromeGlassOpacity ?? 0) === (host.theme.chromeGlassOpacity ?? 0)
+    (next.chromeGlassOpacity ?? 0) === (host.theme.chromeGlassOpacity ?? 0) &&
+    (next.fontPath ?? '') === (host.theme.fontPath ?? '') &&
+    (next.fontSize ?? DEFAULT_FONT_SIZE) === (host.theme.fontSize ?? DEFAULT_FONT_SIZE) &&
+    (next.letterSpacing ?? DEFAULT_LETTER_SPACING) ===
+      (host.theme.letterSpacing ?? DEFAULT_LETTER_SPACING) &&
+    (next.fontColor ?? '') === (host.theme.fontColor ?? '') &&
+    lockContrastEnabled(next) === lockContrastEnabled(host.theme)
   ) {
     return;
   }
@@ -1032,6 +1042,41 @@ export async function pickThemeWallpaper(host: SettingsHost): Promise<void> {
       ...host.theme,
       wallpaper: 'custom',
       wallpaperPath: dest,
+    });
+    void plat().setState('ui.theme', host.theme);
+    host.emit();
+  } catch (error) {
+    plat().warn(error instanceof Error ? error.message : String(error));
+  }
+}
+
+export async function pickThemeFont(host: SettingsHost): Promise<void> {
+  const picked = await plat().openFiles({
+    title: tr('themeFontPick'),
+    filters: {
+      [tr('themeFontPick')]: [...FONT_EXTS],
+    },
+  });
+  const src = picked?.[0];
+  if (!src) {
+    return;
+  }
+  if (!isFontFile(src)) {
+    logWarn(`font type: ${path.extname(src)}`);
+    return;
+  }
+  try {
+    const ext = path.extname(src).toLowerCase() || '.ttf';
+    const dest = path.join(plat().homeDir(), '.grok', `theme-font-${Date.now()}${ext}`);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.copyFile(src, dest);
+    const prev = host.theme.fontPath;
+    if (prev && path.resolve(prev) !== path.resolve(dest) && path.basename(prev).startsWith('theme-font')) {
+      void fs.unlink(prev).catch(() => undefined);
+    }
+    host.theme = normalizeTheme({
+      ...host.theme,
+      fontPath: dest,
     });
     void plat().setState('ui.theme', host.theme);
     host.emit();

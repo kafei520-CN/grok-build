@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { clipboardToPath, splitClipboardPaths } from './clipboard';
+import { isImagePath, looksLikeImage, mimeFromImagePath } from './clientHandlers';
 import { plat } from './platform';
 import type { Attachment } from './types';
 
@@ -33,6 +34,11 @@ export function addActiveFile(host: AttachmentHost): void {
   if (!file) {
     return;
   }
+  if (isImagePath(file.path)) {
+    void attachPath(host, file.path);
+    plat().focusChat();
+    return;
+  }
   upsert(host, {
     id: file.path,
     label: path.basename(file.path),
@@ -58,11 +64,20 @@ export async function attachFromUi(host: AttachmentHost): Promise<void> {
   }
 }
 
+const IMAGE_ATTACH_MAX = 8 * 1024 * 1024;
+
 export async function attachPath(host: AttachmentHost, filePath: string): Promise<void> {
   let text: string | undefined;
+  let mimeType: string | undefined;
+  let data: string | undefined;
   try {
     const bytes = await plat().readFile(filePath);
-    if (bytes.byteLength < ATTACH_TEXT_MAX) {
+    if (isImagePath(filePath) || looksLikeImage(bytes)) {
+      mimeType = mimeFromImagePath(filePath) ?? mimeFromMagic(bytes) ?? 'image/png';
+      if (bytes.byteLength <= IMAGE_ATTACH_MAX) {
+        data = Buffer.from(bytes).toString('base64');
+      }
+    } else if (bytes.byteLength < ATTACH_TEXT_MAX) {
       text = Buffer.from(bytes).toString('utf8');
     }
   } catch {
@@ -70,10 +85,39 @@ export async function attachPath(host: AttachmentHost, filePath: string): Promis
   }
   host.attachments = [
     ...host.attachments.filter((item) => item.id !== filePath),
-    { id: filePath, label: path.basename(filePath), path: filePath, text },
+    {
+      id: filePath,
+      label: path.basename(filePath),
+      path: filePath,
+      text,
+      mimeType,
+      data,
+    },
   ];
   host.fileHits = undefined;
   host.emit();
+}
+
+function mimeFromMagic(bytes: Uint8Array): string | undefined {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return 'image/png';
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    return 'image/gif';
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46
+  ) {
+    return 'image/webp';
+  }
+  return undefined;
 }
 
 export async function pasteClipboard(

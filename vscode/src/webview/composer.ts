@@ -52,7 +52,7 @@ export function mountComposer(parent: HTMLElement): void {
   jump.className = 'jump-bottom';
   jump.hidden = true;
   jump.addEventListener('click', jumpToLatest);
-  card.append(jump, input, bar);
+  card.append(input, bar, jump);
   footer.append(queue, chips, menuBox, live, card);
   parent.append(footer);
   ui.composer = input;
@@ -515,7 +515,11 @@ function pickerControl(opts: {
       });
       list.append(option);
     }
-    pinFloating(list, btn, { prefer: 'above', align: opts.kind === 'effort' ? 'end' : 'start' });
+    pinFloating(list, btn, {
+      prefer: 'above',
+      align: opts.kind === 'effort' ? 'end' : 'start',
+      matchWidth: true,
+    });
   }
   return wrap;
 }
@@ -803,22 +807,12 @@ function tickLiveCounts(el: HTMLElement, summary: LiveEditSummary, first: boolea
 
 export function jumpToLatest(): void {
   ui.stickToBottom = true;
-  scrollTranscript();
+  scrollTranscript(true);
   patchJumpBottom();
 }
 
 export function patchJumpBottom(): void {
-  const card = document.getElementById('composer-card');
-  let el = document.getElementById('jump-bottom') as HTMLButtonElement | null;
-  if (!el && card) {
-    el = document.createElement('button');
-    el.type = 'button';
-    el.id = 'jump-bottom';
-    el.className = 'jump-bottom';
-    el.hidden = true;
-    el.addEventListener('click', jumpToLatest);
-    card.prepend(el);
-  }
+  const el = ensureJumpBottom();
   if (!el) {
     return;
   }
@@ -845,6 +839,24 @@ export function patchJumpBottom(): void {
   } else {
     el.innerHTML = iconDown();
   }
+}
+
+function ensureJumpBottom(): HTMLButtonElement | null {
+  const card = document.getElementById('composer-card');
+  let el = document.getElementById('jump-bottom') as HTMLButtonElement | null;
+  if (!el && card) {
+    el = document.createElement('button');
+    el.type = 'button';
+    el.id = 'jump-bottom';
+    el.className = 'jump-bottom';
+    el.hidden = true;
+    el.addEventListener('click', jumpToLatest);
+    card.append(el);
+  }
+  if (el && card && el.parentElement !== card) {
+    card.append(el);
+  }
+  return el;
 }
 
 function jumpDots(): HTMLElement {

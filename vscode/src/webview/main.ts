@@ -1,6 +1,7 @@
 import type { ChatState, StreamTail } from '../types';
 import { applyEditStatsToMessages, type EditStatsItem } from '../editStats';
 import { mergeLiveMessages } from '../messageMerge';
+import { mergeStreamTail } from '../streamTail';
 import { applyThemeTo } from '../theme';
 import { bindRender, isBooting, isRemoteWeb, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
@@ -9,7 +10,7 @@ import { removeSlot, replaceSlot } from './dom';
 import { patchSettings, settingsBackMessage } from './settings';
 import { bindFileDrop, syncDropHint } from './drop';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
-import { chromeKeepers, overlayKind, syncSurface, syncWallpaper } from './wallpaper';
+import { chromeKeepers, overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './wallpaper';
 import { playNotify } from './notify';
 import { hideRemoteOverlays, showRemoteDiff, showRemoteFile } from './remoteOverlay';
 import { reflowFloating } from './popover';
@@ -154,25 +155,38 @@ window.addEventListener('message', (event: MessageEvent<HostMsg>) => {
   onHostMessage(data as HostMsg);
 };
 
+let tailPaint = 0;
+
 function applyTail(tail: StreamTail): void {
   const messages = ui.state.messages;
   const last = messages.at(-1);
-  if (last?.id === tail.message.id) {
-    messages[messages.length - 1] = tail.message;
+  const next = mergeStreamTail(last, tail);
+  if (last?.id === next.id) {
+    messages[messages.length - 1] = next;
   } else {
-    messages.push(tail.message);
+    messages.push(next);
   }
   ui.state.status = tail.status;
   ui.state.context = tail.context;
   ui.state.queue = tail.queue;
   if (document.getElementById('transcript') && document.getElementById('grok-body')) {
     root.dataset.status = ui.state.status;
-    patchBody(root);
-    patchComposer();
-    scrollTranscript();
+    scheduleTailPaint();
     return;
   }
   render();
+}
+
+function scheduleTailPaint(): void {
+  if (tailPaint) {
+    return;
+  }
+  tailPaint = requestAnimationFrame(() => {
+    tailPaint = 0;
+    patchBody(root);
+    patchComposer();
+    scrollTranscript();
+  });
 }
 
 function render(): void {
@@ -183,6 +197,7 @@ function render(): void {
       ui.state.theme,
       isRemoteWeb() ? ui.state.hostChrome : undefined,
     );
+    syncThemeFontFace(document, ui.state.theme?.fontUrl);
     syncSurface(
       root,
       ui.state.theme,

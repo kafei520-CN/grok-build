@@ -6,6 +6,9 @@ import {
   renderMarkdown,
   safeUrl,
   splitStreamingMarkdown,
+  STREAM_FORCE_COMMIT,
+  STREAM_LIVE_KEEP,
+  streamingMarkdownPatch,
 } from './webview/markdown';
 
 describe('markdown', () => {
@@ -116,5 +119,30 @@ describe('markdown', () => {
     const fenced = splitStreamingMarkdown('done\n\n```js\nconst x = 1;');
     assert.equal(fenced.committed, 'done\n');
     assert.match(fenced.rest, /^```js/);
+  });
+
+  it('appends new committed markdown instead of replacing the prefix', () => {
+    const first = streamingMarkdownPatch('', '# Title\n');
+    assert.equal(first.append, '# Title\n');
+    const next = streamingMarkdownPatch('# Title\n', '# Title\n\nhello\n');
+    assert.equal(next.append, '\nhello\n');
+    assert.equal(next.replace, undefined);
+    const reset = streamingMarkdownPatch('# Title\n', 'other\n');
+    assert.equal(reset.replace, 'other\n');
+  });
+
+  it('only resplits the uncommitted suffix when a prefix is already committed', () => {
+    const prev = '# Title\n';
+    const split = splitStreamingMarkdown(`${prev}\nhello world`, prev);
+    assert.equal(split.committed, prev);
+    assert.equal(split.rest, 'hello world');
+  });
+
+  it('force-commits a giant unfenced paragraph so the live tail stays bounded', () => {
+    const body = `${'word '.repeat(STREAM_FORCE_COMMIT / 5)}end`;
+    const split = splitStreamingMarkdown(body);
+    assert.ok(split.rest.length <= STREAM_LIVE_KEEP + 32);
+    assert.ok(split.committed.length > STREAM_FORCE_COMMIT / 2);
+    assert.equal(`${split.committed}${split.rest}`, body.replace(/\r\n/g, '\n'));
   });
 });

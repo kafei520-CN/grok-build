@@ -91,6 +91,21 @@ describe('handleIncoming', () => {
     );
   });
 
+  it('routes in-process image MCP calls', async () => {
+    const result = await handleIncoming(
+      host(),
+      '_x.ai/mcp/sdk_call',
+      {
+        serverId: 'grok-plugin-images',
+        message: { jsonrpc: '2.0', id: 4, method: 'tools/list' },
+      },
+      4,
+    );
+    const tools = (result as { result: { tools: Array<{ name: string; title: string }> } }).result.tools;
+    assert.equal(tools[0]?.name, 'read_image');
+    assert.equal(tools[0]?.title, '图片工具');
+  });
+
   it('answers mcp elicit with a typed cancel', async () => {
     const result = await handleIncoming(host(), 'x.ai/mcp/elicit', { message: 'Need email' }, 9);
     assert.deepEqual(result, { outcome: 'cancel' });

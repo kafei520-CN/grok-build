@@ -59,7 +59,13 @@ export function placeFloating(opts: PlaceOpts): PlaceResult {
   return { top, left, maxHeight: Math.max(maxHeight, 48), maxWidth: availW };
 }
 
-type PinSpec = { anchor: HTMLElement; prefer: PinPrefer; align: PinAlign; restoreTo?: HTMLElement };
+type PinSpec = {
+  anchor: HTMLElement;
+  prefer: PinPrefer;
+  align: PinAlign;
+  restoreTo?: HTMLElement;
+  matchWidth?: boolean;
+};
 
 const pins = new Map<HTMLElement, PinSpec>();
 let listening = false;
@@ -67,7 +73,7 @@ let listening = false;
 export function pinFloating(
   el: HTMLElement,
   anchor: HTMLElement,
-  opts: { prefer: PinPrefer; align?: PinAlign; restoreTo?: HTMLElement },
+  opts: { prefer: PinPrefer; align?: PinAlign; restoreTo?: HTMLElement; matchWidth?: boolean },
 ): void {
   sweepFloating();
   pins.set(el, {
@@ -75,6 +81,7 @@ export function pinFloating(
     prefer: opts.prefer,
     align: opts.align ?? 'start',
     restoreTo: opts.restoreTo,
+    matchWidth: opts.matchWidth,
   });
   el.classList.add('pin');
   const host = floatHost();
@@ -95,6 +102,8 @@ export function releaseFloating(el: HTMLElement, restoreTo?: HTMLElement): void 
   el.style.right = '';
   el.style.bottom = '';
   el.style.margin = '';
+  el.style.width = '';
+  el.style.minWidth = '';
   el.style.maxHeight = '';
   el.style.maxWidth = '';
   el.style.zIndex = '';
@@ -207,8 +216,13 @@ function applyPin(el: HTMLElement): void {
   el.style.margin = '0';
   const view = viewBox();
   const anchor = spec.anchor.getBoundingClientRect();
+  const matchW = spec.matchWidth ? anchor.width : 0;
+  if (matchW > 0) {
+    el.style.width = `${matchW}px`;
+    el.style.minWidth = `${matchW}px`;
+  }
   const size = {
-    width: Math.max(el.offsetWidth, el.scrollWidth, 96),
+    width: matchW > 0 ? matchW : Math.max(el.offsetWidth, el.scrollWidth, 96),
     height: Math.max(el.offsetHeight, el.scrollHeight, 1),
   };
   const placed = placeFloating({
@@ -221,7 +235,7 @@ function applyPin(el: HTMLElement): void {
   el.style.top = `${placed.top}px`;
   el.style.left = `${placed.left}px`;
   el.style.maxHeight = `${placed.maxHeight}px`;
-  el.style.maxWidth = `${placed.maxWidth}px`;
+  el.style.maxWidth = `${matchW > 0 ? matchW : placed.maxWidth}px`;
   el.style.zIndex = '50';
 }
 

@@ -12,7 +12,18 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.41: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.52: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.52 — Theme can import a font and adjust size, tracking, and text color. Lock contrast keeps auto light/dark text. Color pickers no longer hitch while dragging.</p>
+<p>0.2.51 — Settings under Account shows official Grok subscription remaining (weekly/monthly SuperGrok limit, used %, reset). Custom API endpoints are not shown.</p>
+<p>0.2.50 — Jump-to-latest glass blur works: no transform so the wallpaper frost clips into the circle.</p>
+<p>0.2.49 — Jump-to-latest stays a floating circle 24px above the composer; glass no longer pulls the input card up.</p>
+<p>0.2.48 — Jump-to-latest is a circle above the composer again; the extra top bar on the input strip is gone.</p>
+<p>0.2.47 — Glass tool-call rows keep kind/status color under the frost instead of wiping it. Send/stop stay flat, not glossy.</p>
+<p>0.2.46 — Glass send/stop keep a flat frost film, not a glossy highlight. Stop stays red with a white square.</p>
+<p>0.2.45 — Jump-to-latest floats above the composer and no longer stretches the input card. Model menus match the trigger width. Glass send is white with a gloss plate; stop is red with a white square in every theme.</p>
+<p>0.2.44 — Built-in 图片工具 (images__read_image) reads workspace PNG/JPEG as vision, not as binary text. Long streaming replies stay incremental so VS Code does not freeze.</p>
+<p>0.2.43 — Drawers (workspace overview, skills, and others) scroll again. Picking a workspace PNG in the composer sends it as an image. If grok read_file rejects a workspace image as binary, the plugin injects it into the current turn so the model can still see it.</p>
+<p>0.2.42 — Reading PNG/JPEG in the workspace no longer fails as “Cannot read binary file”. ACP base64 image bytes are restored and image extensions go through the vision path.</p>
 <p>0.2.41 — Each session keeps its own review diffs on disk. Restarting the IDE no longer drops files from Grok Diff or rebuilds them from git HEAD.</p>
 <p>0.2.40 — Plugin chat webview recovers from idle white screens: heartbeat plus reload if the renderer died. Restored sessions keep original edit line counts instead of shrinking them against git HEAD.</p>
 <p>0.2.39 — Long streaming replies no longer freeze the IDE: finished markdown stays put and only the live tail is redrawn.</p>

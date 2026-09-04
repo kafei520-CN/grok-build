@@ -1,3 +1,4 @@
+import { THEME_FONT_FAMILY } from '../theme';
 import type { ThemeColors } from '../types';
 import {
   DEFAULT_WALLPAPER_OPACITY,
@@ -7,6 +8,23 @@ import {
   wallpaperPlacement,
 } from '../wallpaper';
 import { isRemoteWeb } from './app';
+
+/** Inject @font-face for a user-imported file. Empty url removes it. */
+export function syncThemeFontFace(doc: Document, url?: string): void {
+  const id = 'grok-theme-font';
+  let el = doc.getElementById(id);
+  if (!url) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = doc.createElement('style');
+    el.id = id;
+    doc.head.append(el);
+  }
+  el.textContent =
+    `@font-face{font-family:${JSON.stringify(THEME_FONT_FAMILY)};src:url(${JSON.stringify(url)});font-display:swap;}`;
+}
 
 const watchers = new WeakMap<HTMLElement, ResizeObserver>();
 const natural = new WeakMap<HTMLElement, { w: number; h: number }>();

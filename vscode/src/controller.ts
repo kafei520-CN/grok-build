@@ -21,6 +21,12 @@ import { slimFileDiffs } from './diff';
 import { applyDiffStats, publicEdits } from './edits';
 import type { EditStatsItem } from './editStats';
 import { handleIncoming } from './incoming';
+import {
+  cacheKey,
+  failedBinaryImagePath,
+  imageFromBase64,
+  type WorkspaceImage,
+} from './workspaceImages';
 import { tr, uiLocale } from './locale';
 import { logError, logInfo, logWarn, showLog } from './logger';
 import { buildPromptBlocks } from './prompt';
@@ -35,8 +41,16 @@ import {
   modelsFromResult,
 } from './sessionUpdates';
 import { FALLBACK_COMMANDS, classifySlash, modeLabel, promptModeMeta, type HostAction } from './slash';
+import { imageMcpServersMeta } from './imageTool';
+import { isOfficialGrokAccount, parseBilling, type BillingQuota } from './billing';
 import { bindPlatform, plat, type Platform } from './platform';
 import { dispatchUi } from './dispatch';
+import {
+  buildStreamTail,
+  cursorFromMessage,
+  emptyStreamCursor,
+  type StreamDeltaCursor,
+} from './streamTail';
 
 import { gitProbePaths } from './fork';
 import { runSlashAction, type SlashRuntime } from './slashHost';
@@ -173,6 +187,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   fileHits?: Array<{ path: string; label: string }>;
   private error?: string;
   private account?: AccountInfo;
+  billing?: BillingQuota;
+  billingLoading = false;
+  private billingSeq = 0;
   private loginView?: ChatState['login'];
   models?: ChatState['models'];
   permission?: PermissionPrompt;
@@ -197,6 +214,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private readonly listeners = new Set<(state: ChatState) => void>();
   private readonly streamListeners = new Set<(tail: import('./types').StreamTail) => void>();
   private emitTimer?: ReturnType<typeof setTimeout>;
+  private streamCursor: StreamDeltaCursor = emptyStreamCursor();
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
   modelsReloadSeq = 0;
@@ -214,6 +232,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   taskTimer?: ReturnType<typeof setTimeout>;
   private readonly disposables: Array<{ dispose(): void }> = [];
   readonly journal: EditJournal;
+  private readonly workspaceImages = new Map<string, WorkspaceImage>();
+  private readonly rescuedImages = new Set<string>();
   readonly meter: ContextMeter;
 
   constructor(host?: Platform) {
@@ -301,6 +321,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       cliPath: this.cliPath,
       cliInstallHint: installHint(process.platform),
       account: this.account,
+      billing: this.billing,
+      billingLoading: this.billingLoading,
       login: this.loginView,
       models: this.models,
       modeId: this.modeId,
@@ -401,6 +423,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.dropAgent();
     this.messages = [];
     this.journal.clear();
+    this.workspaceImages.clear();
+    this.rescuedImages.clear();
     await this.beginStart();
   }
 
@@ -410,6 +434,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.agent?.clearSession();
     this.messages = [];
     this.journal.clear();
+    this.workspaceImages.clear();
+    this.rescuedImages.clear();
     this.drawer = undefined;
     drawers.stopDashboardPoll(this);
     this.replaying = false;
@@ -449,6 +475,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       await this.createSession(agent);
       this.loginView = undefined;
       this.setStatus('ready');
+      this.refreshBilling();
       void this.refreshSessionsSilent();
       plat().info('Signed in to Grok Build.');
     } catch (error) {
@@ -515,6 +542,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     abortClientRpcs(this, 'cancel');
     this.account = undefined;
+    this.billing = undefined;
+    this.billingLoading = false;
+    this.billingSeq += 1;
     this.messages = [];
     this.journal.clear();
     this.status = 'login';
@@ -545,6 +575,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       await this.createSession(agent);
       this.status = 'ready';
       this.error = undefined;
+      this.refreshBilling();
       this.emit();
     } catch (error) {
       this.fail('API key sign-in failed', error);
@@ -1040,6 +1071,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       this.cwd();
     this.messages = [];
     this.journal.clear();
+    this.workspaceImages.clear();
+    this.rescuedImages.clear();
     this.drawer = undefined;
     drawers.stopDashboardPoll(this);
     this.hideSessionPreview = false;
@@ -1295,6 +1328,51 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   async dashboardDispatch(text: string, sessionId?: string): Promise<void> {
     await drawers.dashboardDispatch(this, text, sessionId);
   }
+  refreshBilling(): void {
+    if (!isOfficialGrokAccount(this.account) || !this.agent) {
+      if (this.billing || this.billingLoading) {
+        this.billing = undefined;
+        this.billingLoading = false;
+        this.emit();
+      }
+      return;
+    }
+    if (!this.billing && !this.billingLoading) {
+      this.billingLoading = true;
+      this.emit();
+    }
+    void this.pullBilling();
+  }
+
+  private async pullBilling(): Promise<void> {
+    if (!isOfficialGrokAccount(this.account) || !this.agent) {
+      if (this.billing || this.billingLoading) {
+        this.billing = undefined;
+        this.billingLoading = false;
+        this.emit();
+      }
+      return;
+    }
+    const seq = ++this.billingSeq;
+    try {
+      const parsed = parseBilling(await this.agent.billing());
+      if (seq !== this.billingSeq) {
+        return;
+      }
+      this.billing = parsed;
+      this.billingLoading = false;
+      this.emit();
+    } catch (error) {
+      if (seq !== this.billingSeq) {
+        return;
+      }
+      logWarn(`billing: ${error instanceof Error ? error.message : error}`);
+      this.billing = undefined;
+      this.billingLoading = false;
+      this.emit();
+    }
+  }
+
   openSettings(): void { drawers.openSettings(this); }
   closeSettings(): void { drawers.closeSettings(this); }
   openRules(): void { drawers.openRules(this); }
@@ -1601,24 +1679,15 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     primary: string,
     secondary: string,
     background?: string,
-    patch?: {
-      wallpaper?: 'icon' | 'custom' | '';
-      wallpaperOpacity?: number;
-      wallpaperScale?: number;
-      wallpaperX?: number;
-      wallpaperY?: number;
-      surface?: 'glass' | 'solid' | '';
-      glassOpacity?: number;
-      glassBlur?: number;
-      chromeBlur?: number;
-      chromeGlass?: boolean;
-      chromeGlassOpacity?: number;
-    },
+    patch?: import('./types').ThemePatch,
   ): void {
     drawers.setTheme(this, primary, secondary, background, patch);
   }
   async pickThemeWallpaper(): Promise<void> {
     await drawers.pickThemeWallpaper(this);
+  }
+  async pickThemeFont(): Promise<void> {
+    await drawers.pickThemeFont(this);
   }
   async saveApi(input: {
     id?: string;
@@ -1714,6 +1783,14 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
 
   emit(): void {
     this.flushEmitTimer();
+    if (this.status !== 'streaming') {
+      this.streamCursor = emptyStreamCursor();
+    } else {
+      const last = this.messages.at(-1);
+      if (last?.role === 'assistant' && last.streaming) {
+        this.streamCursor = cursorFromMessage(last);
+      }
+    }
     const state = this.snapshot();
     for (const listener of this.listeners) {
       listener(state);
@@ -1766,6 +1843,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.modeId = view.modeId;
     this.models = view.models;
     this.commands = view.commands;
+    if (!isReplay && !this.replaying) {
+      void this.rescueWorkspaceImage(update);
+    }
     const next = this.messages.at(-1);
     const after = next?.role === 'assistant' ? stepsStamp(next.steps) : '';
     if (after && after !== before) {
@@ -1777,6 +1857,44 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
 
   allowsFileWrites(): boolean {
     return this.modeId !== 'ask';
+  }
+
+  rememberWorkspaceImage(filePath: string, data: string): void {
+    const image = imageFromBase64(filePath, data);
+    if (!image) {
+      return;
+    }
+    this.workspaceImages.set(cacheKey(filePath), image);
+  }
+
+  private async rescueWorkspaceImage(update: SessionUpdate): Promise<void> {
+    const filePath = failedBinaryImagePath(update);
+    if (!filePath) {
+      return;
+    }
+    const key = cacheKey(filePath);
+    if (this.rescuedImages.has(key)) {
+      return;
+    }
+    let image = this.workspaceImages.get(key);
+    if (!image) {
+      for (const [cached, value] of this.workspaceImages) {
+        if (cached.endsWith(`/${key}`) || key.endsWith(`/${cached}`)) {
+          image = value;
+          break;
+        }
+      }
+    }
+    if (!image) {
+      return;
+    }
+    this.rescuedImages.add(key);
+    try {
+      await this.agent?.interject(`Workspace image: ${path.basename(filePath)}`, [image]);
+    } catch (error) {
+      this.rescuedImages.delete(key);
+      logWarn(`workspace image rescue: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
   async requestToolPermission(params: unknown): Promise<unknown> {
@@ -1922,10 +2040,12 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (this.emitTimer) {
       return;
     }
+    const n = this.messages.at(-1)?.text.length ?? 0;
+    const delay = Math.min(220, 80 + Math.floor(n / 3000));
     this.emitTimer = setTimeout(() => {
       this.emitTimer = undefined;
       this.emitTail();
-    }, 80);
+    }, delay);
   }
 
   private flushEmitTimer(): void {
@@ -1942,17 +2062,12 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       this.emit();
       return;
     }
-    const tail: import('./types').StreamTail = {
-      type: 'tail',
-      message: {
-        ...last,
-        tools: last.tools.map((tool) => ({ ...tool })),
-        steps: last.steps?.map((step) => ({ ...step })),
-      },
+    const { tail, cursor } = buildStreamTail(this.streamCursor, last, {
       status: this.status,
       context: this.meter.usage,
       queue: this.queue,
-    };
+    });
+    this.streamCursor = cursor;
     for (const listener of this.streamListeners) {
       listener(tail);
     }
@@ -2034,6 +2149,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
 
   private sessionMeta(): Record<string, unknown> {
     const extra: Record<string, unknown> = { ...sessionPermissionMeta(readGrokSettings()) };
+    extra['x.ai/mcp/servers'] = imageMcpServersMeta();
     const hints = this.startupHints();
     if (hints) {
       extra.startupHints = hints;
@@ -2087,6 +2203,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       this.emit();
     });
     this.setStatus('ready');
+    if (this.settingsOpen) {
+      this.refreshBilling();
+    }
     void drawers.refreshApis(this);
     setTimeout(() => {
       if (epoch === this.agentGen) {

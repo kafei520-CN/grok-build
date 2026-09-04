@@ -1,3 +1,9 @@
+import {
+  displayUsagePercent,
+  formatQuotaReset,
+  isOfficialGrokAccount,
+  quotaTitle,
+} from '../billing';
 import { DEFAULT_SETTINGS, type GrokSettings, type WebviewToHost } from '../types';
 import { post, tr, ui } from './app';
 import { iconButton } from './dom';
@@ -42,7 +48,7 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.marketplace ?? []).map((row) => row.id).join('|'),
     (ui.state.workflows ?? []).map((row) => row.id).join('|'),
     (ui.state.memoryFiles ?? []).map((row) => row.id).join('|'),
-    `${ui.state.theme?.primary ?? ''}|${ui.state.theme?.secondary ?? ''}|${ui.state.theme?.background ?? ''}|${ui.state.theme?.wallpaper ?? ''}|${ui.state.theme?.wallpaperUrl ?? ''}|${ui.state.theme?.surface ?? ''}`,
+    `${ui.state.theme?.wallpaper ?? ''}|${ui.state.theme?.wallpaperUrl ?? ''}|${ui.state.theme?.surface ?? ''}|${ui.state.theme?.fontUrl ?? ''}|${ui.state.theme?.fontPath ?? ''}`,
     `${ui.state.remote?.running ? '1' : '0'}|${ui.state.remote?.local ? '1' : '0'}|${ui.state.remote?.public ? '1' : '0'}|${ui.state.remote?.port ?? ''}|${ui.state.remote?.code ?? ''}|${ui.state.remote?.codeMode ?? ''}|${ui.state.remote?.publicUrl ?? ''}|${ui.state.remote?.tunnel ?? ''}|${ui.state.remote?.tunnelError ?? ''}|${ui.state.remote?.tunnelHost ?? ''}|${ui.state.remote?.forwardPort ?? ''}|${ui.state.remote?.clients ?? 0}|${ui.state.remote?.error ?? ''}`,
   ].join(':');
   if (!existing || paintedKey !== key) {
@@ -235,6 +241,7 @@ function mountSettings(): HTMLElement {
       ),
     ]),
     accountCard(),
+    quotaCard(),
   );
   el.append(head, body);
   syncSettings(el);
@@ -487,6 +494,45 @@ function accountCard(): HTMLElement {
   return wrap;
 }
 
+function quotaCard(): HTMLElement {
+  const wrap = document.createElement('section');
+  wrap.className = 'settings-block';
+  wrap.dataset.quota = 'wrap';
+  wrap.hidden = true;
+  const card = document.createElement('div');
+  card.className = 'settings-card quota-card';
+  const loading = document.createElement('div');
+  loading.className = 'quota-loading';
+  loading.dataset.quota = 'loading';
+  const title = document.createElement('div');
+  title.className = 'quota-title';
+  title.dataset.quota = 'title';
+  const used = document.createElement('div');
+  used.className = 'quota-used';
+  used.dataset.quota = 'used';
+  const reset = document.createElement('div');
+  reset.className = 'quota-reset';
+  reset.dataset.quota = 'reset';
+  const bar = document.createElement('div');
+  bar.className = 'quota-bar';
+  bar.dataset.quota = 'bar';
+  const fill = document.createElement('span');
+  fill.className = 'quota-fill';
+  fill.dataset.quota = 'fill';
+  bar.append(fill);
+  const product = document.createElement('div');
+  product.className = 'quota-product';
+  product.dataset.quota = 'product';
+  const productName = document.createElement('span');
+  productName.dataset.quota = 'product-name';
+  const productPct = document.createElement('strong');
+  productPct.dataset.quota = 'product-pct';
+  product.append(productName, productPct);
+  card.append(loading, title, used, reset, bar, product);
+  wrap.append(card);
+  return wrap;
+}
+
 function syncSettings(root: HTMLElement): void {
   const settings = current();
   syncSwitch(root, 'compactMode', Boolean(ui.state.compactMode));
@@ -533,6 +579,84 @@ function syncSettings(root: HTMLElement): void {
   }
   if (logout) {
     logout.hidden = !signedIn;
+  }
+  syncQuota(root);
+}
+
+function syncQuota(root: HTMLElement): void {
+  const wrap = root.querySelector('[data-quota="wrap"]') as HTMLElement | null;
+  if (!wrap) {
+    return;
+  }
+  const official = isOfficialGrokAccount(ui.state.account);
+  const quota = ui.state.billing;
+  const loading = Boolean(ui.state.billingLoading) && !quota;
+  if (!official || (!quota && !ui.state.billingLoading)) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  const locale = ui.state.locale === 'zh-CN' ? 'zh-CN' : 'en';
+  const loadingEl = wrap.querySelector('[data-quota="loading"]') as HTMLElement | null;
+  const title = wrap.querySelector('[data-quota="title"]') as HTMLElement | null;
+  const used = wrap.querySelector('[data-quota="used"]') as HTMLElement | null;
+  const reset = wrap.querySelector('[data-quota="reset"]') as HTMLElement | null;
+  const bar = wrap.querySelector('[data-quota="bar"]') as HTMLElement | null;
+  const fill = wrap.querySelector('[data-quota="fill"]') as HTMLElement | null;
+  const product = wrap.querySelector('[data-quota="product"]') as HTMLElement | null;
+  const productName = wrap.querySelector('[data-quota="product-name"]') as HTMLElement | null;
+  const productPct = wrap.querySelector('[data-quota="product-pct"]') as HTMLElement | null;
+  if (loadingEl) {
+    loadingEl.textContent = tr('quotaLoading');
+    loadingEl.hidden = !loading;
+  }
+  if (!quota) {
+    if (title) {
+      title.hidden = true;
+    }
+    if (used) {
+      used.hidden = true;
+    }
+    if (reset) {
+      reset.hidden = true;
+    }
+    if (bar) {
+      bar.hidden = true;
+    }
+    if (product) {
+      product.hidden = true;
+    }
+    return;
+  }
+  const percent = displayUsagePercent(quota.usagePercent);
+  if (title) {
+    title.hidden = false;
+    title.textContent = quotaTitle(locale, quota);
+  }
+  if (used) {
+    used.hidden = false;
+    used.textContent = tr('quotaUsed', { n: percent });
+  }
+  const resetText = formatQuotaReset(locale, quota.periodEnd);
+  if (reset) {
+    reset.hidden = !resetText;
+    reset.textContent = resetText ? tr('quotaReset', { time: resetText }) : '';
+  }
+  if (bar) {
+    bar.hidden = false;
+    bar.classList.toggle('warn', percent >= 80 && percent < 100);
+    bar.classList.toggle('hot', percent >= 100);
+  }
+  if (fill) {
+    fill.style.width = `${percent}%`;
+  }
+  const row = quota.products[0];
+  if (product) {
+    product.hidden = !row;
+  }
+  if (row && productName && productPct) {
+    productName.textContent = row.label;
+    productPct.textContent = `${displayUsagePercent(row.usagePercent)}%`;
   }
 }
 
