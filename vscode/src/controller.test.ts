@@ -108,6 +108,29 @@ describe('controller agent lifecycle', () => {
     assert.equal(controller.snapshot().status, 'missingCli');
     controller.dispose();
   });
+
+  it('useApiLogin skips sign-in and opens API management', async () => {
+    const state = new Map<string, unknown>();
+    bindPlatform(
+      fakePlat({
+        pathEnv: () => '',
+        homeDir: () => path.join(process.cwd(), 'no-such-grok-home'),
+        workspaceFolders: () => [],
+        getState: (key, fallback) =>
+          state.has(key) ? (state.get(key) as typeof fallback) : fallback,
+        setState: async (key, value) => {
+          state.set(key, value);
+        },
+      }),
+    );
+    const controller = new GrokController();
+    await controller.useApiLogin();
+    const snap = controller.snapshot();
+    assert.equal(state.get('ui.skipLogin'), true);
+    assert.equal(snap.settingsOpen, true);
+    assert.equal(snap.settingsPage, 'apis');
+    controller.dispose();
+  });
 });
 
 describe('controller reverse requests', () => {

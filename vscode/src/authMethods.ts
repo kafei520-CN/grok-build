@@ -15,6 +15,14 @@ export function isInteractiveAuthMethod(id: string): boolean {
   return id === AUTH_METHODS.grokCom || id === AUTH_METHODS.oidc;
 }
 
+export function isSessionAuthMethod(id: string | undefined): boolean {
+  return (
+    id === AUTH_METHODS.cachedToken ||
+    id === AUTH_METHODS.grokCom ||
+    id === AUTH_METHODS.oidc
+  );
+}
+
 export function needsInteractiveLogin(methods: AuthMethodInfo[]): boolean {
   const first = methods[0];
   return Boolean(first && isInteractiveAuthMethod(first.id));

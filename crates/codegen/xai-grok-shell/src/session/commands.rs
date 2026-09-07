@@ -326,6 +326,8 @@ pub enum SessionCommand {
     },
     SetSessionModel {
         sampling_config: xai_grok_sampler::SamplerConfig,
+        /// Catalog key (`endpoint-1`), not the routing slug (`grok-4.6`).
+        catalog_model_id: acp::ModelId,
         use_concise: bool,
         /// Models declare differing `model_family`s → compact (lossy) at switch end.
         is_family_switch: bool,

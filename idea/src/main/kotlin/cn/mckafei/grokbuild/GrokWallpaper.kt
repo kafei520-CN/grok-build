@@ -2,7 +2,6 @@ package cn.mckafei.grokbuild
 
 import com.google.gson.JsonObject
 import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.configurations.PathEnvironmentVariableUtil
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.Logger
@@ -115,7 +114,7 @@ object GrokWallpaper {
         val home = System.getProperty("user.home")
         val names = if (SystemInfo.isWindows) listOf("ffmpeg.exe", "ffmpeg") else listOf("ffmpeg")
         for (name in names) {
-            PathEnvironmentVariableUtil.findInPath(name)?.let { return it }
+            findOnPath(name)?.let { return it }
             File(home, ".grok/bin/$name").takeIf { it.isFile }?.let { return it }
         }
         return null

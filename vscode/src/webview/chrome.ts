@@ -355,12 +355,7 @@ export function loginCard(): HTMLElement {
   api.className = 'linkish';
   api.type = 'button';
   api.textContent = tr('useApiKey');
-  api.addEventListener('click', () => {
-    const key = window.prompt(tr('promptApiKey'));
-    if (key) {
-      post({ type: 'setApiKey', key });
-    }
-  });
+  api.addEventListener('click', () => post({ type: 'useApiLogin' }));
   card.append(api);
   return card;
 }

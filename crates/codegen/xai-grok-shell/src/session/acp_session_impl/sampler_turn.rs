@@ -444,6 +444,15 @@ impl SessionActor {
             self.auth_manager
                 .as_ref()
                 .and_then(|am| am.current_wire_valid().map(|a| a.key))
+        } else if !crate::util::is_xai_api_url(&cfg.base_url) {
+            let session_jwt = self
+                .auth_manager
+                .as_ref()
+                .and_then(|am| am.current_or_expired().map(|a| a.key));
+            match creds.api_key {
+                Some(ref key) if session_jwt.as_ref() == Some(key) => None,
+                other => other,
+            }
         } else {
             creds.api_key
         };
@@ -499,7 +508,7 @@ impl SessionActor {
             context_window: cfg.context_window.get(),
             client_version: creds.client_version,
             reasoning_effort: cfg.reasoning_effort,
-            force_http1: false,
+            force_http1: xai_grok_sampler::should_force_http1(&cfg.base_url),
             max_retries: Some(self.max_retries),
             stream_tool_calls: cfg.stream_tool_calls.unwrap_or(false),
             idle_timeout_secs: None,
@@ -781,13 +790,29 @@ impl SessionActor {
     /// repeated 401s ended in silence.
     pub(crate) async fn fail_turn_auth_budget_exhausted(&self, message: String) -> acp::Error {
         const STATUS: Option<u16> = Some(401);
-        let (error_type, message) = match self.auth_manager.as_ref() {
-            Some(auth_manager) => self.apply_auth_remedy(
-                &auth_manager.auth_remedy().after_retries_exhausted(),
-                message,
-                STATUS,
-            ),
-            None => ("auth", message),
+        let (failed_model_id, failed_base_url) = self
+            .chat_state_handle
+            .get_sampling_config()
+            .await
+            .map(|c| (c.model, c.base_url))
+            .unwrap_or_default();
+        let gate = self.auth_gate(&failed_model_id, &failed_base_url);
+        let third_party = !gate.endpoint_is_first_party
+            || matches!(
+                gate.model_byok,
+                crate::agent::auth_method::ModelByok::Byok
+            );
+        let (error_type, message) = if third_party {
+            ("api", message)
+        } else {
+            match self.auth_manager.as_ref() {
+                Some(auth_manager) => self.apply_auth_remedy(
+                    &auth_manager.auth_remedy().after_retries_exhausted(),
+                    message,
+                    STATUS,
+                ),
+                None => ("auth", message),
+            }
         };
         self.log_terminal_failure(error_type, STATUS, &message);
         self.send_xai_notification(XaiSessionUpdate::RetryState(
@@ -976,7 +1001,10 @@ impl SessionActor {
                 })),
             );
         }
-        if auth_recovery_eligible && let Some(ref am) = self.auth_manager {
+        if auth_recovery_eligible
+            && crate::util::is_xai_api_url(&failed_base_url)
+            && let Some(ref am) = self.auth_manager
+        {
             if am
                 .try_recover_unauthorized(crate::auth::recovery::RecoverySource::Turn)
                 .await
@@ -1109,17 +1137,28 @@ impl SessionActor {
         } else {
             detailed_message
         };
+        let third_party_or_byok = {
+            let gate = self.auth_gate(&failed_model_id, &failed_base_url);
+            !gate.endpoint_is_first_party
+                || matches!(
+                    gate.model_byok,
+                    crate::agent::auth_method::ModelByok::Byok
+                )
+        };
         let error_type = if xai_grok_sampling_types::is_context_length_error(&error.message) {
             "context_length"
+        } else if is_auth_401 && third_party_or_byok {
+            "api"
         } else {
             error.kind.as_str()
         };
         let (error_type, detailed_message) = match self.auth_manager.as_ref() {
-            Some(auth_manager) if error_type == "auth" => self.apply_auth_remedy(
-                &auth_manager.auth_remedy(),
-                detailed_message,
-                error.status_code,
-            ),
+            Some(auth_manager) if error_type == "auth" && !third_party_or_byok => self
+                .apply_auth_remedy(
+                    &auth_manager.auth_remedy(),
+                    detailed_message,
+                    error.status_code,
+                ),
             _ => (error_type, detailed_message),
         };
         self.log_terminal_failure(error_type, error.status_code, &detailed_message);

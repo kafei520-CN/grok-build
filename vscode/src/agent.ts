@@ -25,7 +25,7 @@ import { parseRosterList, parseSubagentList } from './roster';
 import { parseTaskList } from './tasksHost';
 import { parseWorktreeApply, parseWorktreeList } from './worktreeHost';
 import { parseSessionRow, sessionHasHistory } from './sessionRow';
-import { asNum, asObject, asString, timesFromMeta } from './wire';
+import { asErrorText, asNum, asObject, asString, timesFromMeta } from './wire';
 import type {
   AccountInfo,
   AuthMethodWire,
@@ -712,10 +712,10 @@ export function parseSessionUpdate(params: unknown): {
       attempt: asNum(update['attempt']),
       maxRetries: asNum(update['maxRetries']) ?? asNum(update['max_retries']),
       attempts: asNum(update['attempts']),
-      reason: asString(update['reason']),
+      reason: asErrorText(update['reason']),
       errorType: asString(update['errorType']) ?? asString(update['error_type']),
-      message: asString(update['message']),
-      error: asString(update['error']),
+      message: asErrorText(update['message']),
+      error: asErrorText(update['error']),
       isRateLimited: update['isRateLimited'] === true || update['is_rate_limited'] === true,
       rawInput:
         update['rawInput'] ??

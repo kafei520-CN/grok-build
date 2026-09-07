@@ -4859,7 +4859,7 @@ pub(crate) fn resolve_credentials(
             info.base_url.clone(),
             xai_chat_state::AuthType::ApiKey,
         )
-    } else if let Some(key) = session_key {
+    } else if let Some(key) = session_key.filter(|_| crate::util::is_xai_api_url(&info.base_url)) {
         (
             Some(key.to_owned()),
             info.base_url.clone(),
@@ -5256,7 +5256,7 @@ pub(crate) fn sampling_config_for_model(
         context_window: info.context_window.get(),
         client_version,
         reasoning_effort: info.reasoning_effort,
-        force_http1: false,
+        force_http1: xai_grok_sampler::should_force_http1(&credentials.base_url),
         max_retries: info.max_retries,
         stream_tool_calls: info.stream_tool_calls.unwrap_or(false),
         idle_timeout_secs: None,

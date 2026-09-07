@@ -385,19 +385,17 @@ impl ModelByok {
 /// demote on `Unknown`). It refreshes when `endpoint_is_first_party` — the
 /// request targets a first-party host (cli-chat-proxy / first-party API),
 /// where sending the session token cannot leak to a third-party BYOK
-/// endpoint. A definite `NotByok` always refreshes (it only ever routes to
-/// the session endpoint); a definite `Byok` never does.
+/// endpoint. A definite `Byok` never does. A definite `NotByok` still requires
+/// a first-party host: tools that rewrite `base_url` onto a relay must not
+/// send the grok.com session token there.
 pub(crate) fn session_token_auth_gate(
     is_session_based_method: bool,
     model_byok: ModelByok,
     endpoint_is_first_party: bool,
 ) -> bool {
     is_session_based_method
-        && match model_byok {
-            ModelByok::NotByok => true,
-            ModelByok::Byok => false,
-            ModelByok::Unknown => endpoint_is_first_party,
-        }
+        && endpoint_is_first_party
+        && !matches!(model_byok, ModelByok::Byok)
 }
 
 pub const AUTH_ERROR_SESSION_EXPIRED: &str =

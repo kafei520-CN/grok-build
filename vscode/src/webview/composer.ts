@@ -61,6 +61,7 @@ export function mountComposer(parent: HTMLElement): void {
 let barKey = '';
 let chipKey = '';
 let menuKey = '';
+let pendingEffortModel: string | undefined;
 let fileSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function patchComposer(): void {
@@ -94,6 +95,7 @@ export function patchComposer(): void {
     releaseByClass('menu');
     releaseByClass('picker-menu');
     releaseByClass('ctx-tip');
+    pendingEffortModel = undefined;
   }
   const menuSlot = document.getElementById('composer-menu-slot');
   const nextMenuKey = `${ui.menu ?? ''}:${ui.draft}:${(ui.state.fileHits ?? []).length}`;
@@ -223,31 +225,6 @@ function fillComposerBar(bar: HTMLElement, input: HTMLTextAreaElement): void {
     }
     post({ type: 'attach' });
   });
-  const seg = document.createElement('div');
-  seg.className = 'seg';
-  for (const [id, key] of [
-    ['ask', 'modeAsk'],
-    ['plan', 'modePlan'],
-    ['default', 'modeAgent'],
-  ] as const) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = tr(key);
-    const current = ui.state.modeId ?? 'default';
-    if (current === id || (id === 'default' && current !== 'ask' && current !== 'plan')) {
-      btn.className = 'on';
-    }
-    const locked = turnBusy();
-    btn.disabled = locked;
-    btn.title = locked ? tr('busyLock') : tr(key);
-    btn.addEventListener('click', () => {
-      if (turnBusy()) {
-        return;
-      }
-      post({ type: 'setMode', modeId: id });
-    });
-    seg.append(btn);
-  }
   const send = document.createElement('button');
   send.type = 'button';
   send.className = ui.state.status === 'streaming' ? 'send-fab stop' : 'send-fab';
@@ -261,7 +238,7 @@ function fillComposerBar(bar: HTMLElement, input: HTMLTextAreaElement): void {
     send.addEventListener('click', () => sendFrom(input));
   }
   releaseByClass('picker-menu');
-  bar.replaceChildren(plus, seg, modelPicker(), effortPicker(), contextMeter(), send);
+  bar.replaceChildren(plus, modePicker(), modelEffortPicker(), contextMeter(), send);
 }
 
 function composerBarKey(): string {
@@ -274,6 +251,7 @@ function composerBarKey(): string {
     current?.currentEffort ?? '',
     current?.efforts?.join(',') ?? '',
     ui.picker ?? '',
+    pendingEffortModel ?? '',
     ui.state.locale ?? '',
     canType() ? '1' : '0',
     (model?.available.length ?? 0).toString(),
@@ -401,22 +379,45 @@ function currentModel(): ModelOption | undefined {
   return ui.state.models?.available.find((m) => m.id === ui.state.models?.currentId);
 }
 
+function modelById(id?: string): ModelOption | undefined {
+  if (!id) {
+    return undefined;
+  }
+  return ui.state.models?.available.find((m) => m.id === id);
+}
+
 function currentModelLabel(): string {
   const model = currentModel();
   return modelDisplayName(model?.id ?? ui.state.models?.currentId, model?.name) || 'Grok';
 }
 
-function currentEffortValue(): string {
-  const model = currentModel();
-  if (model?.currentEffort) {
-    return model.currentEffort;
+function currentModeId(): string {
+  const current = ui.state.modeId ?? 'default';
+  return current === 'ask' || current === 'plan' ? current : 'default';
+}
+
+function currentModeLabel(): string {
+  const id = currentModeId();
+  if (id === 'ask') {
+    return tr('modeAsk');
   }
-  const choices = effortChoices();
+  if (id === 'plan') {
+    return tr('modePlan');
+  }
+  return tr('modeAgent');
+}
+
+function currentEffortValue(model?: ModelOption): string {
+  const target = model ?? currentModel();
+  if (target?.currentEffort) {
+    return target.currentEffort;
+  }
+  const choices = effortChoices(target);
   return choices.includes('high') ? 'high' : (choices[0] ?? 'high');
 }
 
-function effortChoices(): string[] {
-  const listed = currentModel()?.efforts?.filter((item) => item.trim().length > 0);
+function effortChoices(model?: ModelOption): string[] {
+  const listed = (model ?? currentModel())?.efforts?.filter((item) => item.trim().length > 0);
   if (listed && listed.length > 0) {
     return listed;
   }
@@ -430,40 +431,117 @@ function displayEffort(level?: string): string {
   return effortLabel(loc(), level) || level;
 }
 
-function modelPicker(): HTMLElement {
-  const models = ui.state.models?.available ?? [];
+function combinedModelEffortLabel(): string {
+  const name = currentModelLabel();
+  const effort = displayEffort(currentEffortValue());
+  return effort ? `${name} · ${effort}` : name;
+}
+
+function modePicker(): HTMLElement {
+  const current = currentModeId();
   return pickerControl({
-    kind: 'model',
-    label: currentModelLabel(),
-    title: tr('switchModel'),
-    disabled: turnBusy() || !canType() || models.length === 0,
-    items: models.map((model) => ({
-      id: model.id,
-      label: modelDisplayName(model.id, model.name) || model.id,
-      selected: model.id === ui.state.models?.currentId,
-    })),
-    onPick: (id) => post({ type: 'setModel', modelId: id }),
+    kind: 'mode',
+    label: currentModeLabel(),
+    title: tr('switchMode'),
+    disabled: turnBusy(),
+    items: [
+      { id: 'ask', label: tr('modeAsk'), selected: current === 'ask' },
+      { id: 'plan', label: tr('modePlan'), selected: current === 'plan' },
+      { id: 'default', label: tr('modeAgent'), selected: current === 'default' },
+    ],
+    onPick: (id) => post({ type: 'setMode', modeId: id }),
   });
 }
 
-function effortPicker(): HTMLElement {
-  const selected = currentEffortValue();
-  return pickerControl({
-    kind: 'effort',
-    label: displayEffort(selected),
-    title: tr('switchEffort'),
-    disabled: turnBusy() || !canType(),
-    items: effortChoices().map((level) => ({
-      id: level,
-      label: displayEffort(level),
-      selected: level === selected,
-    })),
-    onPick: (id) => post({ type: 'setEffort', level: id }),
+function modelEffortPicker(): HTMLElement {
+  const models = ui.state.models?.available ?? [];
+  const open = ui.picker === 'model' || ui.picker === 'effort';
+  const wrap = document.createElement('div');
+  wrap.className = 'picker model';
+  wrap.addEventListener('click', (event) => event.stopPropagation());
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = open ? 'picker-btn open' : 'picker-btn';
+  const locked = turnBusy() || !canType() || models.length === 0;
+  btn.title = locked && turnBusy() ? tr('busyLock') : tr('switchModel');
+  btn.disabled = locked;
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const text = document.createElement('span');
+  text.className = 'picker-label';
+  text.textContent = combinedModelEffortLabel();
+  btn.append(text);
+  btn.insertAdjacentHTML('beforeend', iconChevron());
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (locked) {
+      return;
+    }
+    if (open) {
+      ui.picker = undefined;
+      pendingEffortModel = undefined;
+    } else {
+      ui.picker = 'model';
+      pendingEffortModel = ui.state.models?.currentId;
+    }
+    ui.moreOpen = false;
+    ui.menu = undefined;
+    render();
   });
+  wrap.append(btn);
+  if (!open || ui.state.settingsOpen) {
+    return wrap;
+  }
+  if (ui.picker === 'effort') {
+    const model = modelById(pendingEffortModel) ?? currentModel();
+    const selectedEffort = currentEffortValue(model);
+    const efforts = effortChoices(model);
+    const list = pickerMenu(
+      efforts.map((level) => ({
+        id: level,
+        label: displayEffort(level),
+        selected: level === selectedEffort,
+      })),
+      (item) => {
+        ui.picker = undefined;
+        pendingEffortModel = undefined;
+        if (!item.selected) {
+          post({ type: 'setEffort', level: item.id });
+        }
+        render();
+      },
+    );
+    pinFloating(list, btn, { prefer: 'above', align: 'end' });
+    return wrap;
+  }
+  if (models.length === 0) {
+    return wrap;
+  }
+  const list = pickerMenu(
+    models.map((model) => ({
+      id: model.id,
+      label: modelDisplayName(model.id, model.name) || model.id,
+      selected: model.id === (pendingEffortModel ?? ui.state.models?.currentId),
+    })),
+    (item) => {
+      pendingEffortModel = item.id;
+      if (!item.selected) {
+        post({ type: 'setModel', modelId: item.id });
+      }
+      const picked = modelById(item.id);
+      ui.picker = effortChoices(picked).length ? 'effort' : undefined;
+      if (ui.picker !== 'effort') {
+        pendingEffortModel = undefined;
+      }
+      render();
+    },
+  );
+  pinFloating(list, btn, { prefer: 'above', align: 'end' });
+  return wrap;
 }
 
 function pickerControl(opts: {
-  kind: 'model' | 'effort';
+  kind: 'mode' | 'model' | 'effort';
   label: string;
   title: string;
   disabled: boolean;
@@ -485,43 +563,52 @@ function pickerControl(opts: {
   text.textContent = opts.label;
   btn.append(text);
   btn.insertAdjacentHTML('beforeend', iconChevron());
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
     if (opts.disabled) {
       return;
     }
     ui.picker = ui.picker === opts.kind ? undefined : opts.kind;
+    pendingEffortModel = undefined;
     ui.moreOpen = false;
     ui.menu = undefined;
     render();
   });
   wrap.append(btn);
   if (ui.picker === opts.kind && opts.items.length > 0 && !ui.state.settingsOpen) {
-    const list = document.createElement('div');
-    list.className = 'picker-menu';
-    list.setAttribute('role', 'listbox');
-    list.addEventListener('click', (event) => event.stopPropagation());
-    for (const item of opts.items) {
-      const option = document.createElement('button');
-      option.type = 'button';
-      option.className = item.selected ? 'picker-item on' : 'picker-item';
-      option.setAttribute('role', 'option');
-      option.textContent = item.label;
-      option.addEventListener('click', () => {
-        ui.picker = undefined;
-        if (!item.selected) {
-          opts.onPick(item.id);
-        }
-        render();
-      });
-      list.append(option);
-    }
+    const list = pickerMenu(opts.items, (item) => {
+      ui.picker = undefined;
+      if (!item.selected) {
+        opts.onPick(item.id);
+      }
+      render();
+    });
     pinFloating(list, btn, {
       prefer: 'above',
-      align: opts.kind === 'effort' ? 'end' : 'start',
-      matchWidth: true,
+      align: 'start',
     });
   }
   return wrap;
+}
+
+function pickerMenu(
+  items: Array<{ id: string; label: string; selected: boolean }>,
+  onPick: (item: { id: string; label: string; selected: boolean }) => void,
+): HTMLElement {
+  const list = document.createElement('div');
+  list.className = 'picker-menu';
+  list.setAttribute('role', 'listbox');
+  list.addEventListener('click', (event) => event.stopPropagation());
+  for (const item of items) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = item.selected ? 'picker-item on' : 'picker-item';
+    option.setAttribute('role', 'option');
+    option.textContent = item.label;
+    option.addEventListener('click', () => onPick(item));
+    list.append(option);
+  }
+  return list;
 }
 
 function slashMenu(): HTMLElement {

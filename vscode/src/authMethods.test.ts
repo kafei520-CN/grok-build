@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   findInteractiveAuthMethod,
+  isSessionAuthMethod,
   needsInteractiveLogin,
   selectEagerAuthMethod,
   selectNonInteractiveAuthMethod,
@@ -48,5 +49,12 @@ describe('authMethods', () => {
   it('skip login has no method when only the browser is advertised', () => {
     const methods = [{ id: 'grok.com', name: 'Grok' }];
     assert.equal(selectNonInteractiveAuthMethod(methods), undefined);
+  });
+
+  it('treats grok.com login methods as session auth', () => {
+    assert.equal(isSessionAuthMethod('cached_token'), true);
+    assert.equal(isSessionAuthMethod('grok.com'), true);
+    assert.equal(isSessionAuthMethod('oidc'), true);
+    assert.equal(isSessionAuthMethod('xai.api_key'), false);
   });
 });

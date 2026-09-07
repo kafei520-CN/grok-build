@@ -12,7 +12,16 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.52: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.61: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.61 — After grok.com login, using a custom relay switches to API-key auth without /logout (grok.com tokens stay on disk). Switching back to an official model restores the session login.</p>
+<p>0.2.60 — Restored history shows the picker model_name (e.g. [La]Grok 4.6), not official Grok 4.6. After grok.com login, sending on a custom relay re-applies that model so /logout is not required first.</p>
+<p>0.2.59 — Restored history shows the model that actually ran. After grok.com login, the session JWT is not sent to a relay; relay 401s do not refresh official OIDC. Put the relay API key in API manager.</p>
+<p>0.2.58 — Custom API 401 is an API-key error, not grok.com /login. Third-party hosts do not receive the grok.com session token.</p>
+<p>0.2.57 — Login “use API key” skips sign-in and opens API manager. Retry banners show the real connection cause and clear as soon as the stream resumes. Third-party API hosts use HTTP/1.1.</p>
+<p>0.2.56 — IntelliJ: resolve node and ffmpeg from PATH without PathEnvironmentVariableUtil.findInPath (scheduled for removal in 2026.3).</p>
+<p>0.2.55 — Mode stays left. Model and effort share one right-side trigger: open the model list first, then that same menu becomes the effort list. Dropdowns no longer fail to open or ellipsize labels.</p>
+<p>0.2.54 — Composer: compact mode dropdown on the left; model and effort share one trigger. Opening it shows the model list with effort beside it (right, or left if tight). Menu labels are not ellipsized.</p>
+<p>0.2.53 — Ask/Plan/Agent is a left dropdown. Model and effort share one trigger (name · effort); picking a model opens effort to the right.</p>
 <p>0.2.52 — Theme can import a font and adjust size, tracking, and text color. Lock contrast keeps auto light/dark text. Color pickers no longer hitch while dragging.</p>
 <p>0.2.51 — Settings under Account shows official Grok subscription remaining (weekly/monthly SuperGrok limit, used %, reset). Custom API endpoints are not shown.</p>
 <p>0.2.50 — Jump-to-latest glass blur works: no transform so the wallpaper frost clips into the circle.</p>

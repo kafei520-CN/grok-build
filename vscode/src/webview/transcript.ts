@@ -937,7 +937,34 @@ function turnErrorCard(message: ChatMessage): HTMLElement {
   body.className = 'turn-error-msg';
   body.textContent = error.message;
   el.append(body);
+  if (/unknownissuer|invalid peer certificate|certificate unverified|not trusted/i.test(error.message)) {
+    const hint = document.createElement('div');
+    hint.className = 'turn-error-msg';
+    hint.textContent = tr('errorUntrustedCert');
+    el.append(hint);
+  } else if (/auth recovery succeeded but .*rejected \(401\)/i.test(error.message)) {
+    const hint = document.createElement('div');
+    hint.className = 'turn-error-msg';
+    hint.textContent = tr('errorRelayAfterOfficialLogin');
+    el.append(hint);
+  } else if (isCustomEndpointAuthError(error)) {
+    const hint = document.createElement('div');
+    hint.className = 'turn-error-msg';
+    hint.textContent = tr('errorApiKeyRejected');
+    el.append(hint);
+  }
   return el;
+}
+
+function isCustomEndpointAuthError(error: { code?: string; message: string }): boolean {
+  const text = error.message;
+  if (/\/login to re-authenticate|session has expired/i.test(text)) {
+    return !/(?:api\.x\.ai|api\.grok\.com|cli-chat-proxy|\.x\.ai\/|\.grok\.com\/)/i.test(text);
+  }
+  if (error.code !== 'HTTP 401' && error.code !== 'auth' && !/unauthorized \(401\)/i.test(text)) {
+    return false;
+  }
+  return !/(?:api\.x\.ai|api\.grok\.com|cli-chat-proxy|\.x\.ai\/|\.grok\.com\/)/i.test(text);
 }
 
 function hasWork(message: ChatMessage): boolean {

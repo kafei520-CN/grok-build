@@ -79,12 +79,41 @@ export function extractFromText(text: string): TurnError {
   if (!trimmed) {
     return { message: 'Unknown error' };
   }
+  const afterRetries = trimmed.match(/^failed after \d+ retries:\s*([\s\S]*)$/i);
+  if (afterRetries?.[1]) {
+    return extractFromText(afterRetries[1]);
+  }
   const api = trimmed.match(/^API error \(status (\d+)(?:\s+([^)]*))?\):\s*([\s\S]*)$/);
   if (api) {
     const body = api[3]?.trim();
+    const fromJson = parseJsonError(body);
     return compactError({
-      code: `HTTP ${api[1]}`,
-      message: body || api[2]?.trim() || trimmed,
+      code: fromJson?.code ?? `HTTP ${api[1]}`,
+      message: fromJson?.message || body || api[2]?.trim() || trimmed,
+    });
+  }
+  const fromJson = parseJsonError(trimmed);
+  if (fromJson) {
+    return compactError(fromJson);
+  }
+  if (
+    /run \/login to re-authenticate/i.test(trimmed) &&
+    !/(?:api\.x\.ai|api\.grok\.com|cli-chat-proxy|\.x\.ai\/|\.grok\.com\/)/i.test(trimmed)
+  ) {
+    return compactError({
+      code: 'HTTP 401',
+      message: trimmed,
+    });
+  }
+  const sending = trimmed.replace(/\s+/g, ' ').match(
+    /^request error:\s*error sending request for url \((https?:\/\/[^)]+)\)(?::\s*(.*))?$/i,
+  );
+  if (sending) {
+    const url = sending[1];
+    const cause = sending[2]?.trim();
+    return compactError({
+      code: 'connection',
+      message: cause ? `${cause}\n${url}` : trimmed,
     });
   }
   const empty = trimmed.match(/empty response from model \(([^)]+)\)/i);
@@ -100,6 +129,41 @@ export function extractFromText(text: string): TurnError {
     return { code: `HTTP ${httpWord[1]}`, message: trimmed };
   }
   return { message: trimmed };
+}
+
+function parseJsonError(text: string | undefined): { message: string; code?: string } | undefined {
+  if (!text) {
+    return undefined;
+  }
+  const start = text.indexOf('{');
+  if (start < 0) {
+    return undefined;
+  }
+  try {
+    const obj = JSON.parse(text.slice(start)) as unknown;
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return undefined;
+    }
+    const root = obj as Record<string, unknown>;
+    const nested =
+      root['error'] && typeof root['error'] === 'object' && !Array.isArray(root['error'])
+        ? (root['error'] as Record<string, unknown>)
+        : {};
+    const message =
+      (typeof root['error'] === 'string' && root['error']) ||
+      (typeof nested['message'] === 'string' && nested['message']) ||
+      (typeof root['message'] === 'string' && root['message']) ||
+      (typeof root['detail'] === 'string' && root['detail']) ||
+      '';
+    const codeRaw = nested['code'] ?? nested['type'] ?? root['code'];
+    const code = typeof codeRaw === 'string' && codeRaw.trim() ? codeRaw : undefined;
+    if (!message && !code) {
+      return undefined;
+    }
+    return { message: message || text, code };
+  } catch {
+    return undefined;
+  }
 }
 
 function parseErrorPayload(data: unknown): TurnError & { http?: number; kind?: string } {

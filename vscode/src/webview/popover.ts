@@ -1,5 +1,5 @@
 export type PinAlign = 'start' | 'end';
-export type PinPrefer = 'above' | 'below';
+export type PinPrefer = 'above' | 'below' | 'right' | 'left';
 
 export interface PlaceBox {
   left: number;
@@ -32,8 +32,15 @@ export interface PlaceResult {
   maxWidth: number;
 }
 
-/** Keep a floating panel inside the viewport, flipping above/below when needed. */
+/** Keep a floating panel inside the viewport, flipping above/below or left/right. */
 export function placeFloating(opts: PlaceOpts): PlaceResult {
+  if (opts.prefer === 'right' || opts.prefer === 'left') {
+    return placeBeside(opts);
+  }
+  return placeAboveBelow(opts);
+}
+
+function placeAboveBelow(opts: PlaceOpts): PlaceResult {
   const gap = opts.gap ?? 6;
   const pad = opts.pad ?? 8;
   const viewRight = opts.view.left + opts.view.width;
@@ -57,6 +64,38 @@ export function placeFloating(opts: PlaceOpts): PlaceResult {
   const maxTop = viewBottom - pad - height;
   top = clamp(top, minTop, Math.max(minTop, maxTop));
   return { top, left, maxHeight: Math.max(maxHeight, 48), maxWidth: availW };
+}
+
+function placeBeside(opts: PlaceOpts): PlaceResult {
+  const gap = opts.gap ?? 6;
+  const pad = opts.pad ?? 8;
+  const viewRight = opts.view.left + opts.view.width;
+  const viewBottom = opts.view.top + opts.view.height;
+  const availW = Math.max(48, opts.view.width - pad * 2);
+  const width = Math.min(Math.max(opts.size.width, 1), availW);
+  const spaceRight = Math.max(0, viewRight - pad - opts.anchor.right - gap);
+  const spaceLeft = Math.max(0, opts.anchor.left - (opts.view.left + pad) - gap);
+  const need = Math.min(width, 96);
+  const useRight =
+    opts.prefer === 'right'
+      ? spaceRight >= need || spaceRight >= spaceLeft
+      : spaceLeft < need && spaceRight > spaceLeft;
+  const maxWidth = Math.max(48, useRight ? spaceRight : spaceLeft);
+  const placedW = Math.min(width, maxWidth);
+  let left = useRight ? opts.anchor.right + gap : opts.anchor.left - gap - placedW;
+  left = clamp(left, opts.view.left + pad, viewRight - pad - placedW);
+  const availH = Math.max(48, viewBottom - pad - (opts.view.top + pad));
+  const height = Math.min(opts.size.height, availH);
+  let top = opts.align === 'end' ? opts.anchor.bottom - height : opts.anchor.top;
+  const minTop = opts.view.top + pad;
+  const maxTop = viewBottom - pad - height;
+  top = clamp(top, minTop, Math.max(minTop, maxTop));
+  return {
+    top,
+    left,
+    maxHeight: Math.max(viewBottom - pad - top, 48),
+    maxWidth: Math.max(maxWidth, 48),
+  };
 }
 
 type PinSpec = {
@@ -218,11 +257,13 @@ function applyPin(el: HTMLElement): void {
   const anchor = spec.anchor.getBoundingClientRect();
   const matchW = spec.matchWidth ? anchor.width : 0;
   if (matchW > 0) {
-    el.style.width = `${matchW}px`;
     el.style.minWidth = `${matchW}px`;
+  } else {
+    el.style.minWidth = '';
   }
+  el.style.width = 'max-content';
   const size = {
-    width: matchW > 0 ? matchW : Math.max(el.offsetWidth, el.scrollWidth, 96),
+    width: Math.max(el.offsetWidth, el.scrollWidth, 96, matchW),
     height: Math.max(el.offsetHeight, el.scrollHeight, 1),
   };
   const placed = placeFloating({
@@ -235,7 +276,7 @@ function applyPin(el: HTMLElement): void {
   el.style.top = `${placed.top}px`;
   el.style.left = `${placed.left}px`;
   el.style.maxHeight = `${placed.maxHeight}px`;
-  el.style.maxWidth = `${matchW > 0 ? matchW : placed.maxWidth}px`;
+  el.style.maxWidth = `${placed.maxWidth}px`;
   el.style.zIndex = '50';
 }
 

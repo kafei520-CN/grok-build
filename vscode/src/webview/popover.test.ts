@@ -62,6 +62,28 @@ describe('placeFloating', () => {
     assert.ok(placed.maxWidth >= 92);
   });
 
+  it('opens to the right of the anchor', () => {
+    const placed = placeFloating({
+      view,
+      anchor: { left: 40, top: 100, right: 140, bottom: 280 },
+      size: { width: 80, height: 120 },
+      prefer: 'right',
+    });
+    assert.equal(placed.left, 140 + 6);
+    assert.equal(placed.top, 100);
+  });
+
+  it('flips left when the right edge is too tight', () => {
+    const placed = placeFloating({
+      view: { left: 0, top: 0, width: 200, height: 400 },
+      anchor: { left: 80, top: 40, right: 180, bottom: 200 },
+      size: { width: 90, height: 80 },
+      prefer: 'right',
+    });
+    assert.ok(placed.left + Math.min(90, placed.maxWidth) <= 180);
+    assert.ok(placed.left >= 8);
+  });
+
   it('clamps a wide panel to the viewport', () => {
     const placed = placeFloating({
       view: { left: 0, top: 0, width: 120, height: 400 },

@@ -9,6 +9,21 @@ export function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
+/** Error payloads may be a string or a JSON object from the provider. */
+export function asErrorText(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (value && typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 export function unwrapPayload(raw: unknown): Record<string, unknown> {
   const obj = asObject(raw);
   const inner = obj['result'];

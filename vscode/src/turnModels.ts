@@ -1,0 +1,136 @@
+import { DEFAULT_CUSTOM_EFFORTS } from './apiEndpoints';
+import { plat } from './platform';
+import type { ApiEndpoint, ChatMessage, ModelOption } from './types';
+
+const STATE_KEY = 'session.turnModels';
+
+export type TurnModelStamp = {
+  modelId?: string;
+  modelName?: string;
+  effort?: string;
+};
+
+type Store = Record<string, TurnModelStamp[]>;
+
+export function isCustomModelId(id?: string): boolean {
+  return Boolean(id?.startsWith('endpoint-'));
+}
+
+/** Official grok.com catalog titles — do not stamp these onto unlabeled history. */
+export function isOfficialGrokStamp(stamp: TurnModelStamp): boolean {
+  const id = (stamp.modelId ?? '').trim();
+  const name = (stamp.modelName ?? '').trim();
+  if (isCustomModelId(id) || name.startsWith('[')) {
+    return false;
+  }
+  return /^grok-[\d.]+$/i.test(id) || /^Grok\s+[\d.]+$/i.test(name);
+}
+
+export function overlayApiModels(
+  models: { currentId?: string; available: ModelOption[] } | undefined,
+  apis: ApiEndpoint[],
+): { currentId?: string; available: ModelOption[] } | undefined {
+  if (!models) {
+    return models;
+  }
+  const enabled = apis.filter((row) => row.enabled);
+  const byId = new Map(enabled.map((row) => [row.id, row]));
+  const available = models.available.map((model) => {
+    const api = byId.get(model.id);
+    return api ? { ...model, name: api.name } : model;
+  });
+  for (const api of enabled) {
+    if (available.some((model) => model.id === api.id)) {
+      continue;
+    }
+    available.push({
+      id: api.id,
+      name: api.name,
+      currentEffort: 'high',
+      efforts: DEFAULT_CUSTOM_EFFORTS,
+    });
+  }
+  return { ...models, available };
+}
+
+export function assistantStamps(messages: ChatMessage[]): TurnModelStamp[] {
+  return messages
+    .filter((message) => message.role === 'assistant')
+    .map((message) => ({
+      modelId: message.modelId,
+      modelName: message.modelName,
+      effort: message.effort,
+    }))
+    .filter((stamp) => Boolean(stamp.modelId || stamp.modelName));
+}
+
+export function applyStoredTurnModels(
+  messages: ChatMessage[],
+  stamps: TurnModelStamp[] | undefined,
+): void {
+  if (!stamps?.length) {
+    return;
+  }
+  let index = 0;
+  for (const message of messages) {
+    if (message.role !== 'assistant') {
+      continue;
+    }
+    const stamp = stamps[index];
+    index += 1;
+    if (!stamp) {
+      continue;
+    }
+    if (stamp.modelId) {
+      message.modelId = stamp.modelId;
+    }
+    if (stamp.modelName) {
+      message.modelName = stamp.modelName;
+    }
+    if (stamp.effort) {
+      message.effort = stamp.effort;
+    }
+  }
+}
+
+export function readStoredTurnModels(sessionId: string | undefined): TurnModelStamp[] {
+  if (!sessionId) {
+    return [];
+  }
+  return readStore()[sessionId] ?? [];
+}
+
+export async function persistTurnModels(
+  sessionId: string | undefined,
+  messages: ChatMessage[],
+): Promise<void> {
+  if (!sessionId) {
+    return;
+  }
+  const stamps = assistantStamps(messages);
+  if (!stamps.length) {
+    return;
+  }
+  const store = { ...readStore(), [sessionId]: stamps };
+  await plat().setState(STATE_KEY, trimStore(store));
+}
+
+function readStore(): Store {
+  const raw = plat().getState<Store>(STATE_KEY, {});
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+function trimStore(store: Store): Store {
+  const ids = Object.keys(store);
+  if (ids.length <= 80) {
+    return store;
+  }
+  const keep = new Set(ids.slice(-80));
+  const next: Store = {};
+  for (const id of ids) {
+    if (keep.has(id)) {
+      next[id] = store[id];
+    }
+  }
+  return next;
+}

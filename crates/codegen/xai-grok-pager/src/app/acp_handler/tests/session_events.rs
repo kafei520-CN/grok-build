@@ -444,9 +444,13 @@
         assert!(is_reauthable_failure(Some("auth"), "Unauthorized (401)"));
         assert!(is_reauthable_failure(
             Some("api"),
+            "Unauthorized (401) from https://api.x.ai/v1/responses"
+        ));
+        assert!(!is_reauthable_failure(
+            Some("api"),
             "Unauthorized (401) from https://proxy/v1/responses"
         ));
-        assert!(is_reauthable_failure(None, "Unauthorized (401)"));
+        assert!(!is_reauthable_failure(None, "Unauthorized (401)"));
         // legacy_auth carries its own migration guidance — excluded.
         assert!(!is_reauthable_failure(
             Some("legacy_auth"),
@@ -528,7 +532,7 @@
         apply_retry_state(
             &RetryState::Failed {
                 error_type: "api".into(),
-                message: "Unauthorized (401) from https://proxy/v1/responses: invalid credentials"
+                message: "Unauthorized (401) from https://api.x.ai/v1/responses: invalid credentials"
                     .into(),
             },
             &mut session,
@@ -537,6 +541,29 @@
             last_session_event(&scrollback),
             Some(SessionEvent::ReAuthRequired)
         ));
+    }
+
+    #[test]
+    fn apply_retry_state_third_party_401_is_not_grok_login() {
+        let mut session = make_session(Some("s1"));
+        let mut scrollback = ScrollbackState::new();
+        apply_retry_state(
+            &RetryState::Failed {
+                error_type: "api".into(),
+                message: "Unauthorized (401) from https://api.inktandwkx.top:51000/v1/chat/completions"
+                    .into(),
+            },
+            &mut session,
+            &mut scrollback,
+            false,
+        );
+        assert!(
+            !matches!(
+                last_session_event(&scrollback),
+                Some(SessionEvent::ReAuthRequired)
+            ),
+            "BYOK / relay 401 must not ask for grok.com /login"
+        );
     }
 
     /// Legacy WebLogin auth keeps its verbose message (with `grok logout` /

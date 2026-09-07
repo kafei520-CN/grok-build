@@ -1,10 +1,12 @@
 import * as path from 'node:path';
 import {
   findInteractiveAuthMethod,
+  isSessionAuthMethod,
   needsInteractiveLogin,
   selectEagerAuthMethod,
   selectNonInteractiveAuthMethod,
 } from './authMethods';
+import { AUTH_METHODS } from './constants';
 import { GrokAgent } from './agent';
 import {
   addActiveFile,
@@ -33,6 +35,7 @@ import { buildPromptBlocks } from './prompt';
 import { formatAgentError, formatErrorLine, isCancelError } from './errors';
 import { readGrokSettings } from './settings';
 import {
+  applyRestoredTurnModels,
   applySessionUpdate,
   finalizeReplayTimes,
   freezeTurnSteps,
@@ -40,6 +43,13 @@ import {
   mergeModelCatalog,
   modelsFromResult,
 } from './sessionUpdates';
+import {
+  applyStoredTurnModels,
+  isCustomModelId,
+  overlayApiModels,
+  persistTurnModels,
+  readStoredTurnModels,
+} from './turnModels';
 import { FALLBACK_COMMANDS, classifySlash, modeLabel, promptModeMeta, type HostAction } from './slash';
 import { imageMcpServersMeta } from './imageTool';
 import { isOfficialGrokAccount, parseBilling, type BillingQuota } from './billing';
@@ -221,6 +231,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   lastApiMutation?: { id: string; at: number };
   private pendingModelId?: string;
   private pendingEffort?: string;
+  /** grok.com / cached_token id to restore after a relay turn used xai.api_key. */
+  private sessionAuthMethodId?: string;
   private runGen = 0;
   private agentGen = 0;
   private sessionOp = 0;
@@ -472,6 +484,10 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     try {
       await authPromise;
       this.account = await agent.authInfo().catch(() => undefined);
+      this.sessionAuthMethodId =
+        this.account?.methodId && isSessionAuthMethod(this.account.methodId)
+          ? this.account.methodId
+          : interactive.id;
       await this.createSession(agent);
       this.loginView = undefined;
       this.setStatus('ready');
@@ -486,6 +502,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
         this.emit();
       }
     }
+  }
+
+  async useApiLogin(): Promise<void> {
+    await this.skipLogin();
+    this.openApis();
   }
 
   async skipLogin(): Promise<void> {
@@ -542,6 +563,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     abortClientRpcs(this, 'cancel');
     this.account = undefined;
+    this.sessionAuthMethodId = undefined;
     this.billing = undefined;
     this.billingLoading = false;
     this.billingSeq += 1;
@@ -615,6 +637,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       }
       return;
     }
+    await this.applySelectedCustomModel(agent);
     this.error = undefined;
     const run = ++this.runGen;
     const blocks = await buildPromptBlocks(trimmed, this.attachments);
@@ -643,6 +666,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       ...this.turnModelFields(),
     };
     this.messages = [...this.messages, userMessage, assistant];
+    void persistTurnModels(this.currentSessionId ?? agent.sessionId, this.messages);
     this.attachments = [];
     this.setStatus('streaming');
     try {
@@ -843,6 +867,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       return;
     }
     try {
+      await this.syncAuthForModel(this.agent, modelId);
       const effort = this.selectedEffort();
       await this.agent.setModel(modelId, effort ? { reasoningEffort: effort } : undefined);
     } catch (error) {
@@ -1086,9 +1111,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       if (op !== this.sessionOp) {
         return;
       }
-      this.models = modelsFromResult(result) ?? this.models;
+      this.models = overlayApiModels(modelsFromResult(result) ?? this.models, this.apis);
       this.currentSessionId = agent.sessionId ?? sessionId;
       finalizeReplayTimes(this.messages);
+      applyStoredTurnModels(this.messages, readStoredTurnModels(this.currentSessionId));
+      applyRestoredTurnModels(this.messages, this.models);
       this.setStatus('ready');
       void this.journal.hydrateFromGit().then(async () => {
         await this.syncAllEditStats();
@@ -1106,6 +1133,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
         this.replaying = false;
         this.restoringSession = false;
         finalizeReplayTimes(this.messages);
+        applyStoredTurnModels(this.messages, readStoredTurnModels(this.currentSessionId));
+        applyRestoredTurnModels(this.messages, this.models);
+        void persistTurnModels(this.currentSessionId, this.messages);
         this.emit();
       }
     }
@@ -1782,6 +1812,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   emit(): void {
+    this.models = overlayApiModels(this.models, this.apis) ?? this.models;
     this.flushEmitTimer();
     if (this.status !== 'streaming') {
       this.streamCursor = emptyStreamCursor();
@@ -1802,7 +1833,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (!next) {
       return;
     }
-    this.models = next;
+    this.models = overlayApiModels(next, this.apis);
     this.emit();
   }
 
@@ -1983,7 +2014,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       this.agent = spawned;
       this.reconnectFails = 0;
       this.agentVersion = spawned.agentVersion();
-      this.models = modelsFromResult(init) ?? this.models;
+      this.models = overlayApiModels(modelsFromResult(init) ?? this.models, this.apis);
       this.applyPendingModelSelection();
       const methods = spawned.authMethods();
       const defaultId = spawned.defaultAuthMethodId();
@@ -2191,6 +2222,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     this.loginView = undefined;
     this.account = await agent.authInfo().catch(() => undefined);
+    if (this.account?.methodId && isSessionAuthMethod(this.account.methodId)) {
+      this.sessionAuthMethodId = this.account.methodId;
+    }
     if (epoch !== this.agentGen) {
       return;
     }
@@ -2221,10 +2255,16 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const result = await agent.newSession(this.cwd(), extra);
     this.currentSessionId = agent.sessionId ?? result.sessionId;
     this.sessionCwd = this.cwd();
-    this.models = modelsFromResult(result) ?? this.models;
-    if (wantedId && this.models?.currentId !== wantedId) {
+    this.models = overlayApiModels(modelsFromResult(result) ?? this.models, this.apis);
+    if (wantedId) {
       try {
-        await agent.setModel(wantedId, wantedEffort ? { reasoningEffort: wantedEffort } : undefined);
+        await this.syncAuthForModel(agent, wantedId);
+        if (this.models?.currentId !== wantedId || this.isRelayModel(wantedId)) {
+          await agent.setModel(
+            wantedId,
+            wantedEffort ? { reasoningEffort: wantedEffort } : undefined,
+          );
+        }
       } catch (error) {
         logWarn(`apply selected model: ${error instanceof Error ? error.message : error}`);
       }
@@ -2246,9 +2286,10 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private turnModelFields(): Pick<ChatMessage, 'modelId' | 'modelName' | 'effort'> {
     const id = this.selectedModelId();
     const model = this.models?.available.find((item) => item.id === id);
+    const api = this.apis.find((row) => row.enabled && row.id === id);
     return {
       modelId: id,
-      modelName: model?.name ?? id,
+      modelName: api?.name ?? model?.name ?? id,
       effort: this.selectedEffort(),
     };
   }
@@ -2276,6 +2317,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   private applyPendingModelSelection(): void {
+    this.models = overlayApiModels(this.models, this.apis) ?? this.models;
     if (!this.models) {
       return;
     }
@@ -2286,6 +2328,62 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const effort = this.selectedEffort();
     if (effort) {
       this.patchCurrentEffort(effort);
+    }
+  }
+
+  private isRelayModel(modelId: string | undefined): boolean {
+    if (!modelId) {
+      return false;
+    }
+    return this.apis.some((row) => row.enabled && row.id === modelId) || isCustomModelId(modelId);
+  }
+
+  /**
+   * Official grok.com login leaves the ACP method on cached_token / oidc, so the
+   * CLI treats relay 401s as session expiry and refreshes the grok.com JWT.
+   * Switch to xai.api_key for a custom endpoint (does not wipe auth.json);
+   * switch back to the saved session method for official models.
+   */
+  private async syncAuthForModel(agent: GrokAgent, modelId: string): Promise<void> {
+    try {
+      const current = this.account?.methodId;
+      if (this.isRelayModel(modelId)) {
+        if (current && isSessionAuthMethod(current) && !this.sessionAuthMethodId) {
+          this.sessionAuthMethodId = current;
+        }
+        if (current === AUTH_METHODS.apiKey) {
+          return;
+        }
+        await agent.authenticate(AUTH_METHODS.apiKey);
+        this.account = await agent.authInfo().catch(() => ({ methodId: AUTH_METHODS.apiKey }));
+        return;
+      }
+      const restore = this.sessionAuthMethodId;
+      if (!restore || current !== AUTH_METHODS.apiKey) {
+        return;
+      }
+      await agent.authenticate(restore);
+      this.account = await agent.authInfo().catch(() => undefined);
+    } catch (error) {
+      logWarn(`model auth: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  /** After grok.com login, put the selected relay on the wire with its own key. */
+  private async applySelectedCustomModel(agent: GrokAgent): Promise<void> {
+    const modelId = this.selectedModelId();
+    if (!modelId || !this.isRelayModel(modelId) || !agent.sessionId) {
+      return;
+    }
+    const effort = this.selectedEffort();
+    try {
+      await this.syncAuthForModel(agent, modelId);
+      await agent.setModel(modelId, effort ? { reasoningEffort: effort } : undefined);
+      if (this.models) {
+        this.models = { ...this.models, currentId: modelId };
+      }
+    } catch (error) {
+      logWarn(`apply custom model: ${error instanceof Error ? error.message : error}`);
     }
   }
 
@@ -2302,6 +2400,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
 
   private endStreaming(cue?: NotifyCue): void {
     this.finishAssistant();
+    void persistTurnModels(this.currentSessionId, this.messages);
     this.notify = cue;
     this.setStatus('ready');
     this.notify = undefined;

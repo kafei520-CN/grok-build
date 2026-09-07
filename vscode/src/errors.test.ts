@@ -48,6 +48,38 @@ describe('agent errors', () => {
     assert.equal(error.message, 'You are sending requests too quickly.');
   });
 
+  it('pulls the provider message out of a JSON API body', () => {
+    const error = extractFromText(
+      'API error (status 429 Too Many Requests): {"error":{"code":"rate_limited","message":"You have exceeded your quota."}}',
+    );
+    assert.equal(error.code, 'rate_limited');
+    assert.equal(error.message, 'You have exceeded your quota.');
+  });
+
+  it('marks grok.com login copy as HTTP 401 so the UI can hint API keys', () => {
+    const error = extractFromText(
+      'Authentication required: your session has expired or your credentials were rejected. Run /login to re-authenticate, then resend your message.',
+    );
+    assert.equal(error.code, 'HTTP 401');
+  });
+
+  it('keeps the hidden reqwest cause on connection failures', () => {
+    const error = extractFromText(
+      'request error: error sending request for url (https://api.example.com:51000/v1/chat/completions): invalid peer certificate: UnknownIssuer',
+    );
+    assert.equal(error.code, 'connection');
+    assert.match(error.message, /UnknownIssuer/);
+    assert.match(error.message, /api\.example\.com:51000/);
+  });
+
+  it('unwraps failed-after-retries prefixes', () => {
+    const error = extractFromText(
+      'failed after 3 retries: empty response from model (no_visible_content): model=grok-4, finish_reason=',
+    );
+    assert.equal(error.code, 'no_visible_content');
+    assert.match(error.message, /model=grok-4/);
+  });
+
   it('formats in-flight retry_state updates', () => {
     const error = formatRetryUpdate({
       sessionUpdate: 'retry_state',

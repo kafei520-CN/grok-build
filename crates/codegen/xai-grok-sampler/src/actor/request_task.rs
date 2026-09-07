@@ -886,7 +886,7 @@ fn emit_retrying(
         attempt,
         max_retries,
         kind: info.kind,
-        reason: err.to_string(),
+        reason: info.message.clone(),
         doom_loop_triggers: info.doom_loop_triggers,
         doom_loop_aborted_at_chunk: info.doom_loop_aborted_at_chunk,
     });

@@ -1211,7 +1211,21 @@ pub fn is_reauthable_failure(error_type: Option<&str>, message: &str) -> bool {
     if matches!(error_type, Some("legacy_auth") | Some("auth_transient")) {
         return false;
     }
-    error_type == Some("auth") || message.contains("Unauthorized (401)")
+    if error_type == Some("auth") {
+        return true;
+    }
+    // Generic 401 dumps from BYOK / third-party relays also say
+    // "Unauthorized (401)". Only treat them as grok.com session expiry when
+    // the dump points at a first-party host.
+    message.contains("Unauthorized (401)") && message_targets_first_party_xai(message)
+}
+
+fn message_targets_first_party_xai(message: &str) -> bool {
+    message.contains("cli-chat-proxy")
+        || message.contains("://api.x.ai")
+        || message.contains("://api.grok.com")
+        || message.contains(".x.ai/")
+        || message.contains(".grok.com/")
 }
 
 /// Status updates for relay sync (session sharing) feature.

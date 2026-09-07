@@ -15,6 +15,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'skipLogin':
       await controller.skipLogin();
       return;
+    case 'useApiLogin':
+      await controller.useApiLogin();
+      return;
     case 'openLoginUrl':
       await controller.openLoginUrl();
       return;

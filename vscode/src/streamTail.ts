@@ -66,7 +66,7 @@ export function buildStreamTail(
     streaming: last.streaming,
     createdAt: last.createdAt,
     endedAt: last.endedAt,
-    error: last.error,
+    error: last.error ?? null,
     modelId: last.modelId,
     modelName: last.modelName,
     effort: last.effort,
@@ -135,6 +135,7 @@ export function mergeStreamTail(last: ChatMessage | undefined, tail: StreamTail)
     steps: incoming.steps ?? last.steps,
     edits: last.edits,
     images: incoming.images ?? last.images,
+    error: 'error' in incoming ? incoming.error ?? undefined : last.error,
   };
 }
 

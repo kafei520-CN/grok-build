@@ -775,12 +775,13 @@ fn session_token_auth_gate_truth_table() {
         assert!(!gate(false, ModelByok::NotByok, fp));
         assert!(!gate(false, ModelByok::Byok, fp));
         assert!(!gate(false, ModelByok::Unknown, fp));
-        // Session method: a definite classification ignores the endpoint —
-        // NotByok always refreshes (only ever routes to the session endpoint),
-        // a genuine per-model Byok never does.
-        assert!(gate(true, ModelByok::NotByok, fp));
+        // A genuine per-model Byok never sends the session token.
         assert!(!gate(true, ModelByok::Byok, fp));
     }
+    // Session method + NotByok: only against a first-party host. A rewritten
+    // relay base_url must not receive the grok.com session token.
+    assert!(gate(true, ModelByok::NotByok, true));
+    assert!(!gate(true, ModelByok::NotByok, false));
     // Session method + Unknown BYOK: refresh only against a first-party xAI
     // host, so a transiently-unclassifiable config can't demote a live session
     // (the stale-token 401 regression) yet the session token never leaks to a
@@ -912,6 +913,108 @@ async fn reconstruct_full_config_no_bearer_resolver_for_api_key_method() {
             assert!(
                 cfg.bearer_resolver.is_none(),
                 "api-key method must keep its configured bearer (no live resolver)"
+            );
+        })
+        .await;
+}
+
+async fn set_third_party_sampling_url(actor: &SessionActor) {
+    let Some(mut cfg) = actor.chat_state_handle.get_sampling_config().await else {
+        panic!("test actor must have a sampling config");
+    };
+    cfg.base_url = "https://api.inktandwkx.top:51000/v1".to_string();
+    actor.chat_state_handle.update_sampling_config(cfg);
+}
+
+/// After grok.com login, chat credentials still hold the session JWT. A later
+/// switch to a third-party relay must not put that JWT on the wire.
+#[tokio::test(flavor = "current_thread")]
+async fn reconstruct_full_config_does_not_send_session_jwt_to_third_party() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, am) = auth_manager_with_valid_token("session-jwt");
+            let (actor, _rx) = make_actor_with_method_and_credentials(
+                Some(am),
+                "cached_token",
+                xai_chat_state::AuthType::SessionToken,
+                "session-jwt".to_string(),
+            )
+            .await;
+            set_third_party_sampling_url(&actor).await;
+
+            let cfg = actor.reconstruct_full_config().await;
+
+            assert!(
+                cfg.bearer_resolver.is_none(),
+                "a relay host must not attach the grok.com bearer resolver"
+            );
+            assert_ne!(
+                cfg.api_key.as_deref(),
+                Some("session-jwt"),
+                "a relay host must not receive the grok.com session JWT"
+            );
+        })
+        .await;
+}
+
+/// A genuine relay API key must still be sent even if `auth_type` was left
+/// as `SessionToken` after an official login (slug-collision / leftover).
+#[tokio::test(flavor = "current_thread")]
+async fn reconstruct_full_config_keeps_relay_api_key_on_third_party() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (_dir, am) = auth_manager_with_valid_token("session-jwt");
+            let (actor, _rx) = make_actor_with_method_and_credentials(
+                Some(am),
+                "cached_token",
+                xai_chat_state::AuthType::SessionToken,
+                "sk-relay-key".to_string(),
+            )
+            .await;
+            set_third_party_sampling_url(&actor).await;
+
+            let cfg = actor.reconstruct_full_config().await;
+
+            assert_eq!(cfg.api_key.as_deref(), Some("sk-relay-key"));
+            assert!(cfg.bearer_resolver.is_none());
+        })
+        .await;
+}
+
+/// Official OIDC refresh cannot unstick a relay 401; retrying it produces
+/// "Auth recovery succeeded but N authenticated inference requests were
+/// still rejected".
+#[tokio::test(flavor = "current_thread")]
+async fn sampler_401_on_third_party_skips_session_refresh() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let called = Arc::new(AtomicBool::new(false));
+            let refresher: Arc<dyn crate::auth::refresh::TokenRefresher> =
+                Arc::new(AlwaysSucceedRefresher {
+                    called: called.clone(),
+                });
+            let (_dir, am) = auth_manager_with_refresher(refresher);
+            let (actor, _rx) = make_actor_with_method_and_credentials(
+                Some(am),
+                "cached_token",
+                xai_chat_state::AuthType::SessionToken,
+                "session-jwt".to_string(),
+            )
+            .await;
+            set_third_party_sampling_url(&actor).await;
+
+            let result = actor.handle_sampling_failure(auth_error(), 0).await;
+
+            assert!(
+                result.is_err(),
+                "a relay 401 must surface as a terminal error, not RefreshAuthAndResubmit"
+            );
+            assert!(
+                !called.load(Ordering::SeqCst),
+                "a relay 401 must not refresh the grok.com OIDC token"
             );
         })
         .await;
@@ -1169,8 +1272,9 @@ async fn set_session_model_invalidates_byok_memo_for_same_model_id() {
                 doom_loop_recovery: None,
                 header_injector: None,
             };
+            let catalog_id = acp::ModelId::new(cfg.model.clone());
             let _ = actor
-                .handle_set_session_model(cfg, false, false, false, true, 85)
+                .handle_set_session_model(cfg, catalog_id, false, false, false, true, 85)
                 .await;
 
             assert!(
@@ -1263,8 +1367,9 @@ async fn switch_to_first_party_model_drops_minted_provider_token() {
                 doom_loop_recovery: None,
                 header_injector: None,
             };
+            let catalog_id = acp::ModelId::new(cfg.model.clone());
             let _ = actor
-                .handle_set_session_model(cfg, false, false, false, true, 85)
+                .handle_set_session_model(cfg, catalog_id, false, false, false, true, 85)
                 .await;
 
             let creds = actor.chat_state_handle.get_credentials().await;

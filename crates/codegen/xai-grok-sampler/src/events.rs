@@ -261,7 +261,7 @@ impl SamplingErrorKind {
 impl From<&SamplingError> for SamplingErrorInfo {
     fn from(err: &SamplingError) -> Self {
         let is_retryable = err.is_retryable();
-        let message = err.to_string();
+        let message = err.user_message();
 
         let (kind, status_code, retry_after_secs, model_metadata) = match err {
             SamplingError::Auth { .. } => (SamplingErrorKind::Auth, None, None, None),

@@ -2,6 +2,7 @@ import type { ContextMeter } from './contextMeter';
 import { editsFromToolUpdate, mergeEdits } from './edits';
 import { formatRetryUpdate } from './errors';
 import { FALLBACK_COMMANDS } from './slash';
+import { isOfficialGrokStamp } from './turnModels';
 import type {
   ChatMessage,
   ChatState,
@@ -226,11 +227,11 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
     return;
   }
   const assistant = ensureAssistant(session, replay, update);
+  if (assistant.error?.retrying) {
+    assistant.error = undefined;
+  }
   if (kind === 'agent_message_chunk') {
     assistant.text += textFromContent(update.content);
-    if (assistant.error?.retrying) {
-      assistant.error = undefined;
-    }
   } else if (kind === 'agent_thought_chunk') {
     assistant.thinking = (assistant.thinking ?? '') + textFromContent(update.content);
   } else if (kind === 'tool_call' || kind === 'tool_call_update') {
@@ -353,7 +354,9 @@ function ensureAssistant(
   const last = session.messages.at(-1);
   if (last?.role === 'assistant') {
     stampTimes(last, update, replay);
-    stampTurnModel(last, session.models);
+    if (!replay) {
+      stampTurnModel(last, session.models);
+    }
     return last;
   }
   const assistant: ChatMessage = {
@@ -368,7 +371,9 @@ function ensureAssistant(
       (replay ? undefined : new Date().toISOString()),
   };
   stampTimes(assistant, update, replay);
-  stampTurnModel(assistant, session.models);
+  if (!replay) {
+    stampTurnModel(assistant, session.models);
+  }
   session.messages.push(assistant);
   return assistant;
 }
@@ -406,6 +411,25 @@ export function stampTurnModel(
   }
   if (!message.effort && stamp.effort) {
     message.effort = stamp.effort;
+  }
+}
+
+/** After session/load, fill turns that replay could not label. */
+export function applyRestoredTurnModels(
+  messages: ChatMessage[],
+  models: ChatState['models'] | undefined,
+): void {
+  const stamp = catalogTurnModel(models);
+  if (!stamp.modelId && !stamp.modelName) {
+    return;
+  }
+  // Official grok.com titles collide with custom relays that route grok-4.6.
+  // Never paint unlabeled history as the live official model.
+  if (isOfficialGrokStamp(stamp)) {
+    return;
+  }
+  for (const message of messages) {
+    stampTurnModel(message, models);
   }
 }
 
@@ -522,6 +546,9 @@ export function stampTimes(message: ChatMessage, update: SessionUpdate, replay: 
 export function finalizeReplayTimes(messages: ChatMessage[]): void {
   for (const message of messages) {
     message.streaming = false;
+    if (message.error?.retrying) {
+      message.error = { ...message.error, retrying: undefined };
+    }
     if (message.createdAt && !message.endedAt) {
       message.endedAt = message.createdAt;
     }

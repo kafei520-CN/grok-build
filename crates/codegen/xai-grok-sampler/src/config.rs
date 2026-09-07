@@ -136,6 +136,19 @@ pub struct SamplerConfig {
     pub header_injector: Option<SharedHeaderInjector>,
 }
 
+/// Official xAI hosts keep HTTP/2. Third-party relays on custom ports often
+/// reset HTTP/2, which surfaces as reqwest's "error sending request for url".
+pub fn should_force_http1(base_url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(base_url) else {
+        return true;
+    };
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    !(host == "api.x.ai"
+        || host == "api.grok.com"
+        || host.ends_with(".x.ai")
+        || host.ends_with(".grok.com"))
+}
+
 impl Default for SamplerConfig {
     /// Empty defaults so callers can use `..Default::default()` and
     /// new fields don't ripple through every literal site.
@@ -218,6 +231,25 @@ impl Default for RetryPolicy {
 pub struct OriginClientInfo {
     pub product: String,
     pub version: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_force_http1;
+
+    #[test]
+    fn official_xai_keeps_http2() {
+        assert!(!should_force_http1("https://api.x.ai/v1"));
+        assert!(!should_force_http1("https://api.grok.com/v1"));
+        assert!(!should_force_http1("https://cli-chat-proxy.grok.com/v1"));
+    }
+
+    #[test]
+    fn third_party_relays_force_http1() {
+        assert!(should_force_http1("https://api.inktandwkx.top:51000/v1"));
+        assert!(should_force_http1("https://api.openai.com/v1"));
+        assert!(should_force_http1("not a url"));
+    }
 }
 
 #[cfg(test)]

@@ -2043,23 +2043,34 @@ textarea:focus-visible {
 
 .picker {
   position: relative;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 42%;
+}
+
+.picker.mode {
+  flex: 0 0 auto;
+  max-width: none;
+  min-width: max-content;
+}
+
+.picker.mode .picker-label {
+  overflow: visible;
+  text-overflow: unset;
+  flex: 0 0 auto;
 }
 
 .picker.model {
-  flex: 1 1 96px;
+  flex: 0 1 auto;
+  max-width: 48%;
   margin-left: auto;
-}
-
-.picker.effort {
-  flex: 0 1 88px;
 }
 
 .picker-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  width: 100%;
+  width: auto;
   max-width: 100%;
   background: color-mix(in srgb, var(--bg) 45%, transparent);
   border: 1px solid var(--line);
@@ -2097,7 +2108,7 @@ textarea:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   text-align: left;
 }
 
@@ -2111,9 +2122,9 @@ textarea:focus-visible {
   left: 0;
   bottom: calc(100% + 6px);
   box-sizing: border-box;
-  min-width: 0;
-  width: 100%;
-  max-width: 100%;
+  min-width: 120px;
+  width: max-content;
+  max-width: min(280px, 90vw);
   max-height: 180px;
   overflow: auto;
   border-radius: 12px;
@@ -2121,17 +2132,11 @@ textarea:focus-visible {
   z-index: 30;
 }
 
-.picker.effort .picker-menu {
-  left: auto;
-  right: 0;
-}
-
 .picker-item {
   display: block;
-  width: 100%;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  width: auto;
+  min-width: 100%;
+  overflow: visible;
   white-space: nowrap;
   text-align: left;
   background: none;
@@ -3369,6 +3374,7 @@ kbd {
 #app[data-surface='glass'] .composer-card .icon-btn,
 #app[data-surface='glass'] .jump-bottom,
 #app[data-surface='glass'] .composer-card .seg,
+#app[data-surface='glass'] .composer-card .picker-btn,
 #app[data-surface='glass'] .permission .btn:not(.primary),
 #app[data-surface='glass'] .ask-card .btn:not(.primary),
 #app[data-surface='glass'] .ask-card .icon-btn,

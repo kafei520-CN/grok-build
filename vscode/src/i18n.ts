@@ -401,6 +401,7 @@ export const EN = {
   modeAsk: 'Ask',
   modePlan: 'Plan',
   modeAgent: 'Agent',
+  switchMode: 'Switch mode',
   switchModel: 'Switch model',
   switchEffort: 'Reasoning effort',
   busyLock: 'Stop the current turn to change this',
@@ -446,6 +447,12 @@ export const EN = {
   agentExitedGiveUp: 'Grok agent stopped. Restart it from the menu.',
   turnRetrying: 'Retrying {n}/{max}',
   errorCode: 'Code {code}',
+  errorUntrustedCert:
+    'The host certificate is not trusted. Install the relay CA in the OS store, or set GROK_EXTRA_CA_BUNDLE to its PEM file.',
+  errorApiKeyRejected:
+    'This endpoint rejected the credentials. For a custom API, check the key in API manager. Sign-in / login is only for grok.com.',
+  errorRelayAfterOfficialLogin:
+    'Official grok.com login was refreshed, but this relay still returned 401. Put the relay API key in API manager — the grok.com session token is not valid there.',
   retry: 'Retry',
   homeTitle: 'What are we building?',
   homeBody:
@@ -948,6 +955,7 @@ export const ZH: Record<StringKey, string> = {
   modeAsk: '问答',
   modePlan: '计划',
   modeAgent: '代理',
+  switchMode: '切换模式',
   switchModel: '切换模型',
   switchEffort: '思考强度',
   busyLock: '请先中断当前任务再调整',
@@ -990,6 +998,12 @@ export const ZH: Record<StringKey, string> = {
   agentExitedGiveUp: 'Grok 代理已停止，请从菜单重新启动。',
   turnRetrying: '正在重试 {n}/{max}',
   errorCode: '错误码 {code}',
+  errorUntrustedCert:
+    '证书不被信任。请把中转站 CA 装进系统，或设置 GROK_EXTRA_CA_BUNDLE 指向它的 PEM。',
+  errorApiKeyRejected:
+    '这个接口拒绝了凭证。自定义中转请到 API 管理核对密钥；/login 只用于 grok.com 官方登录。',
+  errorRelayAfterOfficialLogin:
+    '官方登录已经刷新，但中转站仍返回 401。请在 API 管理里填写中转自己的 API Key；grok.com 的登录凭证不能用在第三方。',
   retry: '重试',
   homeTitle: '要构建什么？',
   homeBody: 'Grok 可以编辑此工作区、运行命令，并使用斜杠工具。/ 调命令，@ 附加文件。',

@@ -380,7 +380,8 @@ export interface ChatMessage {
   streaming?: boolean;
   createdAt?: string;
   endedAt?: string;
-  error?: TurnError;
+  /** `null` on a stream tail means the retry/error card was cleared. */
+  error?: TurnError | null;
   /** Catalog id at the time this assistant turn started. */
   modelId?: string;
   /** Picker display name for that model. */
@@ -635,6 +636,7 @@ export type WebviewToHost =
   | { type: 'alive' }
   | { type: 'login' }
   | { type: 'skipLogin' }
+  | { type: 'useApiLogin' }
   | { type: 'openLoginUrl' }
   | { type: 'submitAuthCode'; code: string }
   | { type: 'cancelLogin' }

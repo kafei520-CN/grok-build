@@ -40,6 +40,17 @@ describe('dispatchUi', () => {
     assert.deepEqual(seen, ['skip']);
   });
 
+  it('routes useApiLogin to skip then open API settings', async () => {
+    const seen: string[] = [];
+    const controller = {
+      async useApiLogin() {
+        seen.push('api');
+      },
+    } as unknown as GrokController;
+    await dispatchUi(controller, { type: 'useApiLogin' });
+    assert.deepEqual(seen, ['api']);
+  });
+
   it('routes wallpaper preview open and close', async () => {
     const seen: string[] = [];
     const controller = {

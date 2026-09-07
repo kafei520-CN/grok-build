@@ -317,10 +317,11 @@ pub fn format_sampling_error(err: &SamplingError, retry_count: Option<u32>) -> S
             if let Some(url) = e.url() {
                 details.push(format!("url: {}", url));
             }
+            let chain = xai_grok_sampling_types::error_source_chain(e);
             let detail_str = if details.is_empty() {
-                e.to_string()
+                chain
             } else {
-                format!("{} ({})", e, details.join(", "))
+                format!("{} ({})", chain, details.join(", "))
             };
             format!(
                 "{}HTTP request failed: {}. This may be a network issue or the API endpoint may be unavailable.",
@@ -429,7 +430,7 @@ pub(crate) fn clone_error(err: &SamplingError) -> SamplingError {
             // reqwest::Error is not Clone; preserve the rendered message
             // as an EventStreamError (the closest retryable transport
             // variant) so callers see an equivalent description.
-            SamplingError::EventStreamError(e.to_string())
+            SamplingError::EventStreamError(xai_grok_sampling_types::error_source_chain(e))
         }
         SamplingError::Serialization(e) => {
             // serde_json::Error is not Clone; its Display already carries the

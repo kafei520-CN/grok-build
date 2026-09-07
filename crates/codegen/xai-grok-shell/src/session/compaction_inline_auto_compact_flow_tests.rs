@@ -763,6 +763,7 @@ async fn family_switch_compacts_lossy_with_new_model() {
             actor
                 .handle_set_session_model(
                     switch_target_config("new-model", server.url()),
+                    acp::ModelId::new("new-model"),
                     false,
                     true,
                     false,

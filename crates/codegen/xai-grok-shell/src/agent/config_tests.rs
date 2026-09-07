@@ -1352,7 +1352,7 @@ fn resolve_credentials_empty_env_key_falls_through_to_session() {
     let alias = "GROK_TEST_EMPTY_ENV_LC_ALIAS";
     let _primary = EnvGuard::set(primary, "");
     let _alias = EnvGuard::set(alias, "");
-    let mut model = test_model_entry("m", "https://inference.example/v1", None, None, None);
+    let mut model = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
     model.env_key = Some(EnvKeys::new([primary, alias]));
     assert!(!model.has_own_credentials());
     let creds = resolve_credentials(&model, Some("session-jwt"));
@@ -1382,11 +1382,20 @@ fn resolve_credentials_empty_env_key_falls_through_to_global_key() {
 #[test]
 fn resolve_credentials_empty_api_key_falls_through_to_session() {
     use xai_chat_state::AuthType;
-    let model = test_model_entry("m", "https://inference.example/v1", Some(""), None, None);
+    let model = test_model_entry("m", "https://api.x.ai/v1", Some(""), None, None);
     assert!(!model.has_own_credentials());
     let creds = resolve_credentials(&model, Some("session-jwt"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
     assert_eq!(creds.api_key.as_deref(), Some("session-jwt"));
+}
+
+#[test]
+fn resolve_credentials_does_not_send_session_jwt_to_third_party() {
+    use xai_chat_state::AuthType;
+    let model = test_model_entry("m", "https://api.inktandwkx.top:51000/v1", None, None, None);
+    let creds = resolve_credentials(&model, Some("session-jwt"));
+    assert_ne!(creds.api_key.as_deref(), Some("session-jwt"));
+    assert_eq!(creds.auth_type, AuthType::ApiKey);
 }
 #[test]
 #[serial]
@@ -1412,9 +1421,12 @@ fn config_toml_env_key_array_parses() {
 #[test]
 fn resolve_credentials_sets_auth_type() {
     use xai_chat_state::AuthType;
-    let model = test_model_entry("m", "https://example.com/v1", None, None, None);
+    let model = test_model_entry("m", "https://api.x.ai/v1", None, None, None);
     let creds = resolve_credentials(&model, Some("tok"));
     assert_eq!(creds.auth_type, AuthType::SessionToken);
+    let third_party = test_model_entry("m", "https://example.com/v1", None, None, None);
+    let creds = resolve_credentials(&third_party, Some("tok"));
+    assert_eq!(creds.auth_type, AuthType::ApiKey);
     let byok = test_model_entry("m", "https://example.com/v1", Some("key"), None, None);
     let creds = resolve_credentials(&byok, Some("tok"));
     assert_eq!(creds.auth_type, AuthType::ApiKey);

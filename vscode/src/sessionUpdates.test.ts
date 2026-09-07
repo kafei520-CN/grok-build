@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { parseSessionUpdate } from './agent';
 import {
+  applyRestoredTurnModels,
   applySessionUpdate,
   captureModels,
   finalizeReplayTimes,
@@ -100,6 +101,57 @@ describe('session replay times', () => {
       available: [{ id: 'grok-4.6', name: 'Grok 4.6', currentEffort: 'high' }],
     });
     assert.equal(session.messages[0]?.modelId, 'endpoint-2');
+  });
+
+  it('does not stamp the live official catalog onto replayed turns', () => {
+    const session = view({
+      replaying: true,
+      models: {
+        currentId: 'grok-4.6',
+        available: [{ id: 'grok-4.6', name: 'Grok 4.6', currentEffort: 'high' }],
+      },
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'agent_message_chunk',
+      content: { type: 'text', text: 'ok' },
+    });
+    assert.equal(session.messages[0]?.modelName, undefined);
+    applyRestoredTurnModels(session.messages, {
+      currentId: 'endpoint-98',
+      available: [{ id: 'endpoint-98', name: '[98Pro]Grok 4.6', currentEffort: 'high' }],
+    });
+    assert.equal(session.messages[0]?.modelId, 'endpoint-98');
+    assert.equal(session.messages[0]?.modelName, '[98Pro]Grok 4.6');
+    assert.equal(session.messages[0]?.effort, 'high');
+  });
+
+  it('does not stamp official Grok 4.6 onto unlabeled restored turns', () => {
+    const messages: ChatMessage[] = [
+      { id: 'a', role: 'assistant', text: 'ok', tools: [] },
+    ];
+    applyRestoredTurnModels(messages, {
+      currentId: 'grok-4.6',
+      available: [{ id: 'grok-4.6', name: 'Grok 4.6', currentEffort: 'high' }],
+    });
+    assert.equal(messages[0]?.modelName, undefined);
+    assert.equal(messages[0]?.modelId, undefined);
+  });
+
+  it('clears in-flight retry banners after replay', () => {
+    const messages: ChatMessage[] = [
+      {
+        id: 'a',
+        role: 'assistant',
+        text: '',
+        tools: [],
+        streaming: true,
+        error: { message: 'request error', code: 'connection', retrying: true, attempt: 12 },
+      },
+    ];
+    finalizeReplayTimes(messages);
+    assert.equal(messages[0].streaming, false);
+    assert.equal(messages[0].error?.retrying, undefined);
+    assert.equal(messages[0].error?.code, 'connection');
   });
 
   it('fills missing endedAt after replay', () => {
@@ -378,6 +430,24 @@ describe('retry errors', () => {
     assert.equal(assistant.error?.retrying, undefined);
     assert.equal(assistant.streaming, false);
     assert.equal(assistant.error?.code, 'no_visible_content');
+  });
+
+  it('clears a retrying banner as soon as the stream resumes', () => {
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'retry_state',
+      type: 'retrying',
+      attempt: 1,
+      maxRetries: 15,
+      reason: 'empty response from model (no_visible_content)',
+    });
+    assert.equal(session.messages[0]?.error?.retrying, true);
+    applySessionUpdate(session, {
+      sessionUpdate: 'agent_thought_chunk',
+      content: { type: 'text', text: 'thinking' },
+    });
+    assert.equal(session.messages[0]?.error, undefined);
+    assert.equal(session.messages[0]?.thinking, 'thinking');
   });
 });
 

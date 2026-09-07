@@ -6,11 +6,11 @@ import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.configurations.PathEnvironmentVariableUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.SystemInfo
+import com.intellij.util.EnvironmentUtil
 import java.io.BufferedWriter
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -271,7 +271,7 @@ class Sidecar(
             }
             val names = if (SystemInfo.isWindows) listOf("node.exe", "node") else listOf("node")
             for (name in names) {
-                PathEnvironmentVariableUtil.findInPath(name)?.let { return it.absolutePath }
+                findOnPath(name)?.let { return it.absolutePath }
             }
             val home = System.getProperty("user.home")
             val extras = listOf(
@@ -286,4 +286,17 @@ class Sidecar(
             return extras.firstOrNull { it.isFile }?.absolutePath
         }
     }
+}
+
+/** PATH lookup without PathEnvironmentVariableUtil.findInPath (scheduled for removal). */
+internal fun findOnPath(fileBaseName: String): File? {
+    val path = EnvironmentUtil.getValue("PATH") ?: return null
+    for (dirPath in path.split(File.pathSeparatorChar)) {
+        if (dirPath.isEmpty()) continue
+        val dir = File(dirPath)
+        if (!dir.isAbsolute || !dir.isDirectory) continue
+        val file = File(dir, fileBaseName)
+        if (file.isFile && file.canExecute()) return file
+    }
+    return null
 }

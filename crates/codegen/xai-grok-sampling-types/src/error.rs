@@ -256,6 +256,16 @@ impl<'de> Deserialize<'de> for ApiErrorCode {
 }
 
 impl SamplingError {
+    /// Message shown to clients. `Display` for [`Self::Http`] is reqwest's
+    /// outer "error sending request for url (...)", which hides the rustls /
+    /// hyper cause reachable only through `source()`.
+    pub fn user_message(&self) -> String {
+        match self {
+            Self::Http(err) => format!("request error: {}", error_source_chain(err)),
+            other => other.to_string(),
+        }
+    }
+
     /// Auth error of unknown wire provenance — for paths that never sent a
     /// request (config validation, cancellation, actor teardown) or that
     /// lost the provenance (legacy round trips).
@@ -711,6 +721,56 @@ pub fn is_context_length_error(message: &str) -> bool {
 /// own 52x pages when the origin is unreachable).
 pub fn is_retryable_api_status(status: StatusCode) -> bool {
     RetryPolicy::edge_client().should_retry(status.as_u16())
+}
+
+/// Join `err` and every `source()` cause. reqwest's `Display` stops at the URL.
+pub fn error_source_chain(err: &dyn std::error::Error) -> String {
+    let mut msg = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let next = cause.to_string();
+        if !next.is_empty() && !msg.contains(&next) {
+            msg.push_str(": ");
+            msg.push_str(&next);
+        }
+        source = cause.source();
+    }
+    msg
+}
+
+#[cfg(test)]
+mod source_chain_tests {
+    use super::error_source_chain;
+
+    #[derive(Debug)]
+    struct Leaf;
+    impl std::fmt::Display for Leaf {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "invalid peer certificate: UnknownIssuer")
+        }
+    }
+    impl std::error::Error for Leaf {}
+
+    #[derive(Debug)]
+    struct Wrapper(Leaf);
+    impl std::fmt::Display for Wrapper {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "error sending request for url (https://relay.example/v1)")
+        }
+    }
+    impl std::error::Error for Wrapper {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn appends_hidden_certificate_cause() {
+        assert_eq!(
+            error_source_chain(&Wrapper(Leaf)),
+            "error sending request for url (https://relay.example/v1): invalid peer certificate: UnknownIssuer"
+        );
+    }
 }
 
 /// Decide whether a [`reqwest::Error`] is worth retrying.

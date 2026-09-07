@@ -79,6 +79,25 @@ describe('streamTail', () => {
     assert.equal(merged.edits?.[0]?.path, 'a.ts');
   });
 
+  it('clears a retry error across JSON IPC when the stream resumes', () => {
+    const first = assistant({
+      id: 'a1',
+      text: '',
+      error: { message: 'empty response from model (no_visible_content)', code: 'no_visible_content', retrying: true, attempt: 1 },
+    });
+    const { cursor } = buildStreamTail(emptyStreamCursor(), first, { status: 'streaming' });
+    const web = mergeStreamTail(
+      undefined,
+      JSON.parse(JSON.stringify(buildStreamTail(emptyStreamCursor(), first, { status: 'streaming' }).tail)),
+    );
+    assert.equal(web.error?.retrying, true);
+    const next = assistant({ id: 'a1', text: 'ok', thinking: 'why' });
+    const wire = JSON.parse(JSON.stringify(buildStreamTail(cursor, next, { status: 'streaming' }).tail));
+    const merged = mergeStreamTail(web, wire);
+    assert.equal(merged.error, undefined);
+    assert.equal(merged.text, 'ok');
+  });
+
   it('resends tools when the stamp changes', () => {
     const first = assistant({
       id: 'a1',

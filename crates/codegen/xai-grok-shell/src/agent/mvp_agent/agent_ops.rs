@@ -2039,7 +2039,10 @@ impl MvpAgent {
             model,
             session.as_ref().map(|a| a.key.as_str()),
         );
-        if prefers_oidc && !model.has_own_credentials()
+        let first_party = crate::util::is_xai_api_url(&credentials.base_url);
+        if prefers_oidc
+            && first_party
+            && !model.has_own_credentials()
             && credentials.auth_type == xai_chat_state::AuthType::ApiKey
         {
             credentials.api_key = None;
@@ -2050,8 +2053,11 @@ impl MvpAgent {
             self.cfg.borrow().grok_com_config.api_key_auth_disabled(),
             session.as_ref().map(|a| a.key.as_str()),
         );
-        if !has_session_key && credentials.auth_type == xai_chat_state::AuthType::ApiKey
-            && !model.has_own_credentials() && is_session_based_auth
+        if !has_session_key
+            && first_party
+            && credentials.auth_type == xai_chat_state::AuthType::ApiKey
+            && !model.has_own_credentials()
+            && is_session_based_auth
         {
             tracing::info!(
                 model = model.info().model.as_str(),

@@ -302,6 +302,13 @@ function boot(): void {
       event.preventDefault();
       post({ type: 'openUrl', url: href });
     }
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest('.picker, .picker-menu, .more-menu, .menu')
+    ) {
+      return;
+    }
     if (ui.moreOpen || ui.picker) {
       ui.moreOpen = false;
       ui.picker = undefined;
