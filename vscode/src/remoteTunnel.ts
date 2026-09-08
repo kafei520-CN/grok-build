@@ -125,43 +125,13 @@ export function isBundledRelayHost(host: string | undefined): boolean {
   return Boolean(host && host === DEFAULT_PUBLIC_HOST);
 }
 
-const BUNDLED_RELAY_PUBLIC =
-  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF4XwrMzzR1X+oR0w9MCFiU3bCnyqp2b+pSCc5QCJfbY grok-build-relay';
-
-const BUNDLED_RELAY_PRIVATE = [
-  '-----BEGIN OPENSSH PRIVATE KEY-----',
-  'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW',
-  'QyNTUxOQAAACBeF8KzM80dV/qEdMPTAhYlN2wp8qqdm/qUgnOUAiX22AAAAJgzPuGxMz7h',
-  'sQAAAAtzc2gtZWQyNTUxOQAAACBeF8KzM80dV/qEdMPTAhYlN2wp8qqdm/qUgnOUAiX22A',
-  'AAAEALE7zsFXwyA5mvSKX8OmB3fbg6INnbSdBVOe+zU0gOj14XwrMzzR1X+oR0w9MCFiU3',
-  'bCnyqp2b+pSCc5QCJfbYAAAAEGdyb2stYnVpbGQtcmVsYXkBAgMEBQ==',
-  '-----END OPENSSH PRIVATE KEY-----',
-  '',
-].join('\n');
-
-function writeUnixFile(file: string, body: string): void {
-  fs.writeFileSync(file, body.replace(/\r\n/g, '\n').replace(/\r/g, '\n'), {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
-}
-
-/** Built-in VPS uses the plugin key (no per-PC authorized_keys). Custom VPS uses a local key. */
-export function ensureTunnelIdentity(host?: string): {
+/** SSH identity for a custom VPS reverse tunnel. Built-in public access does not use SSH. */
+export function ensureTunnelIdentity(): {
   privateKey: string;
   publicKey: string;
-  bundled: boolean;
 } {
   const dir = grokSshDir();
   fs.mkdirSync(dir, { recursive: true });
-  if (isBundledRelayHost(host)) {
-    const privateKey = path.join(dir, 'relay-id_ed25519');
-    const publicFile = `${privateKey}.pub`;
-    writeUnixFile(privateKey, BUNDLED_RELAY_PRIVATE);
-    writeUnixFile(publicFile, `${BUNDLED_RELAY_PUBLIC}\n`);
-    protectPrivateKey(privateKey);
-    return { privateKey, publicKey: BUNDLED_RELAY_PUBLIC, bundled: true };
-  }
   const privateKey = path.join(dir, 'id_ed25519');
   const publicFile = `${privateKey}.pub`;
   if (!fs.existsSync(privateKey) || !fs.existsSync(publicFile)) {
@@ -179,7 +149,7 @@ export function ensureTunnelIdentity(host?: string): {
   if (!publicKey) {
     throw new Error('empty tunnel public key');
   }
-  return { privateKey, publicKey, bundled: false };
+  return { privateKey, publicKey };
 }
 
 function protectPrivateKey(file: string): void {
@@ -254,7 +224,6 @@ export class ReverseTunnel {
   private strict: 'accept-new' | 'no' = 'accept-new';
   private identity?: string;
   private publicKey?: string;
-  private bundledRelay = false;
   private readonly listeners = new Set<() => void>();
 
   info(): TunnelInfo {
@@ -265,8 +234,8 @@ export class ReverseTunnel {
       user: this.cfg?.user ?? 'root',
       sshPort: this.cfg?.sshPort ?? 22,
       remotePort: this.boundPort || this.cfg?.remotePort || 0,
-      sshPublicKey: this.bundledRelay ? undefined : this.publicKey,
-      bundledRelay: this.bundledRelay,
+      sshPublicKey: this.publicKey,
+      bundledRelay: false,
     };
   }
 
@@ -311,10 +280,9 @@ export class ReverseTunnel {
     this.error = undefined;
     this.emit();
     try {
-      const id = ensureTunnelIdentity(cfg.host);
+      const id = ensureTunnelIdentity();
       this.identity = id.privateKey;
       this.publicKey = id.publicKey;
-      this.bundledRelay = id.bundled;
     } catch {
       this.fail('keyfile', false);
       return;

@@ -259,7 +259,7 @@
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "test": "node esbuild.mjs --test && node --test dist/test/*.js dist/test/webview/*.js",
-    "package": "npx --yes @vscode/vsce package --allow-package-secrets privatekey"
+    "package": "npx --yes @vscode/vsce package"
   },
   "devDependencies": {
     "@shikijs/monaco": "^4.4.3",

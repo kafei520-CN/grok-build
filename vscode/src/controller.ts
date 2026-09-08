@@ -1580,8 +1580,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
   private tunnelPublicKey(): string | undefined {
     try {
-      const id = ensureTunnelIdentity(this.remoteHost);
-      return id.bundled ? undefined : id.publicKey;
+      return ensureTunnelIdentity().publicKey;
     } catch {
       return undefined;
     }
