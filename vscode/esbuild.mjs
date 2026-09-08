@@ -51,6 +51,14 @@ const host = {
   banner: { js: '#!/usr/bin/env node' },
 };
 
+const relay = {
+  ...common,
+  entryPoints: ['src/publicRelayServer.ts'],
+  outfile: 'dist/relay.js',
+  format: 'cjs',
+  banner: { js: '#!/usr/bin/env node' },
+};
+
 const shikiMonaco = {
   ...common,
   entryPoints: ['src/webview/shiki-monaco.ts'],
@@ -121,6 +129,7 @@ const tests = {
     'src/remoteGateway.test.ts',
     'src/remoteState.test.ts',
     'src/remoteTunnel.test.ts',
+    'src/publicRelay.test.ts',
     'src/workspaceIndex.test.ts',
   ],
   outdir: 'dist/test',
@@ -141,6 +150,7 @@ async function run() {
       esbuild.context(webview),
       esbuild.context(diffView),
       esbuild.context(host),
+      esbuild.context(relay),
       esbuild.context(shikiMonaco),
     ]);
     await Promise.all(ctxs.map((ctx) => ctx.watch()));
@@ -151,6 +161,7 @@ async function run() {
     esbuild.build(webview),
     esbuild.build(diffView),
     esbuild.build(host),
+    esbuild.build(relay),
     esbuild.build(shikiMonaco),
   ]);
 }

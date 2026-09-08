@@ -540,6 +540,8 @@ export interface RemoteAccessInfo {
   tunnelUser?: string;
   sshPort?: number;
   forwardPort?: number;
+  sshPublicKey?: string;
+  bundledRelay?: boolean;
 }
 
 export interface AuthMethodWire {

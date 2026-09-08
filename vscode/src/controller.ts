@@ -139,10 +139,13 @@ import {
   DEFAULT_PUBLIC_USER,
   DEFAULT_SSH_PORT,
   ReverseTunnel,
+  ensureTunnelIdentity,
+  isBundledRelayHost,
   resolveForwardPort,
   resolvePublicHost,
   sanitizeTunnelUser,
 } from './remoteTunnel';
+import { PublicRelay } from './publicRelay';
 import type { RemoteAccessInfo } from './types';
 import type { NotifyCue } from './notify';
 
@@ -190,6 +193,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private remoteCodeMode: RemotePairMode = 'random';
   private remoteCustomCode = '';
   private readonly tunnel = new ReverseTunnel();
+  private readonly relay = new PublicRelay();
   history?: string[];
   drawer?: DrawerId;
   drawerTab?: string;
@@ -270,6 +274,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.remoteCodeMode = plat().getState('ui.remoteCodeMode', 'random') === 'custom' ? 'custom' : 'random';
     this.remoteCustomCode = sanitizeRemoteSecret(plat().getState('ui.remoteCustomCode', ''));
     this.disposables.push(this.tunnel.onChange(() => this.emit()));
+    this.disposables.push(this.relay.onChange(() => this.emit()));
     this.journal = new EditJournal({
       messages: () => this.messages,
       replaying: () => this.replaying,
@@ -1499,6 +1504,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.remoteLocal = false;
     this.remotePublic = false;
     this.tunnel.stop();
+    this.relay.stop();
     for (const d of this.remoteWatch.splice(0)) {
       d.dispose();
     }
@@ -1572,7 +1578,23 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       void plat().setState('ui.remotePublicUrl', this.remotePublicUrl);
     }
   }
+  private tunnelPublicKey(): string | undefined {
+    try {
+      const id = ensureTunnelIdentity(this.remoteHost);
+      return id.bundled ? undefined : id.publicKey;
+    } catch {
+      return undefined;
+    }
+  }
+
   private effectivePublicUrl(): string {
+    if (isBundledRelayHost(this.remoteHost)) {
+      const rel = this.relay.info();
+      if (rel.state === 'up' && rel.publicUrl) {
+        return rel.publicUrl;
+      }
+      return this.remotePublicUrl;
+    }
     const tun = this.tunnel.info();
     if (tun.state === 'up' && tun.remotePort > 0) {
       return advertisedPublicUrl(tun.host || this.remoteHost, tun.remotePort);
@@ -1582,14 +1604,22 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private syncTunnel(): void {
     if (!this.remotePublic || !this.remoteHost) {
       this.tunnel.stop();
+      this.relay.stop();
       return;
     }
+    const localPort = this.remote?.info().port || this.remotePort;
+    if (isBundledRelayHost(this.remoteHost)) {
+      this.tunnel.stop();
+      this.relay.start({ host: this.remoteHost, localPort });
+      return;
+    }
+    this.relay.stop();
     this.tunnel.start({
       host: this.remoteHost,
       user: this.remoteUser,
       sshPort: this.remoteSshPort,
       remotePort: this.remoteForwardPort,
-      localPort: this.remote?.info().port || this.remotePort,
+      localPort,
     });
   }
   rotateRemoteCode(): void {
@@ -1630,13 +1660,14 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
   private remoteInfo(): RemoteAccessInfo {
     const live = this.remote?.info();
-    const tun = this.tunnel.info();
+    const bundled = isBundledRelayHost(this.remoteHost);
+    const path = bundled ? this.relay.info() : this.tunnel.info();
     const tunnel = this.remotePublic
       ? this.remoteHost
-        ? tun.state
+        ? path.state
         : 'error'
       : 'off';
-    const tunnelError = this.remotePublic && !this.remoteHost ? 'missing' : tun.error;
+    const tunnelError = this.remotePublic && !this.remoteHost ? 'missing' : path.error;
     const extra = {
       tunnel,
       tunnelError,
@@ -1644,6 +1675,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       tunnelUser: this.remoteUser,
       sshPort: this.remoteSshPort,
       forwardPort: this.remoteForwardPort,
+      sshPublicKey: bundled ? undefined : this.tunnel.info().sshPublicKey ?? this.tunnelPublicKey(),
+      bundledRelay: bundled,
     };
     if (live?.running) {
       const publicUrl = this.effectivePublicUrl();

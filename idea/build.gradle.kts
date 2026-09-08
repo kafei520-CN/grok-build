@@ -45,6 +45,9 @@ val copySharedAssets by tasks.registering(Copy::class) {
     from(vscodeRoot.resolve("media/diff.css"))
     from(vscodeRoot.resolve("media/icon.svg"))
     from(vscodeRoot.resolve("media/grok-symbol.png"))
+    from(vscodeRoot.resolve("resources/relay-ssh")) {
+        into("relay-ssh")
+    }
     val monaco = vscodeRoot.resolve("dist/monaco")
     if (monaco.resolve("vs/loader.js").isFile) {
         from(monaco) {

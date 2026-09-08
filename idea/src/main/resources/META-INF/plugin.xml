@@ -12,7 +12,10 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.61: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.64: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.64 — Built-in public access is a browser URL. The other person does not install the plugin or OpenSSH. Pairing code still required. Custom VPS still uses SSH.</p>
+<p>0.2.63 — Built-in public remote writes the relay key from the plugin itself (not a sidecar file), so IntelliJ no longer fails with “tunnel key could not be used”. Rainyun still only needs the one public key imported once.</p>
+<p>0.2.62 — Public remote uses a plugin SSH identity (not ~/.ssh). The built-in relay ships a shared key so other PCs do not paste authorized_keys. Custom VPS still shows this PC’s public key.</p>
 <p>0.2.61 — After grok.com login, using a custom relay switches to API-key auth without /logout (grok.com tokens stay on disk). Switching back to an official model restores the session login.</p>
 <p>0.2.60 — Restored history shows the picker model_name (e.g. [La]Grok 4.6), not official Grok 4.6. After grok.com login, sending on a custom relay re-applies that model so /logout is not required first.</p>
 <p>0.2.59 — Restored history shows the model that actually ran. After grok.com login, the session JWT is not sent to a relay; relay 401s do not refresh official OIDC. Put the relay API key in API manager.</p>

@@ -107,6 +107,14 @@ function publicCard(localOn: boolean, publicOn: boolean): HTMLElement {
     status.className = 'settings-hint';
     status.textContent = tunnelStatus(remote);
     card.append(status);
+    if (remote?.bundledRelay) {
+      const ready = document.createElement('div');
+      ready.className = 'settings-hint';
+      ready.textContent = tr('settingsRemoteBundled');
+      card.append(ready);
+    } else if (remote?.sshPublicKey) {
+      card.append(pubKeyBlock(remote.sshPublicKey));
+    }
     if (remote?.publicUrl) {
       card.append(urlBlock([remote.publicUrl]));
     }
@@ -114,7 +122,9 @@ function publicCard(localOn: boolean, publicOn: boolean): HTMLElement {
   return card;
 }
 
-function tunnelStatus(remote: { tunnel?: string; tunnelError?: string } | undefined): string {
+function tunnelStatus(
+  remote: { tunnel?: string; tunnelError?: string; bundledRelay?: boolean } | undefined,
+): string {
   if (remote?.tunnel === 'up') {
     return tr('settingsRemoteTunnelUp');
   }
@@ -123,11 +133,19 @@ function tunnelStatus(remote: { tunnel?: string; tunnelError?: string } | undefi
   }
   switch (remote?.tunnelError) {
     case 'auth':
-      return tr('settingsRemoteTunnelErrAuth');
+      return remote?.bundledRelay ? tr('settingsRemoteTunnelErrReject') : tr('settingsRemoteTunnelErrAuth');
+    case 'hostkey':
+      return tr('settingsRemoteTunnelErrHostKey');
+    case 'keyfile':
+      return tr('settingsRemoteTunnelErrKeyFile');
     case 'host':
       return tr('settingsRemoteTunnelErrHost');
     case 'forward':
       return tr('settingsRemoteTunnelErrForward');
+    case 'reject':
+      return tr('settingsRemoteTunnelErrReject');
+    case 'relay':
+      return tr('settingsRemoteTunnelErrRelay');
     case 'network':
       return tr('settingsRemoteTunnelErrNetwork');
     case 'missing':
@@ -335,6 +353,29 @@ function urlBlock(urls: string[]): HTMLElement {
     line.append(text, copy);
     wrap.append(line);
   }
+  return wrap;
+}
+
+function pubKeyBlock(key: string): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-row stack';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('settingsRemoteSshPub');
+  const hint = document.createElement('div');
+  hint.className = 'settings-hint';
+  hint.textContent = tr('settingsRemoteSshPubHint');
+  const box = document.createElement('textarea');
+  box.className = 'settings-field';
+  box.readOnly = true;
+  box.rows = 3;
+  box.value = key;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'btn';
+  copy.textContent = tr('settingsRemoteCopy');
+  copy.addEventListener('click', () => copyText(key));
+  wrap.append(name, hint, box, copy);
   return wrap;
 }
 

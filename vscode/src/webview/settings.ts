@@ -49,7 +49,7 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.workflows ?? []).map((row) => row.id).join('|'),
     (ui.state.memoryFiles ?? []).map((row) => row.id).join('|'),
     `${ui.state.theme?.wallpaper ?? ''}|${ui.state.theme?.wallpaperUrl ?? ''}|${ui.state.theme?.surface ?? ''}|${ui.state.theme?.fontUrl ?? ''}|${ui.state.theme?.fontPath ?? ''}`,
-    `${ui.state.remote?.running ? '1' : '0'}|${ui.state.remote?.local ? '1' : '0'}|${ui.state.remote?.public ? '1' : '0'}|${ui.state.remote?.port ?? ''}|${ui.state.remote?.code ?? ''}|${ui.state.remote?.codeMode ?? ''}|${ui.state.remote?.publicUrl ?? ''}|${ui.state.remote?.tunnel ?? ''}|${ui.state.remote?.tunnelError ?? ''}|${ui.state.remote?.tunnelHost ?? ''}|${ui.state.remote?.forwardPort ?? ''}|${ui.state.remote?.clients ?? 0}|${ui.state.remote?.error ?? ''}`,
+    `${ui.state.remote?.running ? '1' : '0'}|${ui.state.remote?.local ? '1' : '0'}|${ui.state.remote?.public ? '1' : '0'}|${ui.state.remote?.port ?? ''}|${ui.state.remote?.code ?? ''}|${ui.state.remote?.codeMode ?? ''}|${ui.state.remote?.publicUrl ?? ''}|${ui.state.remote?.tunnel ?? ''}|${ui.state.remote?.tunnelError ?? ''}|${ui.state.remote?.tunnelHost ?? ''}|${ui.state.remote?.forwardPort ?? ''}|${ui.state.remote?.clients ?? 0}|${ui.state.remote?.error ?? ''}|${ui.state.remote?.sshPublicKey ?? ''}|${ui.state.remote?.bundledRelay ? '1' : '0'}`,
   ].join(':');
   if (!existing || paintedKey !== key) {
     existing?.remove();

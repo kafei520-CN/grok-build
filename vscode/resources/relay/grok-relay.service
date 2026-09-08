@@ -1,0 +1,15 @@
+[Unit]
+Description=Grok Build public web relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /opt/grok-relay/relay.js
+WorkingDirectory=/opt/grok-relay
+Restart=always
+RestartSec=2
+Environment=GROK_RELAY_HOST=189.24.78.197
+
+[Install]
+WantedBy=multi-user.target

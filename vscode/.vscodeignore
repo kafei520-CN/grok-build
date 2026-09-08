@@ -8,3 +8,4 @@ tsconfig.json
 **/*.vsix
 dist/test/**
 dist/host.js
+dist/relay.js

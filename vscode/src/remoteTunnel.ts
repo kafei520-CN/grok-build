@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   AUTO_FORWARD_MAX,
@@ -37,10 +38,16 @@ export interface TunnelInfo {
   user: string;
   sshPort: number;
   remotePort: number;
+  sshPublicKey?: string;
+  bundledRelay?: boolean;
 }
 
-const AUTH_FAIL = /permission denied|no matching host key|host key verification failed|too many authentication/i;
+const AUTH_FAIL = /permission denied \(publickey|permission denied \(publickey,password|too many authentication/i;
+const HOST_KEY_FAIL =
+  /host key verification failed|remote host identification has changed|no matching host key type|no matching host key/i;
+const KEY_FILE_FAIL = /invalid format|unprotected private key|bad permissions|error loading key|load key/i;
 const BAD_HOST = /could not resolve hostname|name or service not known/i;
+const BAD_STRICT = /bad configuration option.*stricthostkeychecking|invalid strict host key/i;
 
 export function sanitizeTunnelHost(raw: unknown): string {
   const text = String(raw ?? '').trim();
@@ -88,30 +95,149 @@ export function advertisedPublicUrl(host: string, remotePort: number): string {
 }
 
 export function sshBinary(): string {
+  return openSshTool('ssh');
+}
+
+export function sshKeygenBinary(): string {
+  return openSshTool('ssh-keygen');
+}
+
+function openSshTool(name: string): string {
   if (process.platform === 'win32') {
     const root = process.env.SystemRoot ?? 'C:\\Windows';
-    const bundled = path.join(root, 'System32', 'OpenSSH', 'ssh.exe');
+    const bundled = path.join(root, 'System32', 'OpenSSH', `${name}.exe`);
     if (fs.existsSync(bundled)) {
       return bundled;
     }
   }
-  return 'ssh';
+  return name;
+}
+
+function sshPath(file: string): string {
+  return file.replace(/\\/g, '/');
+}
+
+export function grokSshDir(): string {
+  return path.join(os.homedir(), '.grok', 'ssh');
+}
+
+export function isBundledRelayHost(host: string | undefined): boolean {
+  return Boolean(host && host === DEFAULT_PUBLIC_HOST);
+}
+
+const BUNDLED_RELAY_PUBLIC =
+  'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF4XwrMzzR1X+oR0w9MCFiU3bCnyqp2b+pSCc5QCJfbY grok-build-relay';
+
+const BUNDLED_RELAY_PRIVATE = [
+  '-----BEGIN OPENSSH PRIVATE KEY-----',
+  'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW',
+  'QyNTUxOQAAACBeF8KzM80dV/qEdMPTAhYlN2wp8qqdm/qUgnOUAiX22AAAAJgzPuGxMz7h',
+  'sQAAAAtzc2gtZWQyNTUxOQAAACBeF8KzM80dV/qEdMPTAhYlN2wp8qqdm/qUgnOUAiX22A',
+  'AAAEALE7zsFXwyA5mvSKX8OmB3fbg6INnbSdBVOe+zU0gOj14XwrMzzR1X+oR0w9MCFiU3',
+  'bCnyqp2b+pSCc5QCJfbYAAAAEGdyb2stYnVpbGQtcmVsYXkBAgMEBQ==',
+  '-----END OPENSSH PRIVATE KEY-----',
+  '',
+].join('\n');
+
+function writeUnixFile(file: string, body: string): void {
+  fs.writeFileSync(file, body.replace(/\r\n/g, '\n').replace(/\r/g, '\n'), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+}
+
+/** Built-in VPS uses the plugin key (no per-PC authorized_keys). Custom VPS uses a local key. */
+export function ensureTunnelIdentity(host?: string): {
+  privateKey: string;
+  publicKey: string;
+  bundled: boolean;
+} {
+  const dir = grokSshDir();
+  fs.mkdirSync(dir, { recursive: true });
+  if (isBundledRelayHost(host)) {
+    const privateKey = path.join(dir, 'relay-id_ed25519');
+    const publicFile = `${privateKey}.pub`;
+    writeUnixFile(privateKey, BUNDLED_RELAY_PRIVATE);
+    writeUnixFile(publicFile, `${BUNDLED_RELAY_PUBLIC}\n`);
+    protectPrivateKey(privateKey);
+    return { privateKey, publicKey: BUNDLED_RELAY_PUBLIC, bundled: true };
+  }
+  const privateKey = path.join(dir, 'id_ed25519');
+  const publicFile = `${privateKey}.pub`;
+  if (!fs.existsSync(privateKey) || !fs.existsSync(publicFile)) {
+    const result = spawnSync(
+      sshKeygenBinary(),
+      ['-t', 'ed25519', '-f', privateKey, '-N', '', '-q', '-C', 'grok-build-remote'],
+      { windowsHide: true, encoding: 'utf8' },
+    );
+    if (result.status !== 0 && !fs.existsSync(privateKey)) {
+      throw new Error(result.stderr?.toString().trim() || 'ssh-keygen failed');
+    }
+    protectPrivateKey(privateKey);
+  }
+  const publicKey = fs.readFileSync(publicFile, 'utf8').trim();
+  if (!publicKey) {
+    throw new Error('empty tunnel public key');
+  }
+  return { privateKey, publicKey, bundled: false };
+}
+
+function protectPrivateKey(file: string): void {
+  if (process.platform !== 'win32') {
+    try {
+      fs.chmodSync(file, 0o600);
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+  const user = os.userInfo().username;
+  spawnSync('icacls', [file, '/inheritance:r'], { windowsHide: true });
+  for (const who of [
+    'SYSTEM',
+    'Administrators',
+    'BUILTIN\\Administrators',
+    'Users',
+    'Authenticated Users',
+    'Everyone',
+  ]) {
+    spawnSync('icacls', [file, '/remove', who], { windowsHide: true });
+  }
+  spawnSync('icacls', [file, '/grant:r', `${user}:(R)`], { windowsHide: true });
+}
+
+export function tunnelKnownHostsFile(): string {
+  return path.join(grokSshDir(), 'known_hosts');
 }
 
 /** Reverse tunnel: local machine dials the VPS, VPS listens, browsers hit the VPS. */
-export function buildSshArgs(cfg: TunnelConfig): string[] {
-  return [
+export function buildSshArgs(
+  cfg: TunnelConfig,
+  extra: { identity?: string; knownHosts?: string; strict?: 'accept-new' | 'no' } = {},
+): string[] {
+  const args = [
     '-N',
     '-T',
     '-o', 'BatchMode=yes',
     '-o', 'ExitOnForwardFailure=yes',
     '-o', 'ServerAliveInterval=30',
     '-o', 'ServerAliveCountMax=3',
-    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', `StrictHostKeyChecking=${extra.strict ?? 'accept-new'}`,
+    '-o', 'PreferredAuthentications=publickey',
+    '-o', 'HostKeyAlgorithms=+ssh-ed25519,rsa-sha2-512,rsa-sha2-256,ssh-rsa',
+  ];
+  if (extra.identity) {
+    args.push('-i', extra.identity, '-o', 'IdentitiesOnly=yes');
+  }
+  if (extra.knownHosts) {
+    args.push('-o', `UserKnownHostsFile=${sshPath(extra.knownHosts)}`);
+  }
+  args.push(
     '-p', String(cfg.sshPort),
     '-R', `0.0.0.0:${cfg.remotePort}:127.0.0.1:${cfg.localPort}`,
     `${cfg.user}@${cfg.host}`,
-  ];
+  );
+  return args;
 }
 
 export class ReverseTunnel {
@@ -125,6 +251,10 @@ export class ReverseTunnel {
   private retry?: ReturnType<typeof setTimeout>;
   private ready?: ReturnType<typeof setTimeout>;
   private delay = 1500;
+  private strict: 'accept-new' | 'no' = 'accept-new';
+  private identity?: string;
+  private publicKey?: string;
+  private bundledRelay = false;
   private readonly listeners = new Set<() => void>();
 
   info(): TunnelInfo {
@@ -135,6 +265,8 @@ export class ReverseTunnel {
       user: this.cfg?.user ?? 'root',
       sshPort: this.cfg?.sshPort ?? 22,
       remotePort: this.boundPort || this.cfg?.remotePort || 0,
+      sshPublicKey: this.bundledRelay ? undefined : this.publicKey,
+      bundledRelay: this.bundledRelay,
     };
   }
 
@@ -178,14 +310,34 @@ export class ReverseTunnel {
     this.state = 'connecting';
     this.error = undefined;
     this.emit();
-    const child = spawn(sshBinary(), buildSshArgs(cfg), {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      windowsHide: true,
-    });
+    try {
+      const id = ensureTunnelIdentity(cfg.host);
+      this.identity = id.privateKey;
+      this.publicKey = id.publicKey;
+      this.bundledRelay = id.bundled;
+    } catch {
+      this.fail('keyfile', false);
+      return;
+    }
+    const child = spawn(
+      sshBinary(),
+      buildSshArgs(cfg, {
+        identity: this.identity,
+        knownHosts: tunnelKnownHostsFile(),
+        strict: this.strict,
+      }),
+      {
+        stdio: ['ignore', 'ignore', 'pipe'],
+        windowsHide: true,
+      },
+    );
     this.child = child;
     let stderr = '';
     child.stderr?.on('data', (chunk: Buffer) => {
-      stderr = `${stderr}${chunk.toString('utf8')}`.slice(-2000);
+      stderr = `${stderr}${chunk.toString('utf8')}`.slice(-4000);
+      if (this.strict === 'accept-new' && BAD_STRICT.test(stderr)) {
+        this.strict = 'no';
+      }
       const msg = classifySshError(stderr);
       if (msg) {
         this.error = msg;
@@ -269,6 +421,12 @@ export function classifySshError(raw: string): string | undefined {
   if (!text) {
     return undefined;
   }
+  if (KEY_FILE_FAIL.test(text)) {
+    return 'keyfile';
+  }
+  if (HOST_KEY_FAIL.test(text)) {
+    return 'hostkey';
+  }
   if (AUTH_FAIL.test(text)) {
     return 'auth';
   }
@@ -285,5 +443,5 @@ export function classifySshError(raw: string): string | undefined {
 }
 
 function isAuthFailure(code: string): boolean {
-  return code === 'auth' || code === 'host';
+  return code === 'auth' || code === 'host' || code === 'hostkey' || code === 'keyfile';
 }
