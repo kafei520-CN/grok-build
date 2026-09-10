@@ -230,9 +230,11 @@ function messagesBareHost(raw: string): boolean {
 function endpointRow(item: ApiEndpoint): HTMLElement {
   const row = document.createElement('div');
   row.className = 'settings-row rule-row';
-  const copy = document.createElement('button');
-  copy.type = 'button';
-  copy.className = 'settings-copy rule-open';
+  const copy = document.createElement(item.builtin ? 'div' : 'button');
+  if (copy instanceof HTMLButtonElement) {
+    copy.type = 'button';
+  }
+  copy.className = item.builtin ? 'settings-copy' : 'settings-copy rule-open';
   const name = document.createElement('div');
   name.className = 'settings-label';
   name.textContent = item.name;
@@ -246,9 +248,13 @@ function endpointRow(item: ApiEndpoint): HTMLElement {
         : tr('settingsApisChat');
   const state = item.enabled ? tr('settingsApisOn') : tr('settingsApisOff');
   const windowHint = item.contextWindow ? ` · ${formatContextWindow(item.contextWindow)}` : '';
-  hint.textContent = `${state} · ${proto} · ${item.model} · ${item.baseUrl}${windowHint}${item.hasKey ? ` · ${tr('settingsApisHasKey')}` : ''}`;
+  hint.textContent = item.builtin
+    ? `${tr('settingsApisOfficial')} · ${state}`
+    : `${state} · ${proto} · ${item.model} · ${item.baseUrl}${windowHint}${item.hasKey ? ` · ${tr('settingsApisHasKey')}` : ''}`;
   copy.append(name, hint);
-  copy.addEventListener('click', () => post({ type: 'openApiForm', id: item.id }));
+  if (!item.builtin) {
+    copy.addEventListener('click', () => post({ type: 'openApiForm', id: item.id }));
+  }
   const tools = document.createElement('div');
   tools.className = 'rule-tools';
   const toggle = document.createElement('button');
@@ -272,7 +278,10 @@ function endpointRow(item: ApiEndpoint): HTMLElement {
     event.stopPropagation();
     post({ type: 'deleteApi', id: item.id });
   });
-  tools.append(toggle, del);
+  tools.append(toggle);
+  if (!item.builtin) {
+    tools.append(del);
+  }
   row.append(copy, tools);
   return row;
 }

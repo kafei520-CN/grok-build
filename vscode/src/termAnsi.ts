@@ -1,11 +1,58 @@
-/** Fold CR progress lines and keep SGR; used before painting. */
+/** Simulate CR overwrite on one line. Trailing CR keeps the last segment. */
 export function foldCarriageReturns(text: string): string {
-  return text.replace(/\r\n/g, '\n').replace(/[^\n]*\r/g, '');
+  return text.replace(/\r\n/g, '\n').split('\n').map(foldLine).join('\n');
+}
+
+function foldLine(line: string): string {
+  if (!line.includes('\r')) {
+    return line;
+  }
+  let out = '';
+  for (const part of line.split('\r')) {
+    out = part.length >= out.length ? part : part + out.slice(part.length);
+  }
+  return out;
+}
+
+const PROGRESS_LINE =
+  /^\s*<[=->]+|\d+%\s+(?:EXECUTING|WAITING|CONFIGURING|INITIALIZING|BUILDING)/i;
+
+/** Drop cursor/erase CSI, honor cursor-up, fold CR, keep one live progress line. */
+export function normalizeTermStream(raw: string): string {
+  let text = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+  text = text.replace(/\x1b\[[0-9;?]*[HJKSTfhlBCD]/g, '');
+  const lines: string[] = [];
+  for (const chunk of text.replace(/\r\n/g, '\n').split('\n')) {
+    const cleaned = chunk.replace(/\x1b\[(\d*)A/g, (_, n) => {
+      const count = Number(n) || 1;
+      for (let i = 0; i < count; i += 1) {
+        lines.pop();
+      }
+      return '';
+    });
+    if (cleaned.length > 0 || lines.length === 0) {
+      lines.push(foldLine(cleaned));
+    }
+  }
+  return collapseProgress(lines);
+}
+
+function collapseProgress(lines: string[]): string {
+  const out: string[] = [];
+  for (const line of lines) {
+    const plain = line.replace(/\x1b\[[0-9;]*m/g, '');
+    if (PROGRESS_LINE.test(plain) && out.length > 0 && PROGRESS_LINE.test(out[out.length - 1] ?? '')) {
+      out[out.length - 1] = line;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
 }
 
 /** Escape + map common SGR codes so the webview can paint a terminal body. */
 export function renderTermHtml(raw: string): string {
-  const text = foldCarriageReturns(raw).replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+  const text = normalizeTermStream(raw);
   let html = '';
   let open = false;
   let style: TermStyle = emptyStyle();

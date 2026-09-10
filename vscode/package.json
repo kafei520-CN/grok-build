@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.66",
+  "version": "0.2.71",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -72,6 +72,11 @@
       {
         "command": "grok.addActiveFile",
         "title": "%command.addActiveFile%",
+        "category": "Grok Build"
+      },
+      {
+        "command": "grok.addFiles",
+        "title": "%command.addFiles%",
         "category": "Grok Build"
       },
       {
@@ -165,6 +170,12 @@
         {
           "command": "grok.addSelection",
           "when": "editorHasSelection",
+          "group": "grok@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "grok.addFiles",
           "group": "grok@1"
         }
       ]
@@ -294,5 +305,9 @@
     "monaco-editor": "^0.52.2",
     "shiki": "^4.4.3",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.7.3",
+    "katex": "^0.18.7"
   }
 }

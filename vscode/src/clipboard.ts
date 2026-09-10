@@ -16,6 +16,17 @@ export function clipboardToPath(value: string): string | undefined {
     const path = decodeURIComponent(trimmed.replace(/^vscode-file:\/\/[^/]*/, ''));
     return path.replace(/^\/([A-Za-z]:)/, '$1');
   }
+  if (trimmed.includes('vscode-resource')) {
+    try {
+      const url = decodeURIComponent(trimmed.replace(/^https?:\/\/[^/]+/, ''));
+      const path = url.replace(/^\/+/, '').replace(/^([A-Za-z])%3A/i, '$1:');
+      if (looksLikeFilePath(path) || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('/')) {
+        return path.replace(/^\/([A-Za-z]:)/, '$1');
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   if (trimmed.startsWith('file:')) {
     return decodeURIComponent(
       trimmed.replace(/^file:\/\//, '').replace(/^\/([A-Za-z]:)/, '$1'),
@@ -29,8 +40,10 @@ export function clipboardToPath(value: string): string | undefined {
 
 const DROP_MIME = [
   'application/vnd.code.uri-list',
+  'application/vnd.code.resourceurls',
   'text/uri-list',
   'text/plain',
+  'codefiles',
   'resourceurls',
   'ResourceURLs',
 ];

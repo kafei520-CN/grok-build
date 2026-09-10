@@ -2,6 +2,9 @@ pub mod cgroup;
 #[cfg(unix)]
 pub mod embedded_search_tools;
 pub mod file_system;
+pub mod output_encoding;
+
+pub use output_encoding::decode_process_output;
 pub mod mock_fs;
 #[cfg(unix)]
 pub mod shell_state;

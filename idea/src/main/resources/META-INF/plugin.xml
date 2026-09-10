@@ -12,7 +12,12 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.66: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.71: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.71 — $\\ce{H2O}$ renders as water, not 0. Math delimiters are parsed before bare mhchem.</p>
+<p>0.2.70 — Quote selection/files into chat from editor, explorer, and the transcript. Markdown renders math and chemistry. Explorer file drops attach. Windows cmd output is decoded as GBK in the agent before display.</p>
+<p>0.2.69 — Windows cmd dir output is decoded as GBK instead of mojibake replacement characters.</p>
+<p>0.2.68 — Opening a session or edit-and-resend no longer jumps to the top. Local chat posts a full snapshot again instead of hydrating a tail first.</p>
+<p>0.2.67 — Edit-and-resend stays pinned to the latest turn. Sent user bubbles no longer vanish until refresh. Terminal cards drop the long command strip, decode GBK when UTF-8 fails, and collapse progress-bar spam.</p>
 <p>0.2.66 — Leftover custom models like [La]GPT-5.6-Terra leave the picker after API manager is emptied. Tool paths wrap. Terminal tools show expandable run output with a horizontal scrollbar and elapsed time.</p>
 <p>0.2.65 — Deleted API endpoints leave the model list. Last model and effort are restored. Long streams no longer freeze the IDE. Step cards check off as each step finishes. Built-in public access no longer ships an SSH private key.</p>
 <p>0.2.64 — Built-in public access is a browser URL. The other person does not install the plugin or OpenSSH. Pairing code still required. Custom VPS still uses SSH.</p>
@@ -175,8 +180,8 @@
       <separator/>
       <action id="Grok.AddSelection"
               class="cn.mckafei.grokbuild.AddSelectionAction"
-              text="Add Selection"
-              description="Attach the current editor selection">
+              text="Quote in Chat"
+              description="Quote the current editor selection in chat">
         <keyboard-shortcut keymap="$default" first-keystroke="control alt G"/>
         <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt G"/>
       </action>
@@ -230,8 +235,8 @@
 
     <action id="Grok.AddSelection.Editor"
             class="cn.mckafei.grokbuild.AddSelectionAction"
-            text="Grok: Add Selection"
-            description="Attach the current editor selection">
+            text="Grok: Quote in Chat"
+            description="Quote the current editor selection in chat">
       <add-to-group group-id="EditorPopupMenu" anchor="last"/>
     </action>
     <action id="Grok.AddActiveFile.Editor"
@@ -239,6 +244,12 @@
             text="Grok: Add Active File"
             description="Attach the current editor file">
       <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+    </action>
+    <action id="Grok.AddFiles.Explorer"
+            class="cn.mckafei.grokbuild.AddFilesAction"
+            text="Grok: Quote File in Chat"
+            description="Attach the selected files to chat">
+      <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
     </action>
   </actions>
 </idea-plugin>

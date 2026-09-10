@@ -1,3 +1,5 @@
+import { extractMath, renderKatex } from './markdownMath';
+
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -40,8 +42,18 @@ function renderBlocks(lines: string[]): string[] {
       if (i < lines.length && fenceClose(lines[i], fence.marker)) {
         i += 1;
       }
+      if (isMathFence(fence.lang)) {
+        out.push(renderKatex(body.join('\n'), true));
+        continue;
+      }
       const lang = fence.lang ? ` data-lang="${escapeHtml(fence.lang)}"` : '';
       out.push(`<pre class="code"${lang}><code>${escapeHtml(body.join('\n'))}</code></pre>`);
+      continue;
+    }
+    const mathBlock = takeMathBlock(lines, i);
+    if (mathBlock) {
+      out.push(renderKatex(mathBlock.body, true));
+      i = mathBlock.next;
       continue;
     }
     const heading = lines[i].match(/^ {0,3}(#{1,6})\s+(.+?)\s*$/);
@@ -86,6 +98,36 @@ function renderBlocks(lines: string[]): string[] {
     out.push(`<p>${inlineMarkdown(para.join('\n')).replace(/\n/g, '<br />')}</p>`);
   }
   return out;
+}
+
+function isMathFence(lang: string): boolean {
+  return lang === 'math' || lang === 'latex' || lang === 'tex' || lang === 'katex';
+}
+
+function takeMathBlock(
+  lines: string[],
+  start: number,
+): { body: string; next: number } | undefined {
+  const line = lines[start]?.trim() ?? '';
+  const one = line.match(/^\$\$(.+)\$\$$/) || line.match(/^\\\[(.+)\\\]$/);
+  if (one) {
+    return { body: one[1], next: start + 1 };
+  }
+  const open = line === '$$' || line === '\\[';
+  if (!open) {
+    return undefined;
+  }
+  const close = line === '\\[' ? '\\]' : '$$';
+  const body: string[] = [];
+  let i = start + 1;
+  while (i < lines.length && lines[i].trim() !== close && lines[i].trim() !== '$$') {
+    body.push(lines[i]);
+    i += 1;
+  }
+  if (i < lines.length) {
+    i += 1;
+  }
+  return { body: body.join('\n'), next: i };
 }
 
 function fenceOpen(line: string): { marker: string; lang: string; info: string } | undefined {
@@ -194,6 +236,9 @@ function isHr(line: string): boolean {
 function startsBlock(lines: string[], i: number): boolean {
   const line = lines[i];
   if (fenceOpen(line) || isHr(line) || /^ {0,3}#{1,6}\s/.test(line) || /^ {0,3}>/.test(line)) {
+    return true;
+  }
+  if (line.trim() === '$$' || line.trim() === '\\[' || /^\$\$.+\$\$$/.test(line.trim())) {
     return true;
   }
   if (parseListItem(line)) {
@@ -353,6 +398,7 @@ export function inlineMarkdown(src: string): string {
   let text = src.replace(/`([^`]+)`/g, (_all, code: string) =>
     stash(`<code>${escapeHtml(code)}</code>`),
   );
+  text = extractMath(text, stash);
   text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_all, alt: string, url: string) => {
     const href = safeUrl(url);
     return href

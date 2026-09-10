@@ -16,6 +16,10 @@ export function isCustomModelId(id?: string): boolean {
   return Boolean(id?.startsWith('endpoint-'));
 }
 
+export function isOfficialPickerModel(model: { id: string; name: string }): boolean {
+  return !isCustomModelId(model.id) && !model.name.trim().startsWith('[');
+}
+
 /** Official grok.com catalog titles — do not stamp these onto unlabeled history. */
 export function isOfficialGrokStamp(stamp: TurnModelStamp): boolean {
   const id = (stamp.modelId ?? '').trim();
@@ -33,10 +37,16 @@ export function overlayApiModels(
   if (!models) {
     return models;
   }
+  const hiddenOfficial = new Set(
+    apis.filter((row) => row.builtin && !row.enabled).map((row) => row.id),
+  );
   const enabled = apis.filter((row) => row.enabled);
-  const byId = new Map(enabled.map((row) => [row.id, row]));
+  const byId = new Map(enabled.filter((row) => !row.builtin).map((row) => [row.id, row]));
   const available = models.available
     .filter((model) => {
+      if (hiddenOfficial.has(model.id)) {
+        return false;
+      }
       if (byId.has(model.id)) {
         return true;
       }
@@ -50,7 +60,7 @@ export function overlayApiModels(
       return api ? { ...model, name: api.name } : model;
     });
   for (const api of enabled) {
-    if (available.some((model) => model.id === api.id)) {
+    if (api.builtin || available.some((model) => model.id === api.id)) {
       continue;
     }
     available.push({

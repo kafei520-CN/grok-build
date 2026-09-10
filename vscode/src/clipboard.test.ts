@@ -26,6 +26,10 @@ describe('clipboard paths', () => {
     };
     const paths = collectDropUris((type) => bag[type] ?? '');
     assert.deepEqual(paths, ['C:/work/a.ts', 'C:/work/b.ts']);
+    const codefiles = collectDropUris((type) =>
+      type === 'codefiles' ? 'file:///C:/work/z.ts' : '',
+    );
+    assert.deepEqual(codefiles, ['C:/work/z.ts']);
   });
 
   it('merges native drop paths and JSON resource URLs', () => {

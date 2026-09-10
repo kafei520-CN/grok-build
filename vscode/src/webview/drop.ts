@@ -139,13 +139,16 @@ function hasFiles(data: DataTransfer | null): boolean {
   if (types.includes('Files')) {
     return true;
   }
-  return types.some(
-    (type) =>
-      type === 'text/uri-list' ||
-      type === 'application/vnd.code.uri-list' ||
-      type === 'resourceurls' ||
-      type === 'ResourceURLs',
-  );
+  return types.some((type) => {
+    const name = type.toLowerCase();
+    return (
+      name === 'files' ||
+      name.includes('uri') ||
+      name.includes('resource') ||
+      name.includes('codefile') ||
+      name === 'codefiles'
+    );
+  });
 }
 
 async function sendDrop(data: DataTransfer): Promise<void> {

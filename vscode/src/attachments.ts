@@ -13,6 +13,21 @@ export interface AttachmentHost {
   emit(): void;
 }
 
+export function quoteText(host: AttachmentHost, text: string): void {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  const compact = trimmed.replace(/\s+/g, ' ');
+  const label = compact.length > 48 ? `${compact.slice(0, 45)}…` : compact;
+  upsert(host, {
+    id: `quote-${Date.now()}-${host.attachments.length}`,
+    label,
+    text: trimmed,
+  });
+  plat().focusChat();
+}
+
 export function addSelection(host: AttachmentHost): void {
   const selection = plat().getActiveSelection();
   if (!selection) {

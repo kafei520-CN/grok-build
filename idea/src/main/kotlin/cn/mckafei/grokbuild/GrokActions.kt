@@ -91,6 +91,23 @@ class AddActiveFileAction : AnAction(), DumbAware {
     }
 }
 
+class AddFilesAction : AnAction(), DumbAware {
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
+    override fun update(e: AnActionEvent) {
+        val files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY)
+        e.presentation.isEnabled = e.project != null && !files.isNullOrEmpty()
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val files = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY) ?: return
+        val session = GrokSession.get(project)
+        session.focusChat()
+        session.sendDropped(files.map { it.path })
+    }
+}
+
 class RestartAgentAction : AnAction(), DumbAware {
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
     override fun actionPerformed(e: AnActionEvent) = run(e, "restart")

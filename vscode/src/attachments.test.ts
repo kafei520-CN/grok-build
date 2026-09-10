@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { ATTACH_TEXT_MAX, addActiveFile, pasteClipboard, type AttachmentHost } from './attachments';
+import {
+  ATTACH_TEXT_MAX,
+  addActiveFile,
+  pasteClipboard,
+  quoteText,
+  type AttachmentHost,
+} from './attachments';
 import { bindPlatform, type Platform } from './platform';
 
 function fakePlat(over: Partial<Platform> = {}): Platform {
@@ -73,6 +79,15 @@ describe('attachments', () => {
     addActiveFile(host);
     assert.equal(host.attachments[0]?.path, '/work/app/huge.ts');
     assert.equal(host.attachments[0]?.text, undefined);
+  });
+
+  it('quotes selected chat text as an attachment chip', () => {
+    bindPlatform(fakePlat());
+    const host: AttachmentHost = { attachments: [], emit() {} };
+    quoteText(host, '  hello from a bubble  ');
+    assert.equal(host.attachments.length, 1);
+    assert.equal(host.attachments[0]?.text, 'hello from a bubble');
+    assert.equal(host.attachments[0]?.label, 'hello from a bubble');
   });
 
   it('attaches dropped file URIs as chips', async () => {

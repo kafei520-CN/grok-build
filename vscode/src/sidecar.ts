@@ -3,7 +3,6 @@ import { GrokController } from './controller';
 import { dispatchUi } from './dispatch';
 import { NodePlatform } from './nodePlatform';
 import { bindPlatform } from './platform';
-import { packedEvents } from './remoteState';
 import type { WebviewToHost } from './types';
 
 interface Incoming {
@@ -189,15 +188,7 @@ const platform = new NodePlatform({
 
 bindPlatform(platform);
 controller = new GrokController(platform);
-controller.onDidChange((state) => {
-  for (const event of packedEvents({
-    type: 'state',
-    state,
-    merge: Boolean(state.mergeTranscript),
-  })) {
-    send(event);
-  }
-});
+controller.onDidChange((state) => send({ type: 'state', state, merge: Boolean(state.mergeTranscript) }));
 controller.onDidStream((tail) => send(tail));
 
 const rl = readline.createInterface({ input: process.stdin, terminal: false });

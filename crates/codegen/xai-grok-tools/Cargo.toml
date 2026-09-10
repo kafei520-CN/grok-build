@@ -11,7 +11,7 @@ arc-swap = { workspace = true }
 dirs = { workspace = true }
 derive_more = { workspace = true, features = ["from", "try_into"] }
 dunce = { workspace = true }
-encoding_rs = { workspace = true, optional = true }
+encoding_rs = { workspace = true }
 fs2 = { workspace = true }
 educe = { workspace = true, features = ["Debug"] }
 async-openai = { workspace = true }

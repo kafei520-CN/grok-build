@@ -145,6 +145,7 @@ async function run() {
     return;
   }
   copyMonaco();
+  copyKatex();
   if (watch) {
     const ctxs = await Promise.all([
       esbuild.context(extension),
@@ -165,6 +166,19 @@ async function run() {
     esbuild.build(relay),
     esbuild.build(shikiMonaco),
   ]);
+}
+
+function copyKatex() {
+  const srcCss = path.join('node_modules', 'katex', 'dist', 'katex.min.css');
+  const srcFonts = path.join('node_modules', 'katex', 'dist', 'fonts');
+  const destDir = path.join('media', 'katex');
+  if (!existsSync(srcCss) || !existsSync(srcFonts)) {
+    console.warn('katex missing; math/chemistry markdown will fall back to code');
+    return;
+  }
+  mkdirSync(destDir, { recursive: true });
+  cpSync(srcCss, path.join(destDir, 'katex.min.css'));
+  cpSync(srcFonts, path.join(destDir, 'fonts'), { recursive: true });
 }
 
 function copyMonaco() {

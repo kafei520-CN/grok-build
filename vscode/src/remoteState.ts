@@ -74,7 +74,7 @@ function packState(state: Record<string, unknown>, messages: unknown[]): string[
   const slim = {
     ...state,
     messages: tail,
-    restoringSession: pending ? true : state.restoringSession,
+    restoringSession: Boolean(state.restoringSession) && pending,
   };
   const boot = JSON.stringify({ type: 'state', state: slim, hydrate: id });
   if (byteLen(boot) <= REMOTE_STATE_SOFT) {

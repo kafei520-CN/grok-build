@@ -5,6 +5,7 @@ import {
   assistantStamps,
   isCustomModelId,
   isOfficialGrokStamp,
+  isOfficialPickerModel,
   overlayApiModels,
 } from './turnModels';
 import type { ChatMessage } from './types';
@@ -40,6 +41,36 @@ describe('turn model stamps', () => {
     );
     assert.equal(next?.available.some((model) => model.id === 'endpoint-1'), true);
     assert.equal(next?.available.find((model) => model.id === 'endpoint-1')?.name, '[La]Grok 4.6');
+  });
+
+  it('hides official catalog rows turned off in the API manager', () => {
+    assert.equal(isOfficialPickerModel({ id: 'grok-4.6', name: 'Grok 4.6' }), true);
+    const next = overlayApiModels(
+      {
+        currentId: 'grok-4.6',
+        available: [
+          { id: 'grok-4.6', name: 'Grok 4.6' },
+          { id: 'grok-4', name: 'Grok 4' },
+        ],
+      },
+      [
+        {
+          id: 'grok-4.6',
+          name: 'Grok 4.6',
+          model: 'grok-4.6',
+          baseUrl: 'https://api.x.ai',
+          backend: 'chat_completions',
+          hasKey: false,
+          enabled: false,
+          builtin: true,
+        },
+      ],
+    );
+    assert.deepEqual(
+      next?.available.map((model) => model.id),
+      ['grok-4'],
+    );
+    assert.equal(next?.currentId, 'grok-4');
   });
 
   it('hides custom catalog rows after the API manager list is empty', () => {

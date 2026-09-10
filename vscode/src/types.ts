@@ -158,6 +158,8 @@ export interface ApiEndpoint {
   enabled: boolean;
   /** Token window written to grok config.toml as context_window. */
   contextWindow?: number;
+  /** Built-in grok.com catalog model. Cannot be deleted. */
+  builtin?: boolean;
 }
 
 export interface RuleItem {
@@ -691,6 +693,7 @@ export type WebviewToHost =
   | { type: 'copyText'; text: string }
   | { type: 'editUserPrompt'; messageId: string; text: string }
   | { type: 'exportChat' }
+  | { type: 'quoteSelection'; text: string }
   | { type: 'attach' }
   | { type: 'openSettings' }
   | { type: 'closeSettings' }

@@ -557,7 +557,7 @@ function applyTerminalCard(
     }
   } else {
     const fromContent = textFromToolContent(update.content);
-    const chunk = encoding === 'utf-8' ? fromContent || raw.text : raw.text || fromContent;
+    const chunk = raw.text || (fromContent.includes('\uFFFD') ? '' : fromContent) || fromContent;
     if (chunk) {
       const prev = card.output ?? '';
       if (replaying || !prev || chunk.startsWith(prev) || chunk.length >= prev.length) {

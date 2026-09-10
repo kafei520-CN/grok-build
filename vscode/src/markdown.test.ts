@@ -74,6 +74,21 @@ describe('markdown', () => {
     assert.match(html, /<td style="text-align:left"><strong>1<\/strong><\/td>/);
   });
 
+  it('renders math and chemistry formulas', () => {
+    const inline = renderMarkdown('Energy $E=mc^2$ and water $\\ce{H2O}$.');
+    assert.match(inline, /katex/);
+    assert.doesNotMatch(inline, /\$E=mc\^2\$/);
+    const water = renderMarkdown('水：$\\ce{H2O}$');
+    assert.match(water, /katex/);
+    assert.match(water, />H</);
+    assert.doesNotMatch(water, /\$\\ce/);
+    const block = renderMarkdown('$$\\ce{2H2 + O2 -> 2H2O}$$');
+    assert.match(block, /katex-display|katex/);
+    const fence = renderMarkdown('```math\n\\frac{1}{2}\n```');
+    assert.match(fence, /katex/);
+    assert.doesNotMatch(fence, /<pre class="code"/);
+  });
+
   it('renders links and rejects javascript urls', () => {
     const html = renderMarkdown('see [docs](https://x.ai) and [x](javascript:alert(1))');
     assert.match(html, /<a href="https:\/\/x.ai" rel="noreferrer noopener">docs<\/a>/);

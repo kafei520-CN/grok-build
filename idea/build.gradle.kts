@@ -45,6 +45,12 @@ val copySharedAssets by tasks.registering(Copy::class) {
     from(vscodeRoot.resolve("media/diff.css"))
     from(vscodeRoot.resolve("media/icon.svg"))
     from(vscodeRoot.resolve("media/grok-symbol.png"))
+    val katex = vscodeRoot.resolve("media/katex")
+    if (katex.resolve("katex.min.css").isFile) {
+        from(katex) {
+            into("katex")
+        }
+    }
     val monaco = vscodeRoot.resolve("dist/monaco")
     if (monaco.resolve("vs/loader.js").isFile) {
         from(monaco) {

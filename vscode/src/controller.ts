@@ -14,6 +14,7 @@ import {
   attachFromUi,
   attachPath,
   pasteClipboard,
+  quoteText,
   removeAttachment,
 } from './attachments';
 import { installHint, resolveGrokBinary } from './cli';
@@ -823,6 +824,19 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     addActiveFile(this);
   }
 
+  quoteText(text: string): void {
+    quoteText(this, text);
+  }
+
+  async addFiles(paths: string[]): Promise<void> {
+    for (const filePath of paths) {
+      if (filePath.trim()) {
+        await attachPath(this, filePath);
+      }
+    }
+    plat().focusChat();
+  }
+
   removeAttachment(id: string): void {
     removeAttachment(this, id);
   }
@@ -1144,7 +1158,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       if (op !== this.sessionOp) {
         return;
       }
-      this.models = overlayApiModels(modelsFromResult(result) ?? this.models, this.apis);
+      this.models = this.overlayModels(modelsFromResult(result) ?? this.models);
       this.currentSessionId = agent.sessionId ?? sessionId;
       finalizeReplayTimes(this.messages);
       applyStoredTurnModels(this.messages, readStoredTurnModels(this.currentSessionId));
@@ -1875,13 +1889,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   emit(): void {
-    this.models = overlayApiModels(this.models, this.apis) ?? this.models;
+    this.models = this.overlayModels();
     this.dropUnknownPicker();
     this.flushEmitTimer();
     if (this.status === 'streaming') {
-      this.emitTail();
       this.publishSnapshot(this.streamPosted ? 'none' : 'tail');
       this.streamPosted = true;
+      this.emitTail();
       return;
     }
     this.streamPosted = false;
@@ -1894,7 +1908,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (!next) {
       return;
     }
-    this.models = overlayApiModels(next, this.apis);
+    this.models = this.overlayModels(next);
     this.emit();
   }
 
@@ -2085,7 +2099,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       this.agent = spawned;
       this.reconnectFails = 0;
       this.agentVersion = spawned.agentVersion();
-      this.models = overlayApiModels(modelsFromResult(init) ?? this.models, this.apis);
+      this.models = this.overlayModels(modelsFromResult(init) ?? this.models);
       this.applyPendingModelSelection();
       const methods = spawned.authMethods();
       const defaultId = spawned.defaultAuthMethodId();
@@ -2332,7 +2346,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const result = await agent.newSession(this.cwd(), extra);
     this.currentSessionId = agent.sessionId ?? result.sessionId;
     this.sessionCwd = this.cwd();
-    this.models = overlayApiModels(modelsFromResult(result) ?? this.models, this.apis);
+    this.models = this.overlayModels(modelsFromResult(result) ?? this.models);
     if (wantedId) {
       try {
         await this.syncAuthForModel(agent, wantedId);
@@ -2404,7 +2418,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   private applyPendingModelSelection(): void {
-    this.models = overlayApiModels(this.models, this.apis) ?? this.models;
+    this.models = this.overlayModels();
     if (!this.models) {
       return;
     }
@@ -2422,6 +2436,12 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (effort) {
       this.patchCurrentEffort(effort);
     }
+  }
+
+  private overlayModels(
+    models: ChatState['models'] = this.models,
+  ): ChatState['models'] {
+    return overlayApiModels(models, this.apis) ?? models;
   }
 
   private persistPicker(): void {

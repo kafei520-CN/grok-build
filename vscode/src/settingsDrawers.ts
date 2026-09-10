@@ -131,6 +131,7 @@ export interface SettingsHost {
   loadSession(sessionId: string, sessionCwd?: string): Promise<void>;
   send(text: string): Promise<void>;
   sendAgentSlash(text: string): Promise<void>;
+  setModel(modelId: string): Promise<void>;
   cancelTurn(): void;
   refreshSessionsSilent(): Promise<void>;
   respawnAgent(): void;
@@ -1123,6 +1124,9 @@ export async function saveApi(
 
 export async function deleteApi(host: SettingsHost, id: string): Promise<void> {
   const row = host.apis.find((item) => item.id === id);
+  if (row?.builtin) {
+    return;
+  }
   const ok = await plat().confirm(
     tr('settingsApisDeleteConfirm', { name: row?.name ?? id }),
     tr('settingsApisDelete'),
@@ -1139,6 +1143,17 @@ export async function deleteApi(host: SettingsHost, id: string): Promise<void> {
 export async function toggleApi(host: SettingsHost, id: string): Promise<void> {
   try {
     const saved = await toggleApiEndpoint(id);
+    if (saved.builtin) {
+      await refreshApis(host);
+      if (!saved.enabled && host.models?.currentId === id) {
+        const next = host.models.available.find((model) => model.id !== id);
+        if (next) {
+          await host.setModel(next.id);
+        }
+      }
+      host.emit();
+      return;
+    }
     if (saved.enabled) {
       markApiMutation(host, saved);
     } else {
@@ -1174,7 +1189,7 @@ export async function quarantineRecentApi(host: SettingsHost): Promise<boolean> 
 
 export async function refreshApis(host: SettingsHost): Promise<void> {
   try {
-    host.apis = await listApiEndpoints();
+    host.apis = await listApiEndpoints(host.models?.available ?? []);
     host.apisLoaded = true;
     host.emit();
   } catch (error) {

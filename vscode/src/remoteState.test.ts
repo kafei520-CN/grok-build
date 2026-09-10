@@ -82,7 +82,7 @@ describe('remote state packing', () => {
       ids,
       messages.map((row) => row.id),
     );
-    assert.equal(boot.state.restoringSession, true);
+    assert.equal(boot.state.restoringSession, false);
   });
 
   it('keeps a full restore on the replay path instead of a merge tail', () => {
@@ -101,6 +101,23 @@ describe('remote state packing', () => {
     };
     assert.equal(boot.merge, undefined);
     assert.equal(typeof boot.hydrate, 'number');
+    assert.equal(boot.state.restoringSession, false);
+  });
+
+  it('only shows the restore spinner when the host is restoring', () => {
+    const messages = Array.from({ length: 80 }, (_, i) => ({
+      id: `m${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      text: 'x'.repeat(2000),
+      tools: [],
+    }));
+    const frames = packRemotePayload({
+      type: 'state',
+      state: { status: 'ready', restoringSession: true, messages },
+    });
+    const boot = JSON.parse(frames[0] ?? '') as {
+      state: { restoringSession?: boolean };
+    };
     assert.equal(boot.state.restoringSession, true);
   });
 
@@ -147,6 +164,16 @@ describe('remote state packing', () => {
     assert.deepEqual(
       mergeTranscript(had, []).map((row) => row.id),
       ['a', 'b'],
+    );
+  });
+
+  it('puts a late user bubble back before its assistant after a stream tail raced ahead', () => {
+    const had = [{ id: 'u1' }, { id: 'a1' }, { id: 'a2' }];
+    const incoming = [{ id: 'u2' }, { id: 'a2' }];
+    const merged = mergeLiveMessages(had, incoming);
+    assert.deepEqual(
+      merged?.map((row) => row.id),
+      ['u1', 'a1', 'u2', 'a2'],
     );
   });
 

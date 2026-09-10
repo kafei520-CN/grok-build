@@ -6,7 +6,6 @@ import { COMMANDS, VIEW_ID } from './constants';
 import type { GrokController } from './controller';
 import { dispatchUi } from './dispatch';
 import { logInfo } from './logger';
-import { packedEvents } from './remoteState';
 import type { ChatState, WebviewToHost } from './types';
 import { bindChatWebview } from './vscodePlatform';
 
@@ -111,17 +110,11 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
   }
 
   private postState(state: ChatState): void {
-    const view = this.view;
-    if (!view) {
-      return;
-    }
-    for (const event of packedEvents({
+    void this.view?.webview.postMessage({
       type: 'state',
       state,
       merge: Boolean(state.mergeTranscript),
-    })) {
-      void view.webview.postMessage(event);
-    }
+    });
   }
 
   private renderHtml(webview: vscode.Webview): string {
@@ -132,6 +125,9 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
     const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'media', 'chat.css'),
     );
+    const katexUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'katex', 'katex.min.css'),
+    );
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -140,6 +136,7 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
     content="default-src 'none'; img-src ${webview.cspSource} data: https:; media-src ${webview.cspSource}; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; script-src ${webview.cspSource} 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="${styleUri}" />
+  <link rel="stylesheet" href="${katexUri}" />
   <title>Grok Build</title>
 </head>
 <body>

@@ -9,6 +9,7 @@ import { mountComposer, patchComposer } from './composer';
 import { removeSlot, replaceSlot } from './dom';
 import { closeSettingsPicker, patchSettings, settingsBackMessage } from './settings';
 import { bindFileDrop, syncDropHint } from './drop';
+import { bindQuoteMenu } from './quoteMenu';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
 import { chromeKeepers, overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './wallpaper';
 import { playNotify } from './notify';
@@ -85,7 +86,9 @@ function onHostMessage(data: HostMsg | null | undefined): void {
     if (typeof data.hydrate === 'number' && data.hydrate === skipHydrate && data.prepend) {
       if (data.done) {
         ui.state.restoringSession = false;
+        ui.stickToBottom = true;
         render();
+        scrollTranscript(true);
       }
       return;
     }
@@ -98,11 +101,15 @@ function onHostMessage(data: HostMsg | null | undefined): void {
       ui.state.messages = ui.state.messages.concat(batch);
     }
     if (typeof data.hydrate === 'number' && !data.done) {
-      ui.state.restoringSession = true;
+      if (ui.state.messages.length === 0) {
+        ui.state.restoringSession = true;
+      }
       return;
     }
     ui.state.restoringSession = false;
+    ui.stickToBottom = true;
     render();
+    scrollTranscript(true);
     return;
   }
   if (data.type === 'tail' && data.message) {
@@ -165,13 +172,12 @@ let tailPaint = 0;
 
 function applyTail(tail: StreamTail): void {
   const messages = ui.state.messages;
-  const last = messages.at(-1);
-  const next = mergeStreamTail(last, tail);
-  if (last?.id === next.id) {
-    messages[messages.length - 1] = next;
-  } else {
-    messages.push(next);
+  const incoming = tail.message;
+  const at = messages.findIndex((item) => item.id === incoming.id);
+  if (at < 0) {
+    return;
   }
+  messages[at] = mergeStreamTail(messages[at], tail);
   ui.state.status = tail.status;
   ui.state.context = tail.context;
   ui.state.queue = tail.queue;
@@ -265,6 +271,7 @@ function render(): void {
 
 function boot(): void {
   (window as unknown as { __grokPrime?: () => void }).__grokPrime?.();
+  bindQuoteMenu();
   post({ type: 'ready' });
   post({ type: 'alive' });
   if (!isRemoteWeb()) {

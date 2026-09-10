@@ -15,6 +15,17 @@ describe('dispatchUi', () => {
     assert.deepEqual(seen, ['u1:hello']);
   });
 
+  it('routes quoteSelection into chat attachments', async () => {
+    const seen: string[] = [];
+    const controller = {
+      quoteText(text: string) {
+        seen.push(text);
+      },
+    } as unknown as GrokController;
+    await dispatchUi(controller, { type: 'quoteSelection', text: 'picked line' });
+    assert.deepEqual(seen, ['picked line']);
+  });
+
   it('routes pasteClipboard so dropped files attach', async () => {
     const seen: string[][] = [];
     const controller = {

@@ -6,6 +6,8 @@ import {
   looksLikeClaude,
   messagesBaseUrlMissingVersion,
   normalizeBaseUrl,
+  mergeOfficialModels,
+  parseApiFile,
   parseApiStore,
   parseModelEndpoints,
   previewRequestUrl,
@@ -345,6 +347,29 @@ describe('api endpoint store', () => {
     assert.equal(second.rows[0]?.name, '[La]GPT-5.6-Terra');
     assert.equal(second.rows[1]?.name, 'DeepSeek');
     assert.equal(second.saved.id, 'endpoint-2');
+  });
+
+  it('keeps official models in the store and remembers the off switch', () => {
+    const official = mergeOfficialModels(
+      [{ id: 'grok-4', name: 'Grok 4', enabled: false }],
+      [
+        { id: 'grok-4', name: 'Grok 4' },
+        { id: 'grok-4.6', name: 'Grok 4.6' },
+        { id: 'endpoint-1', name: '[La]Grok' },
+      ],
+    );
+    assert.deepEqual(
+      official.map((row) => `${row.id}:${row.enabled}`),
+      ['grok-4:false', 'grok-4.6:true'],
+    );
+    const raw = JSON.stringify({
+      version: 2,
+      endpoints: [],
+      official: [{ id: 'grok-4', name: 'Grok 4', enabled: false }],
+    });
+    const file = parseApiFile(raw);
+    assert.equal(file.official[0]?.enabled, false);
+    assert.equal(file.official[0]?.id, 'grok-4');
   });
 
   it('round-trips the store JSON without dropping rows', () => {

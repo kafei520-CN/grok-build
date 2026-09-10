@@ -25,6 +25,28 @@ object SharedAssets {
 
     fun chatCss(): File = resolve("chat.css", "media")
 
+    fun katexDir(): File {
+        val dest = File(workDir("assets"), "katex")
+        if (File(dest, "katex.min.css").isFile) {
+            return dest
+        }
+        extractKatexTree(dest)
+        if (File(dest, "katex.min.css").isFile) {
+            return dest
+        }
+        val roots = listOf(
+            File(System.getProperty("user.dir")),
+            File(System.getProperty("user.dir"), ".."),
+        )
+        for (root in roots) {
+            val candidate = File(root, "vscode/media/katex")
+            if (File(candidate, "katex.min.css").isFile) {
+                return candidate.canonicalFile
+            }
+        }
+        error("Missing katex assets. Compile vscode/ (`npm run compile`) first.")
+    }
+
     fun diffCss(): File = resolve("diff.css", "media")
 
     fun grokSymbol(): File = resolve("grok-symbol.png", "media")
@@ -101,6 +123,29 @@ object SharedAssets {
             }
         }
         return File(dest, "vs/loader.js").isFile
+    }
+
+    private fun extractKatexTree(dest: File): Boolean {
+        val url = SharedAssets::class.java.getResource("/grok/katex/katex.min.css") ?: return false
+        if (url.protocol == "file") {
+            val dir = File(url.toURI()).parentFile ?: return false
+            copyTree(dir, dest)
+            return File(dest, "katex.min.css").isFile
+        }
+        val conn = url.openConnection() as? JarURLConnection ?: return false
+        val prefix = "grok/katex/"
+        val jar = conn.jarFile
+        jar.entries().asSequence().forEach { entry ->
+            if (entry.isDirectory || !entry.name.startsWith(prefix)) {
+                return@forEach
+            }
+            val out = File(dest, entry.name.removePrefix(prefix))
+            out.parentFile.mkdirs()
+            jar.getInputStream(entry).use { input ->
+                out.outputStream().use { input.copyTo(it) }
+            }
+        }
+        return File(dest, "katex.min.css").isFile
     }
 
     fun copyTree(from: File, to: File) {

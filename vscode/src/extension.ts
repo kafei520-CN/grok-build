@@ -24,6 +24,10 @@ export function activate(context: vscode.ExtensionContext): void {
   register(COMMANDS.setApiKey, () => controller.setApiKey());
   register(COMMANDS.addSelection, () => controller.addSelection());
   register(COMMANDS.addActiveFile, () => controller.addActiveFile());
+  register(COMMANDS.addFiles, async (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+    const list = (uris?.length ? uris : uri ? [uri] : []).map((item) => item.fsPath);
+    await controller.addFiles(list);
+  });
   register(COMMANDS.restartAgent, () => controller.restart());
   register(COMMANDS.showLog, () => controller.showLog());
   register(COMMANDS.cancel, () => controller.cancelTurn());

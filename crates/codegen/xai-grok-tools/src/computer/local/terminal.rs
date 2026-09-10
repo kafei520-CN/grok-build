@@ -26,6 +26,7 @@ use crate::computer::types::{
 use crate::notification::types::{BashNotificationBase, BashOutputChunk, ToolNotificationHandle};
 use crate::util::truncate::FRONT_BACK_TRUNCATION_MARKER;
 
+use super::output_encoding::decode_process_output;
 use super::SearchShadowConfig;
 #[cfg(unix)]
 use super::shell_state;
@@ -351,7 +352,7 @@ impl ProcessState {
     ///
     /// The two halves are re-joined by `to_result()` with a separator.
     fn maybe_truncate(&mut self) {
-        let s = String::from_utf8_lossy(&self.output_buffer);
+        let s = decode_process_output(&self.output_buffer);
         let char_count = s.chars().count();
         if char_count <= self.output_byte_limit {
             return;
@@ -462,10 +463,10 @@ impl ProcessState {
         match self.front_buffer.as_ref() {
             Some(front) => format!(
                 "{}{FRONT_BACK_TRUNCATION_MARKER}{}",
-                String::from_utf8_lossy(front).trim_end(),
-                String::from_utf8_lossy(&self.output_buffer).trim_start()
+                decode_process_output(front).trim_end(),
+                decode_process_output(&self.output_buffer).trim_start()
             ),
-            None => String::from_utf8_lossy(&self.output_buffer).into_owned(),
+            None => decode_process_output(&self.output_buffer),
         }
     }
 }
@@ -1829,7 +1830,7 @@ impl LocalTerminalActor {
                     base: BashNotificationBase {
                         tool_call_id: process.tool_call_id.clone(),
                         command: process.command.clone(),
-                        output: process.output_buffer.clone(),
+                        output: decode_process_output(&process.output_buffer).into_bytes(),
                         total_bytes: process.total_bytes,
                         truncated: process.truncated,
                         cwd: process.cwd.clone().into(),

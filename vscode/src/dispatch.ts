@@ -403,6 +403,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'pasteClipboard':
       await controller.pasteClipboard(message);
       return;
+    case 'quoteSelection':
+      controller.quoteText(message.text);
+      return;
     case 'undoEdits':
       await controller.undoEdits(message.messageId);
       return;

@@ -55,6 +55,20 @@ export function mergeLiveMessages<T extends { id?: string }>(had: T[], incoming:
   if (!incomingIds.has(lastHad)) {
     return undefined;
   }
+  let cut = -1;
+  for (const row of incoming) {
+    if (!row.id) {
+      continue;
+    }
+    const at = had.findIndex((item) => item.id === row.id);
+    if (at >= 0) {
+      cut = at;
+      break;
+    }
+  }
+  if (cut < 0) {
+    return undefined;
+  }
   const byId = new Map<string, T>();
   for (const row of had) {
     if (row.id) {
@@ -66,20 +80,7 @@ export function mergeLiveMessages<T extends { id?: string }>(had: T[], incoming:
       byId.set(row.id, row);
     }
   }
-  const seen = new Set<string>();
-  const out: T[] = [];
-  for (const row of had) {
-    const next = row.id ? byId.get(row.id) : row;
-    out.push(next ?? row);
-    if (row.id) {
-      seen.add(row.id);
-    }
-  }
-  for (const row of incoming) {
-    if (row.id && !seen.has(row.id)) {
-      out.push(row);
-      seen.add(row.id);
-    }
-  }
-  return out;
+  const prefix = had.slice(0, cut).filter((row) => !row.id || !incomingIds.has(row.id));
+  const tail = incoming.map((row) => (row.id ? (byId.get(row.id) ?? row) : row));
+  return prefix.concat(tail);
 }

@@ -11,6 +11,7 @@ export const COMMANDS = {
   setApiKey: 'grok.setApiKey',
   addSelection: 'grok.addSelection',
   addActiveFile: 'grok.addActiveFile',
+  addFiles: 'grok.addFiles',
   restartAgent: 'grok.restartAgent',
   showLog: 'grok.showLog',
   cancel: 'grok.cancel',

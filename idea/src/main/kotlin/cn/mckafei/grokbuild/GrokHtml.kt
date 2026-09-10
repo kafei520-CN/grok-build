@@ -6,7 +6,7 @@ import java.nio.file.StandardCopyOption
 
 object GrokHtml {
     fun writeChatPage(): File {
-        val page = writePage("chat", "Grok Build", "chat.css", "webview.js", SharedAssets.webviewJs(), SharedAssets.chatCss())
+        val page = writePage("chat", "Grok Build", "chat.css", "webview.js", SharedAssets.webviewJs(), SharedAssets.chatCss(), katex = true)
         try {
             copy(SharedAssets.grokSymbol(), File(page.parentFile, "grok-symbol.png"))
         } catch (_: Throwable) {
@@ -39,6 +39,7 @@ object GrokHtml {
         jsName: String,
         jsSrc: File,
         cssSrc: File,
+        katex: Boolean = false,
     ): File {
         val dir = SharedAssets.workDir(kind)
         val page = File(dir, "index.html")
@@ -46,13 +47,22 @@ object GrokHtml {
         val css = File(dir, cssName)
         if (page.isFile && js.isFile && css.isFile &&
             js.lastModified() >= jsSrc.lastModified() &&
-            css.lastModified() >= cssSrc.lastModified()
+            css.lastModified() >= cssSrc.lastModified() &&
+            (!katex || File(dir, "katex.min.css").isFile)
         ) {
             return page
         }
         copy(jsSrc, js)
         copy(cssSrc, css)
-        page.writeText(html(title, cssName, jsName), Charsets.UTF_8)
+        if (katex) {
+            try {
+                val katexDir = SharedAssets.katexDir()
+                copy(File(katexDir, "katex.min.css"), File(dir, "katex.min.css"))
+                SharedAssets.copyTree(File(katexDir, "fonts"), File(dir, "fonts"))
+            } catch (_: Throwable) {
+            }
+        }
+        page.writeText(html(title, cssName, jsName, katex), Charsets.UTF_8)
         return page
     }
 
@@ -60,7 +70,7 @@ object GrokHtml {
         Files.copy(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING)
     }
 
-    private fun html(title: String, css: String, script: String): String = """
+    private fun html(title: String, css: String, script: String, katex: Boolean = false): String = """
         <!DOCTYPE html>
         <html lang="en">
         <head>
@@ -70,6 +80,7 @@ object GrokHtml {
             content="default-src 'none'; img-src data: https: file:; media-src file: blob: 'self'; style-src 'unsafe-inline' file:; script-src 'unsafe-inline' file:; connect-src file:; font-src file: data:;" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <link rel="stylesheet" href="$css" />
+          ${if (katex) "<link rel=\"stylesheet\" href=\"katex.min.css\" />" else ""}
           ${GrokTheme.styleTag()}
           <title>$title</title>
         </head>

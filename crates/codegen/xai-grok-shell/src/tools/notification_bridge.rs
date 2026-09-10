@@ -241,23 +241,22 @@ async fn handle_notification(
 ) {
     match notification {
         ToolNotification::BashOutputChunk(chunk) => {
+            let decoded = xai_grok_tools::computer::local::decode_process_output(&chunk.base.output);
+            let decoded_bytes = decoded.as_bytes().to_vec();
             let (output, output_delta) = if config.incremental_bash_output {
                 let prev_offset = offsets.get(&chunk.base.tool_call_id).copied().unwrap_or(0);
-                let full = &chunk.base.output;
-                let delta = if prev_offset <= full.len() {
-                    full[prev_offset..].to_vec()
+                let delta = if prev_offset <= decoded_bytes.len() {
+                    decoded_bytes[prev_offset..].to_vec()
                 } else {
-                    full.clone()
+                    decoded_bytes.clone()
                 };
-                offsets.insert(chunk.base.tool_call_id.clone(), full.len());
+                offsets.insert(chunk.base.tool_call_id.clone(), decoded_bytes.len());
                 (Vec::new(), Some(delta))
             } else {
-                (chunk.base.output.clone(), None)
+                (decoded_bytes, None)
             };
             let bash_output = ToolOutput::Bash(BashOutput {
-                output_for_prompt: BashOutput::make_output_for_prompt(&String::from_utf8_lossy(
-                    &chunk.base.output,
-                )),
+                output_for_prompt: BashOutput::make_output_for_prompt(&decoded),
                 output,
                 exit_code: 0,
                 command: chunk.base.command.clone(),
@@ -277,7 +276,7 @@ async fn handle_notification(
                     .status(Some(acp::ToolCallStatus::InProgress))
                     .content(Some(vec![acp::ToolCallContent::from(
                         acp::ContentBlock::Text(acp::TextContent::new(
-                            String::from_utf8_lossy(&chunk.base.output).into_owned(),
+                            decoded.clone(),
                         )),
                     )]))
                     .raw_output(serde_json::to_value(&bash_output).ok()),

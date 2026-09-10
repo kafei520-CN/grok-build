@@ -68,6 +68,7 @@ export function patchBody(parent: HTMLElement): void {
       parent.append(body);
     }
     bindTranscriptScroll();
+    pinChatIfNeeded();
     return;
   }
   if (body.dataset.kind !== kind) {
@@ -75,6 +76,7 @@ export function patchBody(parent: HTMLElement): void {
     next.id = 'grok-body';
     body.replaceWith(next);
     bindTranscriptScroll();
+    pinChatIfNeeded();
     return;
   }
   if (kind === 'chat') {
@@ -583,6 +585,14 @@ const scrollState: TranscriptScroll = {
   pinLock: false,
 };
 
+function pinChatIfNeeded(): void {
+  if (bodyKind(ui.state) !== 'chat') {
+    return;
+  }
+  ui.stickToBottom = true;
+  scrollTranscript(true);
+}
+
 export function scrollTranscript(force = false): void {
   const el = document.getElementById('transcript');
   if (!el) {
@@ -859,8 +869,10 @@ function submitUserEdit(message: ChatMessage): void {
   }
   ui.editingUserId = undefined;
   ui.editDraft = '';
+  ui.stickToBottom = true;
   post({ type: 'editUserPrompt', messageId: message.id, text });
   render();
+  scrollTranscript(true);
 }
 
 function assistantColumn(message: ChatMessage): HTMLElement {
@@ -1314,7 +1326,7 @@ function toolRow(tool: ChatMessage['tools'][number]): HTMLElement {
   title.className = 'tool-title';
   fillToolTitle(title, tool);
   el.append(title);
-  if (tool.detail) {
+  if (tool.detail && !isTermTool(tool)) {
     const detail = document.createElement('button');
     detail.className = 'tool-detail';
     detail.type = 'button';
@@ -1444,7 +1456,7 @@ function termElapsedText(tool: ChatMessage['tools'][number]): string {
 
 function fillToolTitle(title: HTMLElement, tool: ChatMessage['tools'][number]): void {
   const kind = toolKindLabel(loc(), tool.kind);
-  const hint = tool.detail ? fileName(tool.detail) : tool.title;
+  const hint = isTermTool(tool) ? '' : tool.detail ? fileName(tool.detail) : tool.title;
   const icon = document.createElement('span');
   icon.className = 'tool-icon';
   if (tool.kind) {

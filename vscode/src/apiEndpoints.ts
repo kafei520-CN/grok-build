@@ -151,22 +151,75 @@ export function validateBaseUrl(raw: string): string {
   return normalized;
 }
 
+export interface OfficialRecord {
+  id: string;
+  name: string;
+  enabled: boolean;
+}
+
+export interface ApiFile {
+  endpoints: StoredEndpoint[];
+  official: OfficialRecord[];
+}
+
 export function parseApiStore(raw: string): StoredEndpoint[] {
+  return parseApiFile(raw).endpoints;
+}
+
+export function parseApiFile(raw: string): ApiFile {
   const text = raw.trim();
   if (!text) {
-    return [];
+    return { endpoints: [], official: [] };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text) as unknown;
   } catch {
-    return [];
+    return { endpoints: [], official: [] };
   }
   const rows = Array.isArray(parsed)
     ? parsed
     : parsed && typeof parsed === 'object'
       ? (parsed as { endpoints?: unknown }).endpoints
       : undefined;
+  const officialRaw =
+    parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as { official?: unknown }).official
+      : undefined;
+  return {
+    endpoints: parseEndpointRows(rows),
+    official: parseOfficialRows(officialRaw),
+  };
+}
+
+export function serializeApiStore(rows: StoredEndpoint[]): string {
+  return serializeApiFile({ endpoints: rows, official: [] });
+}
+
+export function serializeApiFile(file: ApiFile): string {
+  return `${JSON.stringify({ version: 2, endpoints: file.endpoints, official: file.official }, null, 2)}\n`;
+}
+
+export function mergeOfficialModels(
+  official: OfficialRecord[],
+  catalog: Array<{ id: string; name: string }> = [],
+): OfficialRecord[] {
+  const byId = new Map(official.map((row) => [row.id, row]));
+  for (const model of catalog) {
+    if (model.id.startsWith('endpoint-') || model.name.trim().startsWith('[')) {
+      continue;
+    }
+    const prev = byId.get(model.id);
+    byId.set(model.id, {
+      id: model.id,
+      name: model.name.trim() || prev?.name || model.id,
+      enabled: prev?.enabled ?? true,
+    });
+  }
+  return [...byId.values()];
+}
+
+function parseEndpointRows(rows: unknown): StoredEndpoint[] {
   if (!Array.isArray(rows)) {
     return [];
   }
@@ -183,8 +236,42 @@ export function parseApiStore(raw: string): StoredEndpoint[] {
   return out;
 }
 
-export function serializeApiStore(rows: StoredEndpoint[]): string {
-  return `${JSON.stringify({ version: 1, endpoints: rows }, null, 2)}\n`;
+function parseOfficialRows(rows: unknown): OfficialRecord[] {
+  if (!Array.isArray(rows)) {
+    return [];
+  }
+  const out: OfficialRecord[] = [];
+  const seen = new Set<string>();
+  for (const item of rows) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const obj = item as { id?: unknown; name?: unknown; enabled?: unknown };
+    const id = typeof obj.id === 'string' ? obj.id.trim() : '';
+    if (!id || seen.has(id) || id.startsWith('endpoint-')) {
+      continue;
+    }
+    seen.add(id);
+    out.push({
+      id,
+      name: typeof obj.name === 'string' && obj.name.trim() ? obj.name.trim() : id,
+      enabled: obj.enabled !== false,
+    });
+  }
+  return out;
+}
+
+function toBuiltinEndpoint(row: OfficialRecord): ApiEndpoint {
+  return {
+    id: row.id,
+    name: row.name,
+    model: row.id,
+    baseUrl: 'https://api.x.ai',
+    backend: 'chat_completions',
+    hasKey: false,
+    enabled: row.enabled,
+    builtin: true,
+  };
 }
 
 export function upsertStoredEndpoint(
@@ -306,35 +393,53 @@ export function repairCustomModelDefaults(toml: string): string {
   return next;
 }
 
-export async function listApiEndpoints(): Promise<ApiEndpoint[]> {
-  const rows = await loadStore();
-  await persistStore(rows);
-  return rows.map(toPublic);
+export async function listApiEndpoints(
+  catalog: Array<{ id: string; name: string }> = [],
+): Promise<ApiEndpoint[]> {
+  const file = await loadApiFile();
+  file.official = mergeOfficialModels(file.official, catalog);
+  await persistApiFile(file);
+  return [...file.official.map(toBuiltinEndpoint), ...file.endpoints.map(toPublic)];
 }
 
 export async function saveApiEndpoint(input: ApiEndpointInput): Promise<ApiEndpoint> {
   validateBaseUrl(input.baseUrl);
-  const next = upsertStoredEndpoint(await loadStore(), input);
-  await persistStore(next.rows);
+  const file = await loadApiFile();
+  if (file.official.some((row) => row.id === input.id)) {
+    throw new Error('official model');
+  }
+  const next = upsertStoredEndpoint(file.endpoints, input);
+  file.endpoints = next.rows;
+  await persistApiFile(file);
   return toPublic(next.saved);
 }
 
 export async function removeApiEndpoint(id: string): Promise<void> {
-  const rows = (await loadStore()).filter((row) => row.id !== id);
-  await persistStore(rows);
+  const file = await loadApiFile();
+  if (file.official.some((row) => row.id === id)) {
+    return;
+  }
+  file.endpoints = file.endpoints.filter((row) => row.id !== id);
+  await persistApiFile(file);
 }
 
 export async function toggleApiEndpoint(id: string): Promise<ApiEndpoint> {
-  const rows = await loadStore();
-  const existing = rows.find((row) => row.id === id);
+  const file = await loadApiFile();
+  const official = file.official.find((row) => row.id === id);
+  if (official) {
+    official.enabled = !official.enabled;
+    await persistApiFile(file);
+    return toBuiltinEndpoint(official);
+  }
+  const existing = file.endpoints.find((row) => row.id === id);
   if (!existing) {
     throw new Error('failed to toggle API endpoint');
   }
-  const next = rows.map((row) =>
+  file.endpoints = file.endpoints.map((row) =>
     row.id === id ? { ...row, enabled: !row.enabled } : row,
   );
-  await persistStore(next);
-  const saved = next.find((row) => row.id === id);
+  await persistApiFile(file);
+  const saved = file.endpoints.find((row) => row.id === id);
   if (!saved) {
     throw new Error('failed to toggle API endpoint');
   }
@@ -345,17 +450,26 @@ export async function setApiEndpointEnabled(
   id: string,
   enabled: boolean,
 ): Promise<ApiEndpoint | undefined> {
-  const rows = await loadStore();
-  const existing = rows.find((row) => row.id === id);
+  const file = await loadApiFile();
+  const official = file.official.find((row) => row.id === id);
+  if (official) {
+    if (official.enabled === enabled) {
+      return toBuiltinEndpoint(official);
+    }
+    official.enabled = enabled;
+    await persistApiFile(file);
+    return toBuiltinEndpoint(official);
+  }
+  const existing = file.endpoints.find((row) => row.id === id);
   if (!existing) {
     return undefined;
   }
   if (existing.enabled === enabled) {
     return toPublic(existing);
   }
-  const next = rows.map((row) => (row.id === id ? { ...row, enabled } : row));
-  await persistStore(next);
-  const saved = next.find((row) => row.id === id);
+  file.endpoints = file.endpoints.map((row) => (row.id === id ? { ...row, enabled } : row));
+  await persistApiFile(file);
+  const saved = file.endpoints.find((row) => row.id === id);
   return saved ? toPublic(saved) : undefined;
 }
 
@@ -368,19 +482,19 @@ interface ModelTable {
   extra: string[];
 }
 
-async function loadStore(): Promise<StoredEndpoint[]> {
+async function loadApiFile(): Promise<ApiFile> {
   const raw = await readText(grokApisPath());
   if (raw.trim()) {
-    return parseApiStore(raw);
+    return parseApiFile(raw);
   }
   const toml = await readText(grokConfigPath());
-  return collectTables(toml).map(storedFromTable);
+  return { endpoints: collectTables(toml).map(storedFromTable), official: [] };
 }
 
-async function persistStore(rows: StoredEndpoint[]): Promise<void> {
-  await writeText(grokApisPath(), serializeApiStore(rows));
+async function persistApiFile(file: ApiFile): Promise<void> {
+  await writeText(grokApisPath(), serializeApiFile(file));
   const toml = await readText(grokConfigPath());
-  const next = applyStoreToToml(toml, rows);
+  const next = applyStoreToToml(toml, file.endpoints);
   if (next !== toml) {
     await writeText(grokConfigPath(), next);
   }
