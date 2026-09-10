@@ -42,6 +42,26 @@ describe('turn model stamps', () => {
     assert.equal(next?.available.find((model) => model.id === 'endpoint-1')?.name, '[La]Grok 4.6');
   });
 
+  it('hides custom catalog rows after the API manager list is empty', () => {
+    const next = overlayApiModels(
+      {
+        currentId: 'endpoint-1',
+        available: [
+          { id: 'grok-4.6', name: 'Grok 4.6', currentEffort: 'high' },
+          { id: 'endpoint-1', name: '[La]Grok 4.6', currentEffort: 'high' },
+          { id: 'endpoint-5', name: '疯狂马斯克', currentEffort: 'xhigh' },
+          { id: 'la-gpt-5-6-terra', name: '[La]GPT-5.6-Terra', currentEffort: 'high' },
+        ],
+      },
+      [],
+    );
+    assert.deepEqual(
+      next?.available.map((model) => model.id),
+      ['grok-4.6'],
+    );
+    assert.equal(next?.currentId, 'grok-4.6');
+  });
+
   it('replays stored model_name onto restored assistant turns', () => {
     const messages: ChatMessage[] = [
       { id: 'u', role: 'user', text: 'hi', tools: [] },

@@ -168,6 +168,11 @@ function patchTranscript(): void {
   if (!transcript) {
     return;
   }
+  if (ui.state.status === 'streaming' && patchLastStreamingTurn(transcript)) {
+    scrollTranscript();
+    syncWorkClock();
+    return;
+  }
   const grouped = groupTurns(ui.state.messages);
   const nodes = [...transcript.children] as HTMLElement[];
   for (let i = 0; i < grouped.length; i++) {
@@ -209,6 +214,34 @@ function patchTranscript(): void {
   }
   scrollTranscript();
   syncWorkClock();
+}
+
+function lastTurn(messages: ChatMessage[]): Turn | undefined {
+  const last = messages.at(-1);
+  if (!last) {
+    return undefined;
+  }
+  if (last.role === 'assistant') {
+    const prev = messages.at(-2);
+    if (prev?.role === 'user') {
+      return { user: prev, assistant: last };
+    }
+    return { assistant: last };
+  }
+  return { user: last };
+}
+
+function patchLastStreamingTurn(transcript: HTMLElement): boolean {
+  const turn = lastTurn(ui.state.messages);
+  if (!turn?.assistant?.streaming) {
+    return false;
+  }
+  const node = transcript.lastElementChild as HTMLElement | null;
+  if (!node || node.dataset.turnId !== turnId(turn)) {
+    return false;
+  }
+  patchStreamingTurn(node, turn);
+  return true;
 }
 
 function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
@@ -305,19 +338,12 @@ function patchWorkBody(body: HTMLElement | null, message: ChatMessage): void {
       body.append(toolRow(tool));
       continue;
     }
-    const sig = `${tool.status}|${tool.kind ?? ''}|${tool.title}|${tool.detail ?? ''}`;
+    const sig = toolRowSig(tool);
     if (row.dataset.sig === sig) {
+      paintTermElapsed(row, tool);
       continue;
     }
-    row.dataset.sig = sig;
-    row.className = `tool-row ${tool.status}`;
-    if (tool.kind) {
-      row.dataset.kind = tool.kind;
-    }
-    const title = row.querySelector('.tool-title');
-    if (title instanceof HTMLElement) {
-      fillToolTitle(title, tool);
-    }
+    row.replaceWith(toolRow(tool));
   }
 }
 
@@ -1088,6 +1114,27 @@ function fillStepRows(body: HTMLElement, steps: PlanStep[], streaming: boolean):
     return;
   }
   body.dataset.steps = key;
+  const rows = [...body.children] as HTMLElement[];
+  if (rows.length === steps.length) {
+    steps.forEach((step, index) => {
+      const row = rows[index];
+      if (!row) {
+        return;
+      }
+      const live = streaming && step.status === 'in_progress';
+      row.dataset.status = step.status;
+      const icon = row.querySelector('.step-icon');
+      if (icon instanceof HTMLElement) {
+        icon.className = `step-icon ${stepIconKind(step.status, live)}`;
+        icon.innerHTML = stepIcon(step.status, live);
+      }
+      const text = row.querySelector('.step-text');
+      if (text) {
+        text.textContent = step.content;
+      }
+    });
+    return;
+  }
   body.replaceChildren();
   for (const step of steps) {
     body.append(stepRow(step, streaming));
@@ -1222,6 +1269,18 @@ function paintWorkLabels(): void {
       label.textContent = workLabel(message);
     }
   }
+  for (const node of document.querySelectorAll('.tool-row[data-id]')) {
+    if (!(node instanceof HTMLElement) || !node.dataset.id) {
+      continue;
+    }
+    const message = ui.state.messages.find(
+      (item) => item.role === 'assistant' && item.tools.some((tool) => tool.id === node.dataset.id),
+    );
+    const tool = message?.tools.find((item) => item.id === node.dataset.id);
+    if (tool) {
+      paintTermElapsed(node, tool);
+    }
+  }
 }
 
 function workLabel(message: ChatMessage): string {
@@ -1258,6 +1317,7 @@ function toolRow(tool: ChatMessage['tools'][number]): HTMLElement {
   const el = document.createElement('div');
   el.className = `tool-row ${tool.status}`;
   el.dataset.id = tool.id;
+  el.dataset.sig = toolRowSig(tool);
   if (tool.kind) {
     el.dataset.kind = tool.kind;
   }
@@ -1273,7 +1333,81 @@ function toolRow(tool: ChatMessage['tools'][number]): HTMLElement {
     detail.addEventListener('click', () => post({ type: 'openFile', path: tool.detail! }));
     el.append(detail);
   }
+  if (isTermTool(tool)) {
+    el.append(termPreview(tool));
+  }
   return el;
+}
+
+function toolRowSig(tool: ChatMessage['tools'][number]): string {
+  return `${tool.status}|${tool.kind ?? ''}|${tool.title}|${tool.detail ?? ''}|${tool.output?.length ?? 0}|${tool.command ?? ''}`;
+}
+
+function isTermTool(tool: ChatMessage['tools'][number]): boolean {
+  const kind = (tool.kind ?? '').toLowerCase();
+  const title = tool.title.toLowerCase();
+  return (
+    kind === 'execute' ||
+    kind === 'terminal' ||
+    title.includes('terminal') ||
+    title.includes('bash') ||
+    title.includes('run_terminal')
+  );
+}
+
+function termPreview(tool: ChatMessage['tools'][number]): HTMLElement {
+  const open =
+    ui.termOpen.get(tool.id) ??
+    (tool.status === 'in_progress' || tool.status === 'pending' || Boolean(tool.output));
+  const box = document.createElement('details');
+  box.className = 'tool-term';
+  box.open = open;
+  box.addEventListener('toggle', (event) => {
+    if (!event.isTrusted) {
+      return;
+    }
+    ui.termOpen.set(tool.id, box.open);
+  });
+  const summary = document.createElement('summary');
+  summary.textContent = tool.command ? tool.command : tr('termRun');
+  const frame = document.createElement('div');
+  frame.className = 'term-frame';
+  const body = document.createElement('pre');
+  body.className = 'term-body';
+  body.textContent = tool.output || '';
+  const elapsed = document.createElement('span');
+  elapsed.className = 'term-elapsed';
+  elapsed.textContent = termElapsedText(tool);
+  frame.append(body, elapsed);
+  box.append(summary, frame);
+  return box;
+}
+
+function paintTermElapsed(row: HTMLElement, tool: ChatMessage['tools'][number]): void {
+  const elapsed = row.querySelector('.term-elapsed');
+  if (elapsed) {
+    elapsed.textContent = termElapsedText(tool);
+  }
+  const body = row.querySelector('.term-body');
+  if (body && tool.output !== undefined && body.textContent !== tool.output) {
+    body.textContent = tool.output;
+  }
+}
+
+function termElapsedText(tool: ChatMessage['tools'][number]): string {
+  const start = Date.parse(tool.startedAt ?? '');
+  if (Number.isNaN(start)) {
+    return '';
+  }
+  const end = tool.endedAt ? Date.parse(tool.endedAt) : Date.now();
+  if (Number.isNaN(end)) {
+    return '';
+  }
+  const ms = Math.max(0, end - start);
+  if (!tool.endedAt && ms < 1000) {
+    return '';
+  }
+  return formatDuration(ms);
 }
 
 function fillToolTitle(title: HTMLElement, tool: ChatMessage['tools'][number]): void {

@@ -27,7 +27,10 @@ export function cursorFromMessage(message: ChatMessage): StreamDeltaCursor {
 /** tools/steps/error/images 是否变化；不含正文，避免长输出反复全量序列化。 */
 export function streamMetaStamp(message: ChatMessage): string {
   const tools = message.tools
-    .map((tool) => `${tool.id}:${tool.status}:${tool.title}:${tool.detail ?? ''}`)
+    .map(
+      (tool) =>
+        `${tool.id}:${tool.status}:${tool.title}:${tool.detail?.length ?? 0}:${tool.output?.length ?? 0}`,
+    )
     .join('|');
   const steps = (message.steps ?? []).map((step) => `${step.status}:${step.content}`).join('|');
   const err = message.error
@@ -62,7 +65,7 @@ export function buildStreamTail(
     id: last.id,
     role: 'assistant',
     text: canAppendText ? '' : text,
-    tools: metaChanged ? last.tools.map((tool) => ({ ...tool })) : [],
+    tools: metaChanged ? last.tools.map(slimTool) : [],
     streaming: last.streaming,
     createdAt: last.createdAt,
     endedAt: last.endedAt,
@@ -77,10 +80,10 @@ export function buildStreamTail(
   if (!canAppendPlan) {
     slim.plan = last.plan;
   }
+  if (last.steps?.length) {
+    slim.steps = last.steps.map((step) => ({ ...step }));
+  }
   if (metaChanged) {
-    if (last.steps) {
-      slim.steps = last.steps.map((step) => ({ ...step }));
-    }
     if (last.images?.length) {
       slim.images = last.images;
     }
@@ -109,6 +112,17 @@ export function buildStreamTail(
   };
 }
 
+function slimTool<T extends { detail?: string; output?: string }>(tool: T): T {
+  const next = { ...tool };
+  if (next.detail && next.detail.length > 240) {
+    next.detail = `${next.detail.slice(0, 237)}...`;
+  }
+  if (next.output && next.output.length > 8000) {
+    next.output = next.output.slice(next.output.length - 8000);
+  }
+  return next;
+}
+
 /** 在 webview 里把增量贴回已有消息，保留 edits / tools。 */
 export function mergeStreamTail(last: ChatMessage | undefined, tail: StreamTail): ChatMessage {
   const incoming = tail.message;
@@ -132,7 +146,7 @@ export function mergeStreamTail(last: ChatMessage | undefined, tail: StreamTail)
     thinking,
     plan,
     tools,
-    steps: incoming.steps ?? last.steps,
+    steps: incoming.steps !== undefined ? incoming.steps : last.steps,
     edits: last.edits,
     images: incoming.images ?? last.images,
     error: 'error' in incoming ? incoming.error ?? undefined : last.error,

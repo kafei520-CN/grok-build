@@ -12,7 +12,9 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.64: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.66: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.66 — Leftover custom models like [La]GPT-5.6-Terra leave the picker after API manager is emptied. Tool paths wrap. Terminal tools show expandable run output with a horizontal scrollbar and elapsed time.</p>
+<p>0.2.65 — Deleted API endpoints leave the model list. Last model and effort are restored. Long streams no longer freeze the IDE. Step cards check off as each step finishes. Built-in public access no longer ships an SSH private key.</p>
 <p>0.2.64 — Built-in public access is a browser URL. The other person does not install the plugin or OpenSSH. Pairing code still required. Custom VPS still uses SSH.</p>
 <p>0.2.63 — Built-in public remote writes the relay key from the plugin itself (not a sidecar file), so IntelliJ no longer fails with “tunnel key could not be used”. Rainyun still only needs the one public key imported once.</p>
 <p>0.2.62 — Public remote uses a plugin SSH identity (not ~/.ssh). The built-in relay ships a shared key so other PCs do not paste authorized_keys. Custom VPS still shows this PC’s public key.</p>

@@ -98,6 +98,46 @@ describe('streamTail', () => {
     assert.equal(merged.text, 'ok');
   });
 
+  it('sends step status changes on later ticks', () => {
+    const first = assistant({
+      id: 'a1',
+      text: 'x',
+      steps: [
+        { content: 'One', status: 'in_progress' },
+        { content: 'Two', status: 'pending' },
+      ],
+    });
+    const { tail: t1, cursor } = buildStreamTail(emptyStreamCursor(), first, { status: 'streaming' });
+    const web = mergeStreamTail(undefined, JSON.parse(JSON.stringify(t1)));
+    assert.equal(web.steps?.[0]?.status, 'in_progress');
+    const next = assistant({
+      id: 'a1',
+      text: 'xy',
+      steps: [
+        { content: 'One', status: 'completed' },
+        { content: 'Two', status: 'in_progress' },
+      ],
+    });
+    const { tail: t2 } = buildStreamTail(cursor, next, { status: 'streaming' });
+    const wire = JSON.parse(JSON.stringify(t2));
+    assert.equal(wire.message.steps[0].status, 'completed');
+    const merged = mergeStreamTail(web, wire);
+    assert.equal(merged.steps?.[0]?.status, 'completed');
+    assert.equal(merged.steps?.[1]?.status, 'in_progress');
+    assert.equal(merged.text, 'xy');
+  });
+
+  it('does not put a huge tool body on the wire', () => {
+    const last = assistant({
+      id: 'a1',
+      text: 'x',
+      tools: [{ id: 't1', title: 'read', status: 'done', detail: 'z'.repeat(20_000) }],
+    });
+    const { tail } = buildStreamTail(emptyStreamCursor(), last, { status: 'streaming' });
+    assert.ok((tail.message.tools[0]?.detail?.length ?? 0) <= 240);
+    assert.ok(JSON.stringify(tail).length < 2000);
+  });
+
   it('resends tools when the stamp changes', () => {
     const first = assistant({
       id: 'a1',

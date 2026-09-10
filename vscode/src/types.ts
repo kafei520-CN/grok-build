@@ -350,6 +350,11 @@ export interface ToolCard {
   kind?: string;
   status: string;
   detail?: string;
+  /** Clipped terminal stdout for execute/terminal tools. */
+  output?: string;
+  command?: string;
+  startedAt?: string;
+  endedAt?: string;
 }
 
 export interface TurnError {
@@ -365,6 +370,7 @@ export type PlanStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' 
 export interface PlanStep {
   content: string;
   status: PlanStepStatus;
+  id?: string;
 }
 
 export interface ChatMessage {
@@ -490,6 +496,8 @@ export interface ChatState {
   notify?: 'done' | 'fail';
   currentSessionId?: string;
   restoringSession?: boolean;
+  /** Live snapshot omitted history; the webview must keep its transcript. */
+  mergeTranscript?: boolean;
   hideSessionPreview?: boolean;
   workspacePath?: string;
   locale?: 'en' | 'zh-CN';

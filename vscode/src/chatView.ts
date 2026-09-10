@@ -110,7 +110,11 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
   }
 
   private postState(state: ChatState): void {
-    void this.view?.webview.postMessage({ type: 'state', state });
+    void this.view?.webview.postMessage({
+      type: 'state',
+      state,
+      merge: Boolean(state.mergeTranscript),
+    });
   }
 
   private renderHtml(webview: vscode.Webview): string {

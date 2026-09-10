@@ -38,18 +38,58 @@ export function parsePlanEntries(raw: unknown): PlanStep[] | undefined {
   const steps: PlanStep[] = [];
   for (const item of list) {
     const obj = asObject(item);
+    const id = asString(obj['id']);
     const content =
-      asString(obj['content']) ?? asString(obj['title']) ?? asString(obj['text']);
-    if (!content) {
+      asString(obj['content']) ?? asString(obj['title']) ?? asString(obj['text']) ?? '';
+    let status = planStepStatus(
+      asString(obj['status']) ?? asString(obj['state']),
+      asObject(obj['_meta'] ?? obj['meta']),
+    );
+    if (obj['completed'] === true || obj['done'] === true) {
+      status = 'completed';
+    }
+    if (!content && !id) {
       continue;
     }
-    const status = planStepStatus(asString(obj['status']), asObject(obj['_meta'] ?? obj['meta']));
     if (status === 'abandoned') {
       continue;
     }
-    steps.push({ content, status });
+    steps.push({ content: content || '', status, ...(id ? { id } : {}) });
   }
   return steps;
+}
+
+/** Full snapshots replace; merge:true patches (id/status without content) update in place. */
+export function overlayPlanSteps(
+  prev: PlanStep[] | undefined,
+  incoming: PlanStep[],
+): PlanStep[] {
+  const labeled = incoming.filter((step) => step.content);
+  if (labeled.length === incoming.length && labeled.length > 0) {
+    return incoming;
+  }
+  if (!prev?.length) {
+    return labeled;
+  }
+  const next = prev.map((step) => ({ ...step }));
+  for (const patch of incoming) {
+    const hit = next.find(
+      (step) =>
+        Boolean(patch.id && step.id && patch.id === step.id) ||
+        Boolean(patch.content && patch.content === step.content),
+    );
+    if (hit) {
+      hit.status = patch.status;
+      if (patch.content) {
+        hit.content = patch.content;
+      }
+      continue;
+    }
+    if (patch.content) {
+      next.push({ ...patch });
+    }
+  }
+  return next;
 }
 
 function planStepStatus(raw: string | undefined, meta: Record<string, unknown>): PlanStepStatus {
@@ -123,7 +163,7 @@ function applySteps(
   if (!canBindSteps(session, assistant)) {
     return;
   }
-  assistant.steps = steps;
+  assistant.steps = overlayPlanSteps(assistant.steps, steps);
 }
 
 export function applySessionUpdate(session: SessionView, update: SessionUpdate): void {
@@ -468,6 +508,116 @@ function listFromRaw(raw: unknown): unknown {
   return undefined;
 }
 
+export function isTerminalTool(kind?: string, title?: string): boolean {
+  const text = `${kind ?? ''} ${title ?? ''}`.toLowerCase();
+  return (
+    kind === 'execute' ||
+    kind === 'terminal' ||
+    text.includes('terminal') ||
+    text.includes('bash') ||
+    text.includes('run_terminal')
+  );
+}
+
+export function clipTermOutput(text: string, max = 8000): string {
+  if (text.length <= max) {
+    return text;
+  }
+  const slice = text.slice(text.length - max);
+  const nl = slice.indexOf('\n');
+  return slice.slice(nl >= 0 ? nl + 1 : 0);
+}
+
+function applyTerminalCard(card: ChatMessage['tools'][number], update: SessionUpdate): void {
+  if (!isTerminalTool(card.kind, card.title)) {
+    return;
+  }
+  if (!card.startedAt) {
+    card.startedAt = new Date().toISOString();
+  }
+  const command = commandFromUnknown(update.rawInput) ?? commandFromUnknown(update.rawOutput);
+  if (command) {
+    card.command = command;
+  }
+  const raw = parseTermRaw(update.rawOutput);
+  const chunk = textFromToolContent(update.content) || raw.text;
+  if (raw.delta !== undefined) {
+    if (raw.delta.length === 0) {
+      card.output = '';
+    } else {
+      card.output = clipTermOutput(`${card.output ?? ''}${raw.delta}`);
+    }
+  } else if (chunk) {
+    const prev = card.output ?? '';
+    if (!prev || chunk.startsWith(prev) || chunk.length >= prev.length) {
+      card.output = clipTermOutput(chunk);
+    } else if (!prev.endsWith(chunk)) {
+      card.output = clipTermOutput(`${prev}${prev.endsWith('\n') ? '' : '\n'}${chunk}`);
+    }
+  }
+  if (card.status === 'completed' || card.status === 'failed') {
+    card.endedAt = card.endedAt ?? new Date().toISOString();
+  }
+}
+
+function commandFromUnknown(raw: unknown): string | undefined {
+  const obj = asObject(raw);
+  const bash = asObject(obj['Bash']);
+  const src = Object.keys(bash).length ? bash : obj;
+  return asString(src['command']) ?? asString(src['cmd']) ?? asString(src['script']);
+}
+
+function parseTermRaw(raw: unknown): { text: string; delta?: string } {
+  const obj = asObject(raw);
+  const bash = asObject(obj['Bash']);
+  const src = Object.keys(bash).length ? bash : obj;
+  const deltaRaw = src['output_delta'];
+  const delta = deltaRaw === undefined ? undefined : utf8FromUnknown(deltaRaw);
+  const text =
+    utf8FromUnknown(src['output']) ||
+    utf8FromUnknown(src['stdout']) ||
+    utf8FromUnknown(src['output_for_prompt']) ||
+    utf8FromUnknown(src['text']);
+  return { text, delta };
+}
+
+function utf8FromUnknown(raw: unknown): string {
+  if (typeof raw === 'string') {
+    return raw;
+  }
+  if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'number') {
+    try {
+      return Buffer.from(raw as number[]).toString('utf8');
+    } catch {
+      return '';
+    }
+  }
+  return '';
+}
+
+function textFromToolContent(content: SessionUpdate['content']): string {
+  if (!content) {
+    return '';
+  }
+  const blocks = Array.isArray(content) ? content : [content];
+  const parts: string[] = [];
+  for (const block of blocks) {
+    if (block.type === 'diff' || block.type === 'image' || block.oldText || block.newText) {
+      continue;
+    }
+    if (block.text) {
+      parts.push(block.text);
+      continue;
+    }
+    const nested = asObject((block as unknown as Record<string, unknown>)['content']);
+    const inner = asString(nested['text']);
+    if (inner) {
+      parts.push(inner);
+    }
+  }
+  return parts.join('');
+}
+
 function isTodoTool(update: SessionUpdate): boolean {
   const text = `${update.kind ?? ''} ${update.title ?? ''} ${update.toolCallId ?? ''}`.toLowerCase();
   if (text.includes('todo') || text.includes('updating plan')) {
@@ -500,6 +650,7 @@ function applyTool(session: SessionView, assistant: ChatMessage, update: Session
   if (update.status) {
     card.status = update.status;
   }
+  applyTerminalCard(card, update);
   const location = update.locations?.[0]?.path;
   if (location) {
     card.detail = location;

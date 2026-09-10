@@ -94,6 +94,7 @@ export interface SettingsHost {
   rules: RuleItem[];
   skills: SkillItem[];
   apis: ApiEndpoint[];
+  apisLoaded?: boolean;
   mcps: McpItem[];
   agents: AgentDefItem[];
   personas: PersonaItem[];
@@ -1174,6 +1175,7 @@ export async function quarantineRecentApi(host: SettingsHost): Promise<boolean> 
 export async function refreshApis(host: SettingsHost): Promise<void> {
   try {
     host.apis = await listApiEndpoints();
+    host.apisLoaded = true;
     host.emit();
   } catch (error) {
     logWarn(`api list: ${error instanceof Error ? error.message : error}`);

@@ -577,6 +577,7 @@ export const EN = {
   toolSearch: 'Search',
   toolDelete: 'Delete',
   toolGeneric: 'Tool',
+  termRun: 'Run output',
 } as const;
 
 export type StringKey = keyof typeof EN;
@@ -1135,6 +1136,7 @@ export const ZH: Record<StringKey, string> = {
   toolSearch: '搜索',
   toolDelete: '删除',
   toolGeneric: '工具',
+  termRun: '运行情况',
 };
 
 export function t(

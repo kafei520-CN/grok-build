@@ -421,4 +421,63 @@ api_backend = "chat_completions"
     assert.equal(rows.length, 2);
     assert.equal(rows.map((row) => row.name).sort().join(','), 'One,Two');
   });
+
+  it('drops endpoint tables that are no longer in the plugin store', () => {
+    const leftover = `
+[models]
+default = "grok-4.6"
+
+[model.endpoint-1]
+name = "[La]Grok 4.6"
+model = "grok-4.6"
+base_url = "https://relay.example/v1"
+api_backend = "chat_completions"
+
+[model.endpoint-5]
+name = "疯狂马斯克"
+model = "grok-4.6"
+base_url = "https://other.example/v1"
+api_backend = "chat_completions"
+
+[model.gpt-4o]
+name = "GPT-4o"
+model = "gpt-4o"
+base_url = "https://api.openai.com/v1"
+api_backend = "chat_completions"
+`;
+    const cleaned = applyStoreToToml(leftover, []);
+    const rows = parseModelEndpoints(cleaned);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.id, 'gpt-4o');
+    assert.doesNotMatch(cleaned, /endpoint-1/);
+    assert.doesNotMatch(cleaned, /endpoint-5/);
+    assert.match(cleaned, /\[models\]/);
+    assert.match(cleaned, /default = "grok-4.6"/);
+  });
+
+  it('drops older plugin slug tables that used system_prompt_label', () => {
+    const leftover = `
+[models]
+default = "grok-4.6"
+
+[model.la-gpt-5-6-terra]
+name = "[La]GPT-5.6-Terra"
+model = "gpt-5.6-terra"
+base_url = "https://relay.example/v1"
+api_backend = "chat_completions"
+system_prompt_label = "[La]GPT-5.6-Terra"
+
+[model.gpt-4o]
+name = "GPT-4o"
+model = "gpt-4o"
+base_url = "https://api.openai.com/v1"
+api_backend = "chat_completions"
+`;
+    const cleaned = applyStoreToToml(leftover, []);
+    const rows = parseModelEndpoints(cleaned);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.id, 'gpt-4o');
+    assert.doesNotMatch(cleaned, /la-gpt-5-6-terra/);
+    assert.doesNotMatch(cleaned, /\[La\]GPT-5\.6-Terra/);
+  });
 });

@@ -35,10 +35,20 @@ export function overlayApiModels(
   }
   const enabled = apis.filter((row) => row.enabled);
   const byId = new Map(enabled.map((row) => [row.id, row]));
-  const available = models.available.map((model) => {
-    const api = byId.get(model.id);
-    return api ? { ...model, name: api.name } : model;
-  });
+  const available = models.available
+    .filter((model) => {
+      if (byId.has(model.id)) {
+        return true;
+      }
+      if (isCustomModelId(model.id) || model.name.trim().startsWith('[')) {
+        return false;
+      }
+      return true;
+    })
+    .map((model) => {
+      const api = byId.get(model.id);
+      return api ? { ...model, name: api.name } : model;
+    });
   for (const api of enabled) {
     if (available.some((model) => model.id === api.id)) {
       continue;
@@ -50,7 +60,11 @@ export function overlayApiModels(
       efforts: DEFAULT_CUSTOM_EFFORTS,
     });
   }
-  return { ...models, available };
+  let currentId = models.currentId;
+  if (currentId && !available.some((model) => model.id === currentId)) {
+    currentId = available.find((model) => !isCustomModelId(model.id))?.id ?? available[0]?.id;
+  }
+  return { ...models, currentId, available };
 }
 
 export function assistantStamps(messages: ChatMessage[]): TurnModelStamp[] {

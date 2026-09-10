@@ -218,7 +218,7 @@ export function applyStoreToToml(toml: string, rows: StoredEndpoint[]): string {
   const managed = new Set(rows.map((row) => row.id));
   let next = toml;
   for (const table of collectTables(next)) {
-    if (managed.has(table.id)) {
+    if (managed.has(table.id) || isPluginModelTable(table)) {
       next = deleteModelEndpoint(next, table.id);
     }
   }
@@ -438,6 +438,11 @@ function toPublic(row: StoredEndpoint): ApiEndpoint {
     enabled: row.enabled,
     contextWindow: row.contextWindow,
   };
+}
+
+/** Plugin-owned custom models: endpoint-* or older slug tables with system_prompt_label. */
+function isPluginModelTable(table: ModelTable): boolean {
+  return table.id.startsWith('endpoint-') || Boolean(table.values['system_prompt_label']);
 }
 
 function collectTables(toml: string): ModelTable[] {

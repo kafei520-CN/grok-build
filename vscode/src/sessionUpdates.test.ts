@@ -10,6 +10,9 @@ import {
   isoFromMs,
   mergeModelCatalog,
   modelsFromResult,
+  clipTermOutput,
+  isTerminalTool,
+  overlayPlanSteps,
   parsePlanEntries,
   stampTimes,
   stampTurnModel,
@@ -280,6 +283,38 @@ describe('plan steps', () => {
     assert.equal(session.messages[0]?.steps?.[1]?.status, 'in_progress');
   });
 
+  it('applies merge:true todo patches that only send id and status', () => {
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'plan',
+      entries: [
+        { id: '1', content: 'One', status: 'in_progress' },
+        { id: '2', content: 'Two', status: 'pending' },
+      ],
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call_update',
+      title: 'todo_write',
+      rawInput: { merge: true, todos: [{ id: '1', status: 'completed' }] },
+    });
+    assert.equal(session.messages[0]?.steps?.[0]?.status, 'completed');
+    assert.equal(session.messages[0]?.steps?.[0]?.content, 'One');
+    assert.equal(session.messages[0]?.steps?.[1]?.status, 'pending');
+  });
+
+  it('overlays a status-only patch onto the live card', () => {
+    const next = overlayPlanSteps(
+      [
+        { id: '1', content: 'One', status: 'in_progress' },
+        { id: '2', content: 'Two', status: 'pending' },
+      ],
+      [{ id: '1', content: '', status: 'completed' }],
+    );
+    assert.equal(next[0]?.status, 'completed');
+    assert.equal(next[0]?.content, 'One');
+    assert.equal(next.length, 2);
+  });
+
   it('builds the step card from todo_write tool output', () => {
     const session = view({ replaying: false, messages: [] });
     applySessionUpdate(session, {
@@ -391,6 +426,73 @@ describe('plan steps', () => {
     assert.equal(assistant.steps?.[1]?.status, 'abandoned');
     applySessionUpdate(session, { sessionUpdate: 'plan', entries: [] });
     assert.equal(assistant.steps?.length, 3);
+  });
+});
+
+describe('terminal tool cards', () => {
+  it('clips a long terminal buffer from the front', () => {
+    const text = `${'a'.repeat(100)}\n${'b'.repeat(9000)}`;
+    const clipped = clipTermOutput(text, 8000);
+    assert.ok(clipped.length <= 8000);
+    assert.equal(clipped.endsWith('b'.repeat(100)), true);
+  });
+
+  it('treats execute and bash titles as terminal tools', () => {
+    assert.equal(isTerminalTool('execute'), true);
+    assert.equal(isTerminalTool('read'), false);
+    assert.equal(isTerminalTool(undefined, 'run_terminal_cmd'), true);
+  });
+
+  it('stores execute stdout and command on the tool card', () => {
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 't-run',
+      kind: 'execute',
+      status: 'in_progress',
+      title: 'npm test',
+      rawInput: { command: 'npm test' },
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 't-run',
+      kind: 'execute',
+      status: 'completed',
+      content: { type: 'text', text: 'ok\n2 passed\n' },
+      rawOutput: { command: 'npm test', output: 'ok\n2 passed\n', exit_code: 0 },
+    });
+    const tool = session.messages[0]?.tools[0];
+    assert.equal(tool?.kind, 'execute');
+    assert.equal(tool?.command, 'npm test');
+    assert.match(tool?.output ?? '', /2 passed/);
+    assert.ok(tool?.startedAt);
+    assert.ok(tool?.endedAt);
+  });
+
+  it('appends bash output_delta onto the live buffer', () => {
+    const session = view({ replaying: false, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 't-bash',
+      kind: 'execute',
+      status: 'in_progress',
+      title: 'bash',
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 't-bash',
+      kind: 'execute',
+      status: 'in_progress',
+      rawOutput: { Bash: { output_delta: Buffer.from('hello').toJSON().data } },
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 't-bash',
+      kind: 'execute',
+      status: 'in_progress',
+      rawOutput: { Bash: { output_delta: Buffer.from(' world').toJSON().data } },
+    });
+    assert.equal(session.messages[0]?.tools[0]?.output, 'hello world');
   });
 });
 

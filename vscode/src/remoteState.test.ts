@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { mergeLiveMessages } from './messageMerge';
+import { mergeLiveMessages, mergeTranscript } from './messageMerge';
 import { packRemotePayload, REMOTE_STATE_SOFT, chunkMessages } from './remoteState';
 
 describe('remote state packing', () => {
@@ -120,6 +120,23 @@ describe('remote state packing', () => {
   it('does not merge when the last live message vanished (rewind / new session)', () => {
     const had = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
     assert.equal(mergeLiveMessages(had, [{ id: 'a' }, { id: 'b' }]), undefined);
+  });
+
+  it('keeps the open transcript when a live snapshot omits messages', () => {
+    const had = [{ id: 'a' }, { id: 'b' }];
+    assert.deepEqual(
+      mergeTranscript(had, []).map((row) => row.id),
+      ['a', 'b'],
+    );
+  });
+
+  it('appends a new user turn that is not in the live tail', () => {
+    const had = [{ id: 'a' }, { id: 'b' }];
+    const next = mergeTranscript(had, [{ id: 'c' }, { id: 'd' }]);
+    assert.deepEqual(
+      next.map((row) => row.id),
+      ['a', 'b', 'c', 'd'],
+    );
   });
 
   it('chunks messages without dropping a oversized single item', () => {

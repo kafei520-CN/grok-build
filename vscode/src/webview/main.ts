@@ -1,6 +1,6 @@
 import type { ChatState, StreamTail } from '../types';
 import { applyEditStatsToMessages, type EditStatsItem } from '../editStats';
-import { mergeLiveMessages } from '../messageMerge';
+import { mergeTranscript } from '../messageMerge';
 import { mergeStreamTail } from '../streamTail';
 import { applyThemeTo } from '../theme';
 import { bindRender, isBooting, isRemoteWeb, normalizeState, persistUi, post, root, ui } from './app';
@@ -57,9 +57,8 @@ function onHostMessage(data: HostMsg | null | undefined): void {
       hydrateGen = data.hydrate;
     }
     const incoming = normalizeState(data.state);
-    const merged = mergeLiveMessages(ui.state.messages, incoming.messages);
-    if (merged && (data.merge || typeof data.hydrate === 'number')) {
-      incoming.messages = merged;
+    if (data.merge || incoming.mergeTranscript || typeof data.hydrate === 'number') {
+      incoming.messages = mergeTranscript(ui.state.messages, incoming.messages);
       incoming.restoringSession = false;
       if (typeof data.hydrate === 'number') {
         skipHydrate = data.hydrate;

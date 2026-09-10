@@ -1,3 +1,17 @@
+/** Keep the open transcript when a live update omits history or only appends new turns. */
+export function mergeTranscript<T extends { id?: string }>(had: T[], incoming: T[]): T[] {
+  if (!incoming.length) {
+    return had;
+  }
+  if (!had.length) {
+    return incoming;
+  }
+  return (
+    mergeLiveMessages(had, incoming) ??
+    had.concat(incoming.filter((row) => row.id && !had.some((item) => item.id === row.id)))
+  );
+}
+
 /** If `incoming` is a live tail of `had` (same last id, plus optional new ids), merge in place. */
 export function mergeLiveMessages<T extends { id?: string }>(had: T[], incoming: T[]): T[] | undefined {
   if (!had.length || !incoming.length) {

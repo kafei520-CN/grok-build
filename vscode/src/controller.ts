@@ -57,7 +57,6 @@ import { bindPlatform, plat, type Platform } from './platform';
 import { dispatchUi } from './dispatch';
 import {
   buildStreamTail,
-  cursorFromMessage,
   emptyStreamCursor,
   type StreamDeltaCursor,
 } from './streamTail';
@@ -115,6 +114,7 @@ import { disposeAllTerminals } from './acpTerminal';
 import { AGENT_RECONNECT_MAX, reconnectDelayMs } from './reconnect';
 import { workspaceStartupHints } from './startup';
 import { DEFAULT_THEME, normalizeTheme } from './theme';
+import { listApiEndpoints } from './apiEndpoints';
 import {
   DEFAULT_REMOTE_PORT,
   RemoteGateway,
@@ -229,12 +229,14 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private readonly streamListeners = new Set<(tail: import('./types').StreamTail) => void>();
   private emitTimer?: ReturnType<typeof setTimeout>;
   private streamCursor: StreamDeltaCursor = emptyStreamCursor();
+  private streamPosted = false;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
   modelsReloadSeq = 0;
   lastApiMutation?: { id: string; at: number };
   private pendingModelId?: string;
   private pendingEffort?: string;
+  apisLoaded = false;
   /** grok.com / cached_token id to restore after a relay turn used xai.api_key. */
   private sessionAuthMethodId?: string;
   private runGen = 0;
@@ -263,6 +265,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const profile = plat().getState('ui.agentProfile', '');
     this.agentProfile = typeof profile === 'string' && profile.trim() ? profile.trim() : undefined;
     this.skipInteractiveLogin = Boolean(plat().getState('ui.skipLogin', false));
+    this.pendingModelId = savedPickerId(plat().getState('ui.modelId', ''));
+    this.pendingEffort = savedPickerEffort(plat().getState('ui.effort', ''));
     this.remotePort = clampRemotePort(plat().getState('ui.remotePort', DEFAULT_REMOTE_PORT));
     this.remoteHost = resolvePublicHost(plat().getState('ui.remoteHost', ''));
     this.remoteUser = sanitizeTunnelUser(plat().getState('ui.remoteSshUser', DEFAULT_PUBLIC_USER));
@@ -330,8 +334,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     return { dispose: () => this.streamListeners.delete(listener) };
   }
 
-  snapshot(): ChatState {
+  snapshot(opts?: { messages?: 'all' | 'none' | 'tail' }): ChatState {
     const settings = readGrokSettings();
+    const mode = opts?.messages ?? 'all';
+    const source =
+      mode === 'none' ? [] : mode === 'tail' ? this.messages.slice(-2) : this.messages;
     return {
       status: this.status,
       error: this.error,
@@ -343,12 +350,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       login: this.loginView,
       models: this.models,
       modeId: this.modeId,
-      messages: this.messages.map((message) => ({
+      messages: source.map((message) => ({
         ...message,
         tools: message.tools.map((tool) => ({ ...tool })),
         steps: message.steps?.map((step) => ({ ...step })),
         edits: message.edits?.length ? publicEdits(message.edits) : message.edits,
       })),
+      mergeTranscript: mode !== 'all',
       permission: this.permission,
       ask: this.ask,
       attachments: this.attachments,
@@ -842,6 +850,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     this.pendingEffort = level;
     this.patchCurrentEffort(level);
+    this.persistPicker();
     const modelId = this.selectedModelId();
     if (!this.agent?.sessionId || !modelId) {
       this.emit();
@@ -860,6 +869,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       return;
     }
     this.pendingModelId = modelId;
+    this.persistPicker();
     if (this.models) {
       this.models = { ...this.models, currentId: modelId };
       const effort = this.selectedEffort();
@@ -1478,7 +1488,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       });
       this.remote = gateway;
       this.remoteWatch = [
-        this.onDidChange((state) => gateway.broadcast({ type: 'state', state })),
+        this.onDidChange((state) =>
+          gateway.broadcast({ type: 'state', state, merge: Boolean(state.mergeTranscript) }),
+        ),
         this.onDidStream((tail) => gateway.broadcast(tail)),
       ];
     }
@@ -1845,19 +1857,17 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
 
   emit(): void {
     this.models = overlayApiModels(this.models, this.apis) ?? this.models;
+    this.dropUnknownPicker();
     this.flushEmitTimer();
-    if (this.status !== 'streaming') {
-      this.streamCursor = emptyStreamCursor();
-    } else {
-      const last = this.messages.at(-1);
-      if (last?.role === 'assistant' && last.streaming) {
-        this.streamCursor = cursorFromMessage(last);
-      }
+    if (this.status === 'streaming') {
+      this.emitTail();
+      this.publishSnapshot(this.streamPosted ? 'none' : 'tail');
+      this.streamPosted = true;
+      return;
     }
-    const state = this.snapshot();
-    for (const listener of this.listeners) {
-      listener(state);
-    }
+    this.streamPosted = false;
+    this.streamCursor = emptyStreamCursor();
+    this.publishSnapshot('all');
   }
 
   applyModelsUpdate(params: unknown): void {
@@ -2005,6 +2015,15 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (epoch !== this.agentGen) {
       return;
     }
+    try {
+      this.apis = await listApiEndpoints();
+      this.apisLoaded = true;
+    } catch (error) {
+      logWarn(`api list: ${error instanceof Error ? error.message : error}`);
+    }
+    if (epoch !== this.agentGen) {
+      return;
+    }
     const cliPath = resolveGrokBinary({
       configuredPath: plat().getConfig('cliPath', ''),
       preferWorkspaceBinary: plat().getConfig('preferWorkspaceBinary', false),
@@ -2122,7 +2141,6 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private emitTail(): void {
     const last = this.messages.at(-1);
     if (!last || last.role !== 'assistant' || !last.streaming || this.streamListeners.size === 0) {
-      this.emit();
       return;
     }
     const { tail, cursor } = buildStreamTail(this.streamCursor, last, {
@@ -2133,6 +2151,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.streamCursor = cursor;
     for (const listener of this.streamListeners) {
       listener(tail);
+    }
+  }
+
+  private publishSnapshot(messages: 'all' | 'none' | 'tail'): void {
+    const state = this.snapshot({ messages });
+    for (const listener of this.listeners) {
+      listener(state);
     }
   }
 
@@ -2327,15 +2352,25 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   private selectedModelId(): string | undefined {
-    return this.pendingModelId ?? this.models?.currentId;
+    const wanted = this.pendingModelId ?? this.models?.currentId;
+    if (!wanted) {
+      return undefined;
+    }
+    if (!this.models?.available.length) {
+      return wanted;
+    }
+    if (this.models.available.some((item) => item.id === wanted)) {
+      return wanted;
+    }
+    return this.models.currentId;
   }
 
   private selectedEffort(): string | undefined {
-    if (this.pendingEffort) {
-      return this.pendingEffort;
-    }
     const id = this.selectedModelId();
     const model = this.models?.available.find((item) => item.id === id);
+    if (this.pendingEffort && (!model?.efforts?.length || model.efforts.includes(this.pendingEffort))) {
+      return this.pendingEffort;
+    }
     if (model?.currentEffort) {
       return model.currentEffort;
     }
@@ -2353,14 +2388,40 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (!this.models) {
       return;
     }
-    const wantedId = this.selectedModelId();
-    if (wantedId && this.models.currentId !== wantedId) {
+    const wantedId = this.pendingModelId ?? this.models.currentId;
+    const known = Boolean(wantedId && this.models.available.some((item) => item.id === wantedId));
+    if (wantedId && known && this.models.currentId !== wantedId) {
       this.models = { ...this.models, currentId: wantedId };
+    } else if (wantedId && !known && (this.apisLoaded || !isCustomModelId(wantedId))) {
+      if (this.models.available.length) {
+        this.pendingModelId = this.models.currentId;
+        this.persistPicker();
+      }
     }
     const effort = this.selectedEffort();
     if (effort) {
       this.patchCurrentEffort(effort);
     }
+  }
+
+  private persistPicker(): void {
+    void plat().setState('ui.modelId', this.pendingModelId ?? this.models?.currentId ?? '');
+    void plat().setState('ui.effort', this.pendingEffort ?? this.selectedEffort() ?? '');
+  }
+
+  private dropUnknownPicker(): void {
+    const wanted = this.pendingModelId;
+    if (!wanted || !this.models?.available.length) {
+      return;
+    }
+    if (this.models.available.some((item) => item.id === wanted)) {
+      return;
+    }
+    if (isCustomModelId(wanted) && !this.apisLoaded) {
+      return;
+    }
+    this.pendingModelId = this.models.currentId;
+    this.persistPicker();
   }
 
   private isRelayModel(modelId: string | undefined): boolean {
@@ -2486,4 +2547,20 @@ async function isGitCwd(cwd: string): Promise<boolean> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function savedPickerId(raw: unknown): string | undefined {
+  const text = String(raw ?? '').trim();
+  if (!text || text.length > 80 || /[\r\n]/.test(text)) {
+    return undefined;
+  }
+  return text;
+}
+
+function savedPickerEffort(raw: unknown): string | undefined {
+  const text = String(raw ?? '').trim().toLowerCase();
+  if (!/^[a-z][a-z0-9_-]{0,15}$/.test(text)) {
+    return undefined;
+  }
+  return text;
 }
