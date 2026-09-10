@@ -98,6 +98,7 @@ const tests = {
     'src/skillsHost.test.ts',
     'src/grokDirs.test.ts',
     'src/apiEndpoints.test.ts',
+    'src/turnModels.test.ts',
     'src/incoming.test.ts',
     'src/workspaceImages.test.ts',
     'src/errors.test.ts',
