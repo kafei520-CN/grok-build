@@ -12,7 +12,8 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.71: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.72: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.72 — Official grok.com models appear in API manager with the same on/off switch. Turning one off hides it from the model picker; official models cannot be deleted.</p>
 <p>0.2.71 — $\\ce{H2O}$ renders as water, not 0. Math delimiters are parsed before bare mhchem.</p>
 <p>0.2.70 — Quote selection/files into chat from editor, explorer, and the transcript. Markdown renders math and chemistry. Explorer file drops attach. Windows cmd output is decoded as GBK in the agent before display.</p>
 <p>0.2.69 — Windows cmd dir output is decoded as GBK instead of mojibake replacement characters.</p>
