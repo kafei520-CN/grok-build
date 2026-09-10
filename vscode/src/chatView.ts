@@ -6,6 +6,7 @@ import { COMMANDS, VIEW_ID } from './constants';
 import type { GrokController } from './controller';
 import { dispatchUi } from './dispatch';
 import { logInfo } from './logger';
+import { packedEvents } from './remoteState';
 import type { ChatState, WebviewToHost } from './types';
 import { bindChatWebview } from './vscodePlatform';
 
@@ -110,11 +111,17 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
   }
 
   private postState(state: ChatState): void {
-    void this.view?.webview.postMessage({
+    const view = this.view;
+    if (!view) {
+      return;
+    }
+    for (const event of packedEvents({
       type: 'state',
       state,
       merge: Boolean(state.mergeTranscript),
-    });
+    })) {
+      void view.webview.postMessage(event);
+    }
   }
 
   private renderHtml(webview: vscode.Webview): string {

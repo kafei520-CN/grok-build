@@ -1083,6 +1083,24 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.note(`Rewound to turn ${index}.`);
   }
 
+  async rewindTurn(messageId: string): Promise<void> {
+    const index = rewindIndexFor(this.messages, messageId);
+    if (index === undefined) {
+      return;
+    }
+    if (!(await plat().confirm(tr('rewindConfirm'), tr('rewindAction')))) {
+      return;
+    }
+    if (this.status === 'streaming') {
+      this.cancelTurn();
+    }
+    try {
+      await this.rewindTo(index);
+    } catch (error) {
+      this.fail('Rewind failed', error);
+    }
+  }
+
   async resumePicker(): Promise<void> {
     await this.refreshSessionsSilent();
     this.drawer = 'sessions';
@@ -1131,7 +1149,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       finalizeReplayTimes(this.messages);
       applyStoredTurnModels(this.messages, readStoredTurnModels(this.currentSessionId));
       applyRestoredTurnModels(this.messages, this.models);
-      this.setStatus('ready');
+      this.status = 'ready';
+      this.error = undefined;
       void this.journal.hydrateFromGit().then(async () => {
         await this.syncAllEditStats();
         this.emit();
@@ -1909,6 +1928,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       refreshEditStats: (assistant) => {
         void this.syncEditStats(assistant);
       },
+      termEncoding: readGrokSettings().termEncoding,
     };
     const last = this.messages.at(-1);
     const before = last?.role === 'assistant' ? stepsStamp(last.steps) : '';
@@ -2530,6 +2550,29 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.emit();
     this.notify = undefined;
   }
+}
+
+/** Keep this assistant turn, or drop it when it is already the latest. */
+export function rewindIndexFor(
+  messages: Array<{ id: string; role: string }>,
+  messageId: string,
+): number | undefined {
+  const idx = messages.findIndex((item) => item.id === messageId);
+  if (idx < 0 || messages[idx]?.role !== 'assistant') {
+    return undefined;
+  }
+  const keep = (idx + 1) >> 1;
+  let last: { id: string; role: string } | undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'assistant') {
+      last = messages[i];
+      break;
+    }
+  }
+  if (last?.id === messageId) {
+    return Math.max(0, keep - 1);
+  }
+  return keep;
 }
 
 function stepsStamp(steps: ChatMessage['steps']): string {

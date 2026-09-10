@@ -1,4 +1,5 @@
 import { plat } from './platform';
+import { normalizeTermEncoding } from './termEncoding';
 import { DEFAULT_SETTINGS, type GrokSettings } from './types';
 
 export { settingNeedsRestart } from './types';
@@ -23,6 +24,9 @@ export function readGrokSettings(): GrokSettings {
     alwaysApprove: p.getConfig('alwaysApprove', DEFAULT_SETTINGS.alwaysApprove),
     locale: locale === 'en' || locale === 'zh-CN' ? locale : 'auto',
     notifySound: p.getConfig('notifySound', DEFAULT_SETTINGS.notifySound),
+    termEncoding: normalizeTermEncoding(
+      p.getConfig('termEncoding', DEFAULT_SETTINGS.termEncoding),
+    ),
   };
 }
 
@@ -50,6 +54,8 @@ export function normalizeSetting(
       return value === 'auto' || value === 'ask' || value === 'acceptEdits' ? value : undefined;
     case 'locale':
       return value === 'auto' || value === 'en' || value === 'zh-CN' ? value : undefined;
+    case 'termEncoding':
+      return typeof value === 'string' ? normalizeTermEncoding(value) : undefined;
     default:
       return undefined;
   }

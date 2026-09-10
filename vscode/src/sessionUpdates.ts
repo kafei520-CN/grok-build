@@ -2,6 +2,8 @@ import type { ContextMeter } from './contextMeter';
 import { editsFromToolUpdate, mergeEdits } from './edits';
 import { formatRetryUpdate } from './errors';
 import { FALLBACK_COMMANDS } from './slash';
+import { DEFAULT_TERM_ENCODING, type TermEncoding } from './termEncoding';
+import { decodeTermUnknown } from './termText';
 import { isOfficialGrokStamp } from './turnModels';
 import type {
   ChatMessage,
@@ -28,6 +30,8 @@ export interface SessionView {
   displayPath: (filePath: string) => string;
   emitUnlessReplaying: () => void;
   refreshEditStats?: (assistant: ChatMessage) => void;
+  /** Decode terminal tool bytes for display. */
+  termEncoding?: TermEncoding;
 }
 
 export function parsePlanEntries(raw: unknown): PlanStep[] | undefined {
@@ -528,7 +532,12 @@ export function clipTermOutput(text: string, max = 8000): string {
   return slice.slice(nl >= 0 ? nl + 1 : 0);
 }
 
-function applyTerminalCard(card: ChatMessage['tools'][number], update: SessionUpdate): void {
+function applyTerminalCard(
+  card: ChatMessage['tools'][number],
+  update: SessionUpdate,
+  replaying: boolean,
+  encoding: TermEncoding,
+): void {
   if (!isTerminalTool(card.kind, card.title)) {
     return;
   }
@@ -539,20 +548,25 @@ function applyTerminalCard(card: ChatMessage['tools'][number], update: SessionUp
   if (command) {
     card.command = command;
   }
-  const raw = parseTermRaw(update.rawOutput);
-  const chunk = textFromToolContent(update.content) || raw.text;
-  if (raw.delta !== undefined) {
+  const raw = parseTermRaw(update.rawOutput, encoding, !replaying);
+  if (raw.delta !== undefined && !replaying) {
     if (raw.delta.length === 0) {
       card.output = '';
     } else {
       card.output = clipTermOutput(`${card.output ?? ''}${raw.delta}`);
     }
-  } else if (chunk) {
-    const prev = card.output ?? '';
-    if (!prev || chunk.startsWith(prev) || chunk.length >= prev.length) {
-      card.output = clipTermOutput(chunk);
-    } else if (!prev.endsWith(chunk)) {
-      card.output = clipTermOutput(`${prev}${prev.endsWith('\n') ? '' : '\n'}${chunk}`);
+  } else {
+    const fromContent = textFromToolContent(update.content);
+    const chunk = encoding === 'utf-8' ? fromContent || raw.text : raw.text || fromContent;
+    if (chunk) {
+      const prev = card.output ?? '';
+      if (replaying || !prev || chunk.startsWith(prev) || chunk.length >= prev.length) {
+        card.output = clipTermOutput(chunk);
+      } else if (!prev.endsWith(chunk)) {
+        card.output = clipTermOutput(`${prev}${prev.endsWith('\n') ? '' : '\n'}${chunk}`);
+      }
+    } else if (replaying && raw.delta) {
+      card.output = clipTermOutput(`${card.output ?? ''}${raw.delta}`);
     }
   }
   if (card.status === 'completed' || card.status === 'failed') {
@@ -567,32 +581,25 @@ function commandFromUnknown(raw: unknown): string | undefined {
   return asString(src['command']) ?? asString(src['cmd']) ?? asString(src['script']);
 }
 
-function parseTermRaw(raw: unknown): { text: string; delta?: string } {
+function parseTermRaw(
+  raw: unknown,
+  encoding: TermEncoding,
+  skipText = false,
+): { text: string; delta?: string } {
   const obj = asObject(raw);
   const bash = asObject(obj['Bash']);
   const src = Object.keys(bash).length ? bash : obj;
   const deltaRaw = src['output_delta'];
-  const delta = deltaRaw === undefined ? undefined : utf8FromUnknown(deltaRaw);
+  const delta = deltaRaw === undefined ? undefined : decodeTermUnknown(deltaRaw, encoding);
+  if (skipText && delta !== undefined) {
+    return { text: '', delta };
+  }
   const text =
-    utf8FromUnknown(src['output']) ||
-    utf8FromUnknown(src['stdout']) ||
-    utf8FromUnknown(src['output_for_prompt']) ||
-    utf8FromUnknown(src['text']);
+    decodeTermUnknown(src['output'], encoding) ||
+    decodeTermUnknown(src['stdout'], encoding) ||
+    decodeTermUnknown(src['output_for_prompt'], encoding) ||
+    decodeTermUnknown(src['text'], encoding);
   return { text, delta };
-}
-
-function utf8FromUnknown(raw: unknown): string {
-  if (typeof raw === 'string') {
-    return raw;
-  }
-  if (Array.isArray(raw) && raw.length > 0 && typeof raw[0] === 'number') {
-    try {
-      return Buffer.from(raw as number[]).toString('utf8');
-    } catch {
-      return '';
-    }
-  }
-  return '';
 }
 
 function textFromToolContent(content: SessionUpdate['content']): string {
@@ -650,7 +657,7 @@ function applyTool(session: SessionView, assistant: ChatMessage, update: Session
   if (update.status) {
     card.status = update.status;
   }
-  applyTerminalCard(card, update);
+  applyTerminalCard(card, update, session.replaying, session.termEncoding ?? DEFAULT_TERM_ENCODING);
   const location = update.locations?.[0]?.path;
   if (location) {
     card.detail = location;

@@ -2,6 +2,7 @@ import { totals } from '../edits';
 import { formatDuration, toolKindLabel, turnSourceText } from '../i18n';
 import { permissionButtonClass, permissionLabelKey } from '../permissions';
 import { permissionActions, permissionNeedsCancel, permissionTarget } from '../permissionView';
+import { renderTermHtml } from '../termAnsi';
 import type {
   ChatMessage,
   ChatState,
@@ -25,6 +26,7 @@ import {
   iconCopy,
   iconEdit,
   iconFork,
+  iconRewind,
   iconStar,
   toolIcon,
 } from './icons';
@@ -1196,17 +1198,16 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
   const el = document.createElement('details');
   el.className = message.streaming ? 'work live' : 'work';
   el.dataset.mid = message.id;
-  el.open = ui.workOpen.get(message.id) ?? Boolean(message.streaming);
+  const open = ui.workOpen.get(message.id) ?? Boolean(message.streaming);
+  el.open = open;
   el.addEventListener('toggle', (event) => {
     if (!event.isTrusted) {
       return;
     }
     ui.workOpen.set(message.id, el.open);
     if (el.open) {
-      const live = ui.state.messages.find((item) => item.id === message.id);
-      if (live) {
-        patchWorkBody(el.querySelector('.work-body'), live);
-      }
+      const live = ui.state.messages.find((item) => item.id === message.id) ?? message;
+      patchWorkBody(el.querySelector('.work-body'), live);
     }
   });
   const summary = document.createElement('summary');
@@ -1219,20 +1220,8 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
   summary.append(mark, label);
   const body = document.createElement('div');
   body.className = 'work-body';
-  if (message.thinking) {
-    const think = document.createElement('div');
-    think.className = 'md thinking';
-    setMarkdown(think, message.thinking, Boolean(message.streaming));
-    body.append(think);
-  }
-  if (message.plan) {
-    const plan = document.createElement('div');
-    plan.className = 'md plan';
-    setMarkdown(plan, message.plan, Boolean(message.streaming));
-    body.append(plan);
-  }
-  for (const tool of message.tools) {
-    body.append(toolRow(tool));
+  if (open) {
+    patchWorkBody(body, message);
   }
   el.append(summary, body);
   return el;
@@ -1258,25 +1247,25 @@ export function syncWorkClock(): void {
 }
 
 function paintWorkLabels(): void {
-  for (const node of document.querySelectorAll('details.work[data-mid]')) {
-    const id = node instanceof HTMLElement ? node.dataset.mid : undefined;
-    const message = ui.state.messages.find((item) => item.id === id);
-    if (!message || message.role !== 'assistant') {
+  const live = ui.state.messages.at(-1);
+  if (!live || live.role !== 'assistant' || !live.streaming) {
+    return;
+  }
+  for (const node of document.querySelectorAll('details.work.live[data-mid]')) {
+    if (!(node instanceof HTMLElement) || node.dataset.mid !== live.id) {
       continue;
     }
     const label = node.querySelector('.work-label');
     if (label) {
-      label.textContent = workLabel(message);
+      label.textContent = workLabel(live);
     }
   }
-  for (const node of document.querySelectorAll('.tool-row[data-id]')) {
+  const tools = new Map(live.tools.map((tool) => [tool.id, tool]));
+  for (const node of document.querySelectorAll('.work.live .tool-row[data-id]')) {
     if (!(node instanceof HTMLElement) || !node.dataset.id) {
       continue;
     }
-    const message = ui.state.messages.find(
-      (item) => item.role === 'assistant' && item.tools.some((tool) => tool.id === node.dataset.id),
-    );
-    const tool = message?.tools.find((item) => item.id === node.dataset.id);
+    const tool = tools.get(node.dataset.id);
     if (tool) {
       paintTermElapsed(node, tool);
     }
@@ -1356,31 +1345,66 @@ function isTermTool(tool: ChatMessage['tools'][number]): boolean {
 }
 
 function termPreview(tool: ChatMessage['tools'][number]): HTMLElement {
-  const open =
-    ui.termOpen.get(tool.id) ??
-    (tool.status === 'in_progress' || tool.status === 'pending' || Boolean(tool.output));
+  const live = tool.status === 'in_progress' || tool.status === 'pending';
+  const open = ui.termOpen.get(tool.id) ?? live;
   const box = document.createElement('details');
   box.className = 'tool-term';
   box.open = open;
+  const summary = document.createElement('summary');
+  const prompt = document.createElement('span');
+  prompt.className = 'term-prompt';
+  prompt.textContent = '$';
+  const cmd = document.createElement('span');
+  cmd.className = 'term-cmd';
+  cmd.textContent = tool.command || tool.title || tr('termRun');
+  const meta = document.createElement('span');
+  meta.className = 'term-meta';
+  const elapsed = document.createElement('span');
+  elapsed.className = 'term-elapsed';
+  elapsed.textContent = termElapsedText(tool);
+  const status = document.createElement('span');
+  status.className = 'term-status';
+  meta.append(elapsed, status);
+  summary.append(prompt, cmd, meta);
+  const frame = document.createElement('div');
+  frame.className = 'term-frame';
+  const body = document.createElement('pre');
+  body.className = 'term-body';
+  if (open) {
+    paintTermBody(body, tool.output || '');
+  }
   box.addEventListener('toggle', (event) => {
     if (!event.isTrusted) {
       return;
     }
     ui.termOpen.set(tool.id, box.open);
+    if (box.open) {
+      paintTermBody(body, tool.output || '');
+    }
   });
-  const summary = document.createElement('summary');
-  summary.textContent = tool.command ? tool.command : tr('termRun');
-  const frame = document.createElement('div');
-  frame.className = 'term-frame';
-  const body = document.createElement('pre');
-  body.className = 'term-body';
-  body.textContent = tool.output || '';
-  const elapsed = document.createElement('span');
-  elapsed.className = 'term-elapsed';
-  elapsed.textContent = termElapsedText(tool);
-  frame.append(body, elapsed);
+  frame.append(body);
   box.append(summary, frame);
   return box;
+}
+
+function paintTermBody(body: HTMLElement, text: string): void {
+  const src = text || '';
+  if (body.dataset.src === src && body.dataset.ready === '1') {
+    return;
+  }
+  const pin = body.scrollHeight - body.scrollTop - body.clientHeight < 28;
+  body.dataset.src = src;
+  if (!src) {
+    body.classList.add('idle');
+    body.textContent = tr('termIdle');
+  } else {
+    body.classList.remove('idle');
+    body.innerHTML = renderTermHtml(src);
+  }
+  if (pin || body.dataset.ready !== '1') {
+    body.scrollTop = body.scrollHeight;
+  }
+  body.dataset.ready = '1';
 }
 
 function paintTermElapsed(row: HTMLElement, tool: ChatMessage['tools'][number]): void {
@@ -1388,9 +1412,17 @@ function paintTermElapsed(row: HTMLElement, tool: ChatMessage['tools'][number]):
   if (elapsed) {
     elapsed.textContent = termElapsedText(tool);
   }
-  const body = row.querySelector('.term-body');
-  if (body && tool.output !== undefined && body.textContent !== tool.output) {
-    body.textContent = tool.output;
+  const cmd = row.querySelector('.term-cmd');
+  if (cmd && tool.command && cmd.textContent !== tool.command) {
+    cmd.textContent = tool.command;
+  }
+  const term = row.querySelector('.tool-term');
+  if (!(term instanceof HTMLDetailsElement) || !term.open) {
+    return;
+  }
+  const body = term.querySelector('.term-body');
+  if (body instanceof HTMLElement && tool.output !== undefined) {
+    paintTermBody(body, tool.output);
   }
 }
 
@@ -1472,7 +1504,13 @@ function turnMeta(message: ChatMessage): HTMLElement {
   fork.title = tr('menuFork');
   fork.innerHTML = iconFork();
   fork.addEventListener('click', () => post({ type: 'runSlash', command: 'fork' }));
-  el.append(copy, fork);
+  const rewind = document.createElement('button');
+  rewind.type = 'button';
+  rewind.className = 'meta-btn';
+  rewind.title = tr('menuRewind');
+  rewind.innerHTML = iconRewind();
+  rewind.addEventListener('click', () => post({ type: 'rewindTurn', messageId: message.id }));
+  el.append(copy, fork, rewind);
   const stamp = turnSourceText(loc(), message, ui.state.timestamps !== false);
   if (stamp) {
     const time = document.createElement('span');

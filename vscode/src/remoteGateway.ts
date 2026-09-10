@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { Socket } from 'node:net';
 import type { WebviewToHost } from './types';
-import { packRemotePayload } from './remoteState';
+import { packDelivery, packRemotePayload } from './remoteState';
 
 export const DEFAULT_REMOTE_PORT = 8787;
 /** Keep the pairing token after a drop so the same browser can reconnect. */
@@ -316,7 +316,7 @@ export class RemoteGateway {
     if (!this.sockets.size) {
       return;
     }
-    const frames = packRemotePayload(payload, 'update');
+    const frames = packDelivery(payload);
     for (const sock of this.sockets) {
       sendPacked(sock, frames);
     }

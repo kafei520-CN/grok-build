@@ -4,10 +4,12 @@ import {
   isOfficialGrokAccount,
   quotaTitle,
 } from '../billing';
+import { TERM_ENCODINGS, normalizeTermEncoding } from '../termEncoding';
 import { DEFAULT_SETTINGS, type GrokSettings, type WebviewToHost } from '../types';
 import { post, tr, ui } from './app';
 import { iconButton } from './dom';
-import { iconBack, iconClose, iconStar } from './icons';
+import { iconBack, iconClose, iconChevron, iconStar } from './icons';
+import { pinFloating, releaseByClass } from './popover';
 import { apisNavRow, mountApiFormBody, mountApisBody } from './settingsApi';
 import { mountRulesBody, rulesNavRow } from './settingsRules';
 import { mountSkillsBody, skillsNavRow } from './settingsSkills';
@@ -25,6 +27,7 @@ let paintedKey: string | undefined;
 export function patchSettings(parent: HTMLElement): void {
   const existing = document.getElementById('grok-settings');
   if (!ui.state.settingsOpen) {
+    closeSettingsPicker();
     existing?.remove();
     paintedKey = undefined;
     return;
@@ -52,6 +55,7 @@ export function patchSettings(parent: HTMLElement): void {
     `${ui.state.remote?.running ? '1' : '0'}|${ui.state.remote?.local ? '1' : '0'}|${ui.state.remote?.public ? '1' : '0'}|${ui.state.remote?.port ?? ''}|${ui.state.remote?.code ?? ''}|${ui.state.remote?.codeMode ?? ''}|${ui.state.remote?.publicUrl ?? ''}|${ui.state.remote?.tunnel ?? ''}|${ui.state.remote?.tunnelError ?? ''}|${ui.state.remote?.tunnelHost ?? ''}|${ui.state.remote?.forwardPort ?? ''}|${ui.state.remote?.clients ?? 0}|${ui.state.remote?.error ?? ''}|${ui.state.remote?.sshPublicKey ?? ''}|${ui.state.remote?.bundledRelay ? '1' : '0'}`,
   ].join(':');
   if (!existing || paintedKey !== key) {
+    closeSettingsPicker();
     existing?.remove();
     parent.append(mountSettings());
     paintedKey = key;
@@ -150,6 +154,7 @@ function mountSettings(): HTMLElement {
       themeNavRow(),
       remoteNavRow(),
       localeRow(),
+      termEncodingRow(),
       toggleRow(
         'compactMode',
         tr('settingsCompact'),
@@ -349,6 +354,108 @@ function localeRow(): HTMLElement {
   );
 }
 
+function termEncodingRow(): HTMLElement {
+  const selected = current().termEncoding ?? 'utf-8';
+  const row = document.createElement('div');
+  row.className = 'settings-row stack';
+  row.dataset.key = 'termEncoding';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('settingsTermEncoding');
+  const wrap = document.createElement('div');
+  wrap.className = 'picker settings-picker';
+  wrap.addEventListener('click', (event) => event.stopPropagation());
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'picker-btn';
+  btn.dataset.field = 'termEncoding';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  const text = document.createElement('span');
+  text.className = 'picker-label';
+  text.dataset.pickerLabel = 'termEncoding';
+  text.textContent = termEncodingLabel(selected);
+  btn.append(text);
+  btn.insertAdjacentHTML('beforeend', iconChevron());
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    toggleSettingsPicker(btn, encodingMenu(current().termEncoding ?? 'utf-8'));
+  });
+  wrap.append(btn);
+  const help = document.createElement('div');
+  help.className = 'settings-hint';
+  help.textContent = tr('settingsTermEncodingHint');
+  row.append(name, wrap, help);
+  return row;
+}
+
+function encodingMenu(selected: string): HTMLElement {
+  const list = document.createElement('div');
+  list.className = 'picker-menu settings-picker-menu';
+  list.setAttribute('role', 'listbox');
+  list.addEventListener('click', (event) => event.stopPropagation());
+  for (const id of TERM_ENCODINGS) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = id === selected ? 'picker-item on' : 'picker-item';
+    option.dataset.id = id;
+    option.setAttribute('role', 'option');
+    option.textContent = termEncodingLabel(id);
+    option.addEventListener('click', () => {
+      closeSettingsPicker();
+      pickTermEncoding(id);
+    });
+    list.append(option);
+  }
+  return list;
+}
+
+function pickTermEncoding(id: string): void {
+  const value = normalizeTermEncoding(id);
+  const settings = { ...(ui.state.settings ?? DEFAULT_SETTINGS), termEncoding: value };
+  ui.state.settings = settings;
+  const label = document.querySelector('[data-picker-label="termEncoding"]');
+  if (label) {
+    label.textContent = termEncodingLabel(value);
+  }
+  post({ type: 'updateSetting', key: 'termEncoding', value });
+}
+
+export function closeSettingsPicker(): void {
+  releaseByClass('settings-picker-menu');
+  const btn = document.querySelector('.settings-picker .picker-btn.open');
+  if (btn instanceof HTMLElement) {
+    btn.classList.remove('open');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function toggleSettingsPicker(btn: HTMLElement, menu: HTMLElement): void {
+  const open = btn.classList.contains('open');
+  closeSettingsPicker();
+  if (open) {
+    return;
+  }
+  btn.classList.add('open');
+  btn.setAttribute('aria-expanded', 'true');
+  pinFloating(menu, btn, { prefer: 'below', align: 'start', matchWidth: true });
+}
+
+function termEncodingLabel(id: string): string {
+  if (id === 'utf-8') {
+    return 'UTF-8';
+  }
+  if (id === 'shift_jis') {
+    return 'Shift_JIS';
+  }
+  if (id === 'windows-1252') {
+    return 'Windows-1252';
+  }
+  if (id === 'iso-8859-1') {
+    return 'ISO-8859-1';
+  }
+  return id.toUpperCase();
+}
+
 function permissionRow(): HTMLElement {
   return choiceRow(
     'permissionMode',
@@ -544,6 +651,11 @@ function syncSettings(root: HTMLElement): void {
   syncSwitch(root, 'preferWorkspaceBinary', settings.preferWorkspaceBinary);
   syncChoice(root, 'locale', settings.locale);
   syncChoice(root, 'permissionMode', settings.permissionMode);
+  const encoding = settings.termEncoding ?? 'utf-8';
+  const encodingLabel = root.querySelector('[data-picker-label="termEncoding"]');
+  if (encodingLabel) {
+    encodingLabel.textContent = termEncodingLabel(encoding);
+  }
   syncField(root, 'cliPath', settings.cliPath);
   syncField(root, 'minCliVersion', settings.minCliVersion);
   const pathHint = root.querySelector('[data-hint="cliPath"]');

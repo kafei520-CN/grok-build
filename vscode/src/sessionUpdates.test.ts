@@ -494,6 +494,58 @@ describe('terminal tool cards', () => {
     });
     assert.equal(session.messages[0]?.tools[0]?.output, 'hello world');
   });
+
+  it('decodes execute bytes with the configured terminal encoding', () => {
+    let supported = true;
+    try {
+      new TextDecoder('gbk');
+    } catch {
+      supported = false;
+    }
+    if (!supported) {
+      return;
+    }
+    const session = view({ replaying: false, messages: [], termEncoding: 'gbk' });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 't-gbk',
+      kind: 'execute',
+      status: 'completed',
+      title: 'echo',
+      rawOutput: { output: [0xc4, 0xe3, 0xba, 0xc3] },
+    });
+    assert.equal(session.messages[0]?.tools[0]?.output, '你好');
+  });
+
+  it('replays a terminal card from the latest snapshot instead of every delta', () => {
+    const session = view({ replaying: true, messages: [] });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 't-bash',
+      kind: 'execute',
+      status: 'in_progress',
+      title: 'bash',
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 't-bash',
+      kind: 'execute',
+      status: 'in_progress',
+      content: { type: 'text', text: 'hello' },
+      rawOutput: { Bash: { output_delta: Buffer.from('hello').toJSON().data } },
+    });
+    applySessionUpdate(session, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 't-bash',
+      kind: 'execute',
+      status: 'completed',
+      content: { type: 'text', text: 'hello world\n' },
+      rawOutput: { command: 'echo hi', output: 'hello world\n' },
+    });
+    const tool = session.messages[0]?.tools[0];
+    assert.equal(tool?.output, 'hello world\n');
+    assert.equal(tool?.command, 'echo hi');
+  });
 });
 
 describe('unknown session updates', () => {

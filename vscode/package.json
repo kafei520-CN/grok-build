@@ -250,6 +250,31 @@
           ],
           "default": "auto",
           "description": "%config.locale%"
+        },
+        "grok.termEncoding": {
+          "type": "string",
+          "enum": [
+            "utf-8",
+            "gbk",
+            "gb18030",
+            "gb2312",
+            "big5",
+            "shift_jis",
+            "windows-1252",
+            "iso-8859-1"
+          ],
+          "enumDescriptions": [
+            "%config.termEncoding.utf8%",
+            "%config.termEncoding.gbk%",
+            "%config.termEncoding.gb18030%",
+            "%config.termEncoding.gb2312%",
+            "%config.termEncoding.big5%",
+            "%config.termEncoding.shiftJis%",
+            "%config.termEncoding.windows1252%",
+            "%config.termEncoding.latin1%"
+          ],
+          "default": "utf-8",
+          "description": "%config.termEncoding%"
         }
       }
     }

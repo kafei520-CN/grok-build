@@ -749,21 +749,28 @@ textarea:focus-visible {
 }
 
 .tool-term {
-  margin-top: 6px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--elev) 55%, #000 45%);
+  margin-top: 8px;
+  border: 1px solid color-mix(in srgb, var(--ice) 20%, var(--line));
+  border-radius: 10px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #0b1520 82%, var(--bg)),
+    color-mix(in srgb, #070b10 88%, var(--bg))
+  );
+  box-shadow: var(--glass-shadow-sm);
   overflow: hidden;
 }
 
 .tool-term > summary {
   list-style: none;
   cursor: pointer;
-  padding: 5px 8px;
-  font-size: 11px;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font: 11px/1.35 var(--mono);
+  color: color-mix(in srgb, var(--ice) 62%, var(--fg));
+  background: color-mix(in srgb, #101a24 55%, transparent);
 }
 
 .tool-term > summary::-webkit-details-marker {
@@ -771,7 +778,49 @@ textarea:focus-visible {
 }
 
 .tool-term[open] > summary {
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid color-mix(in srgb, var(--ice) 16%, var(--line));
+}
+
+.term-prompt {
+  flex-shrink: 0;
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.term-cmd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.term-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.tool-row.pending .term-status,
+.tool-row.in_progress .term-status {
+  background: var(--warn);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warn) 70%, transparent);
+}
+
+.tool-row.completed:not(.failed) .term-status {
+  background: var(--ok);
+}
+
+.tool-row.failed .term-status {
+  background: var(--error);
 }
 
 .term-frame {
@@ -780,26 +829,72 @@ textarea:focus-visible {
 
 .term-body {
   margin: 0;
-  padding: 8px 8px 22px;
-  max-height: 132px;
+  padding: 10px 12px 12px;
+  max-height: 220px;
   overflow: auto;
-  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre;
-  color: var(--fg);
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+  color: #d6e4ee;
+}
+
+.term-body.idle {
+  color: color-mix(in srgb, var(--muted) 80%, #d6e4ee);
+  font-style: italic;
 }
 
 .tool-term[open] .term-body {
-  max-height: 240px;
+  max-height: 280px;
+}
+
+.compact .term-body {
+  max-height: 160px;
+  font-size: 11px;
 }
 
 .term-elapsed {
-  position: absolute;
-  right: 8px;
-  bottom: 4px;
   font-size: 10px;
   color: var(--muted);
-  pointer-events: none;
+  font-variant-numeric: tabular-nums;
 }
+
+.term-body .t-b {
+  font-weight: 700;
+}
+
+.term-body .t-d {
+  opacity: 0.72;
+}
+
+.term-body .t-u {
+  text-decoration: underline;
+}
+
+.term-body .t-fg-30 { color: #4a5560; }
+.term-body .t-fg-31 { color: #ff6b6b; }
+.term-body .t-fg-32 { color: #3dd68c; }
+.term-body .t-fg-33 { color: #e6c07b; }
+.term-body .t-fg-34 { color: #6cb2ff; }
+.term-body .t-fg-35 { color: #d2a8ff; }
+.term-body .t-fg-36 { color: #56d4dd; }
+.term-body .t-fg-37 { color: #e8eef4; }
+.term-body .t-fg-90 { color: #7d8a96; }
+.term-body .t-fg-91 { color: #ff8a8a; }
+.term-body .t-fg-92 { color: #6be7a8; }
+.term-body .t-fg-93 { color: #f0d48a; }
+.term-body .t-fg-94 { color: #8ec5ff; }
+.term-body .t-fg-95 { color: #e0c0ff; }
+.term-body .t-fg-96 { color: #7ee6ee; }
+.term-body .t-fg-97 { color: #ffffff; }
+.term-body .t-bg-40 { background: #1b2228; }
+.term-body .t-bg-41 { background: #5a2424; }
+.term-body .t-bg-42 { background: #1e4a32; }
+.term-body .t-bg-43 { background: #4a3f1e; }
+.term-body .t-bg-44 { background: #1e3654; }
+.term-body .t-bg-45 { background: #3b2654; }
+.term-body .t-bg-46 { background: #1c4548; }
+.term-body .t-bg-47 { background: #4a5560; }
 
 .answer {
   padding-top: 1px;
@@ -2807,6 +2902,25 @@ kbd {
 .settings-field:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--ice) 50%, var(--line));
+}
+
+.settings-picker {
+  position: relative;
+  flex: none;
+  max-width: none;
+  width: 100%;
+}
+
+.settings-picker .picker-btn {
+  width: 100%;
+  max-width: none;
+  justify-content: space-between;
+  padding: 7px 9px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.settings-picker-menu {
+  max-height: 240px;
 }
 
 .settings-actions {

@@ -34,5 +34,14 @@
   "config.locale": "Language for the Grok sidebar. auto follows the VS Code display language.",
   "config.locale.auto": "Follow VS Code display language",
   "config.locale.en": "English",
-  "config.locale.zhCN": "简体中文"
+  "config.locale.zhCN": "简体中文",
+  "config.termEncoding": "Encoding used to display terminal tool output. Default UTF-8. Use GBK on Chinese Windows consoles.",
+  "config.termEncoding.utf8": "UTF-8",
+  "config.termEncoding.gbk": "GBK",
+  "config.termEncoding.gb18030": "GB18030",
+  "config.termEncoding.gb2312": "GB2312",
+  "config.termEncoding.big5": "Big5",
+  "config.termEncoding.shiftJis": "Shift_JIS",
+  "config.termEncoding.windows1252": "Windows-1252",
+  "config.termEncoding.latin1": "ISO-8859-1"
 }

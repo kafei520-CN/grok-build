@@ -120,6 +120,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'rewindTo':
       await controller.rewindTo(message.index);
       return;
+    case 'rewindTurn':
+      await controller.rewindTurn(message.messageId);
+      return;
     case 'searchFiles':
       await controller.searchFiles(message.query);
       return;

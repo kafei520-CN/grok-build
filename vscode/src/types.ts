@@ -1,3 +1,7 @@
+import type { TermEncoding } from './termEncoding';
+
+export type { TermEncoding };
+
 export type ChatStatus =
   | 'untrusted'
   | 'missingCli'
@@ -448,6 +452,8 @@ export interface GrokSettings {
   locale: 'auto' | 'en' | 'zh-CN';
   /** Play a chime when a turn finishes or is interrupted. */
   notifySound: boolean;
+  /** Decode terminal tool bytes for display. */
+  termEncoding: TermEncoding;
 }
 
 export const DEFAULT_SETTINGS: GrokSettings = {
@@ -459,6 +465,7 @@ export const DEFAULT_SETTINGS: GrokSettings = {
   alwaysApprove: false,
   locale: 'auto',
   notifySound: true,
+  termEncoding: 'utf-8',
 };
 
 export function settingNeedsRestart(key: keyof GrokSettings): boolean {
@@ -677,6 +684,7 @@ export type WebviewToHost =
   | { type: 'renameSession'; sessionId: string }
   | { type: 'deleteSession'; sessionId: string }
   | { type: 'rewindTo'; index: number }
+  | { type: 'rewindTurn'; messageId: string }
   | { type: 'searchFiles'; query: string }
   | { type: 'pickFile'; path: string }
   | { type: 'copyLast' }

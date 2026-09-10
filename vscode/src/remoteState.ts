@@ -33,6 +33,18 @@ export function packRemotePayload(
   return packState(row.state, messages);
 }
 
+/** Full snapshot vs live tail. Merge flags must not chunk-replay a restore. */
+export function packDelivery(payload: unknown): string[] {
+  const merge = Boolean(
+    payload && typeof payload === 'object' && (payload as { merge?: boolean }).merge,
+  );
+  return packRemotePayload(payload, merge ? 'update' : 'replay');
+}
+
+export function packedEvents(payload: unknown): unknown[] {
+  return packDelivery(payload).map((frame) => JSON.parse(frame) as unknown);
+}
+
 /** Live updates: send a tail the client can merge, never wipe the open transcript. */
 function packStateUpdate(state: Record<string, unknown>, messages: unknown[]): string[] {
   const tail: unknown[] = [];
@@ -58,10 +70,11 @@ function packState(state: Record<string, unknown>, messages: unknown[]): string[
   const chunks = chunkMessages(messages);
   const id = ++hydrateSeq;
   const tail = chunks.at(-1) ?? [];
+  const pending = chunks.length > 1;
   const slim = {
     ...state,
     messages: tail,
-    restoringSession: tail.length === 0 && chunks.length > 0 ? true : state.restoringSession,
+    restoringSession: pending ? true : state.restoringSession,
   };
   const boot = JSON.stringify({ type: 'state', state: slim, hydrate: id });
   if (byteLen(boot) <= REMOTE_STATE_SOFT) {

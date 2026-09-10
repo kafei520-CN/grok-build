@@ -1,13 +1,13 @@
 import type { ChatState, StreamTail } from '../types';
 import { applyEditStatsToMessages, type EditStatsItem } from '../editStats';
-import { mergeTranscript } from '../messageMerge';
+import { resolveIncomingMessages } from '../messageMerge';
 import { mergeStreamTail } from '../streamTail';
 import { applyThemeTo } from '../theme';
 import { bindRender, isBooting, isRemoteWeb, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
 import { mountComposer, patchComposer } from './composer';
 import { removeSlot, replaceSlot } from './dom';
-import { patchSettings, settingsBackMessage } from './settings';
+import { closeSettingsPicker, patchSettings, settingsBackMessage } from './settings';
 import { bindFileDrop, syncDropHint } from './drop';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
 import { chromeKeepers, overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './wallpaper';
@@ -57,12 +57,17 @@ function onHostMessage(data: HostMsg | null | undefined): void {
       hydrateGen = data.hydrate;
     }
     const incoming = normalizeState(data.state);
-    if (data.merge || incoming.mergeTranscript || typeof data.hydrate === 'number') {
-      incoming.messages = mergeTranscript(ui.state.messages, incoming.messages);
+    const resolved = resolveIncomingMessages(ui.state.messages, incoming.messages, {
+      merge: data.merge,
+      mergeTranscript: incoming.mergeTranscript,
+      hydrate: data.hydrate,
+    });
+    incoming.messages = resolved.messages;
+    if (resolved.skipHydrate !== undefined) {
+      skipHydrate = resolved.skipHydrate;
       incoming.restoringSession = false;
-      if (typeof data.hydrate === 'number') {
-        skipHydrate = data.hydrate;
-      }
+    } else if (resolved.live) {
+      incoming.restoringSession = false;
     }
     ui.state = incoming;
     persistUi();
@@ -92,9 +97,11 @@ function onHostMessage(data: HostMsg | null | undefined): void {
     } else {
       ui.state.messages = ui.state.messages.concat(batch);
     }
-    if (data.done || ui.state.messages.length > 0) {
-      ui.state.restoringSession = false;
+    if (typeof data.hydrate === 'number' && !data.done) {
+      ui.state.restoringSession = true;
+      return;
     }
+    ui.state.restoringSession = false;
     render();
     return;
   }
@@ -308,6 +315,7 @@ function boot(): void {
     ) {
       return;
     }
+    closeSettingsPicker();
     if (ui.moreOpen || ui.picker) {
       ui.moreOpen = false;
       ui.picker = undefined;

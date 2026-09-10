@@ -44,6 +44,8 @@ export const EN = {
   settingsTimestampsHint: 'Keep the clock on finished turns',
   settingsNotify: 'Notification sound',
   settingsNotifyHint: 'Play a chime when a turn finishes, or a lower tone if it is interrupted',
+  settingsTermEncoding: 'Terminal encoding',
+  settingsTermEncodingHint: 'How terminal tool bytes are decoded for display. Default UTF-8.',
   settingsTheme: 'Theme',
   settingsThemeHint: 'Colors, a frosted or solid floating panel, and an optional image behind the chat.',
   settingsRemote: 'Remote access',
@@ -401,6 +403,8 @@ export const EN = {
   compactBusy: 'Wait for the current reply to finish.',
   rewindEmpty: 'No rewind points in this session.',
   rewindPick: 'Rewind to turn',
+  rewindConfirm: 'Rewind to this turn? Later messages and file edits after this point will be discarded.',
+  rewindAction: 'Rewind',
   queued: 'Queued: {n}',
   removeAttach: 'Remove',
   attach: 'Attach',
@@ -578,6 +582,7 @@ export const EN = {
   toolDelete: 'Delete',
   toolGeneric: 'Tool',
   termRun: 'Run output',
+  termIdle: 'Waiting for output',
 } as const;
 
 export type StringKey = keyof typeof EN;
@@ -608,6 +613,8 @@ export const ZH: Record<StringKey, string> = {
   settingsTimestampsHint: '在完成的回复旁保留时钟',
   settingsNotify: '提示音',
   settingsNotifyHint: '任务完成时播放提示音，意外中断时播放较低的音调',
+  settingsTermEncoding: '终端输出编码',
+  settingsTermEncodingHint: '将终端工具的字节输出按此编码显示。默认 UTF-8。中文 Windows 可改成 GBK。',
   settingsTheme: '主题',
   settingsThemeHint: '主色、副色、背景色，以及毛玻璃 / 纯色悬浮面板。可选图片铺在对话框后面。',
   settingsRemote: '远程访问',
@@ -964,6 +971,8 @@ export const ZH: Record<StringKey, string> = {
   compactBusy: '请等当前回复结束后再压缩。',
   rewindEmpty: '当前会话没有可回退的回合。',
   rewindPick: '回退到回合',
+  rewindConfirm: '回退到这一回合？之后的对话和文件改动会被撤掉。',
+  rewindAction: '回退',
   queued: '已排队：{n}',
   removeAttach: '移除',
   attach: '附加',
@@ -1137,6 +1146,7 @@ export const ZH: Record<StringKey, string> = {
   toolDelete: '删除',
   toolGeneric: '工具',
   termRun: '运行情况',
+  termIdle: '等待输出',
 };
 
 export function t(

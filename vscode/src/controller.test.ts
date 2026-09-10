@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
 import { describe, it } from 'node:test';
-import { GrokController } from './controller';
+import { GrokController, rewindIndexFor } from './controller';
 import { cancelledPermission } from './permissions';
 import { bindPlatform, type Platform } from './platform';
 
@@ -167,5 +167,29 @@ describe('controller reverse requests', () => {
     controller.cancelTurn();
     assert.deepEqual(await second, cancelledPermission());
     controller.dispose();
+  });
+});
+
+describe('rewindIndexFor', () => {
+  const turns = [
+    { id: 'u1', role: 'user' },
+    { id: 'a1', role: 'assistant' },
+    { id: 'u2', role: 'user' },
+    { id: 'a2', role: 'assistant' },
+    { id: 'u3', role: 'user' },
+    { id: 'a3', role: 'assistant' },
+  ];
+
+  it('keeps an earlier assistant turn and drops what follows', () => {
+    assert.equal(rewindIndexFor(turns, 'a1'), 1);
+    assert.equal(rewindIndexFor(turns, 'a2'), 2);
+  });
+
+  it('undoes the latest assistant turn', () => {
+    assert.equal(rewindIndexFor(turns, 'a3'), 2);
+  });
+
+  it('ignores user bubbles', () => {
+    assert.equal(rewindIndexFor(turns, 'u2'), undefined);
   });
 });

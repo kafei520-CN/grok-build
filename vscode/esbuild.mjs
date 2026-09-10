@@ -88,6 +88,7 @@ const tests = {
     'src/wallpaper.test.ts',
     'src/markdown.test.ts',
     'src/streamTail.test.ts',
+    'src/termText.test.ts',
     'src/imageTool.test.ts',
     'src/settings.test.ts',
     'src/sessionUpdates.test.ts',

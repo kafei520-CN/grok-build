@@ -15,6 +15,7 @@ object GrokSettingsStore {
         var alwaysApprove: Boolean = false,
         var locale: String = "auto",
         var notifySound: Boolean = true,
+        var termEncoding: String = "utf-8",
     )
 
     fun file(): File = File(System.getProperty("user.home"), ".grok/idea-settings.json")
@@ -34,6 +35,7 @@ object GrokSettingsStore {
             alwaysApprove = bool(raw, "alwaysApprove", false),
             locale = str(raw, "locale", "auto"),
             notifySound = bool(raw, "notifySound", true),
+            termEncoding = str(raw, "termEncoding", "utf-8"),
         )
     }
 
@@ -49,6 +51,7 @@ object GrokSettingsStore {
         obj.addProperty("alwaysApprove", snapshot.alwaysApprove)
         obj.addProperty("locale", snapshot.locale)
         obj.addProperty("notifySound", snapshot.notifySound)
+        obj.addProperty("termEncoding", snapshot.termEncoding)
         val target = file()
         val tmp = File(target.path + ".tmp")
         tmp.writeText(obj.toString() + "\n", Charsets.UTF_8)

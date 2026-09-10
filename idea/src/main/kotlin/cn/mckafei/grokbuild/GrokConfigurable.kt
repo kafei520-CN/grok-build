@@ -24,6 +24,9 @@ class GrokConfigurable : Configurable {
     private val notifySound = JBCheckBox("Play a sound when a turn finishes or is interrupted")
     private val permission = ComboBox(arrayOf("ask", "acceptEdits", "auto"))
     private val locale = ComboBox(arrayOf("auto", "en", "zh-CN"))
+    private val termEncoding = ComboBox(
+        arrayOf("utf-8", "gbk", "gb18030", "gb2312", "big5", "shift_jis", "windows-1252", "iso-8859-1"),
+    )
     private var original = GrokSettingsStore.Snapshot()
 
     override fun getDisplayName(): String = "Grok Build"
@@ -41,6 +44,7 @@ class GrokConfigurable : Configurable {
             .addLabeledComponent(JBLabel("Min CLI version:"), minCli, 1, false)
             .addLabeledComponent(JBLabel("Permission mode:"), permission, 1, false)
             .addLabeledComponent(JBLabel("Locale:"), locale, 1, false)
+            .addLabeledComponent(JBLabel("Terminal encoding:"), termEncoding, 1, false)
             .addComponent(preferWorkspace, 8)
             .addComponent(includeSelection, 4)
             .addComponent(alwaysApprove, 4)
@@ -82,6 +86,7 @@ class GrokConfigurable : Configurable {
         notifySound.isSelected = original.notifySound
         permission.selectedItem = original.permissionMode
         locale.selectedItem = original.locale
+        termEncoding.selectedItem = original.termEncoding
     }
 
     override fun disposeUIResources() {
@@ -98,5 +103,6 @@ class GrokConfigurable : Configurable {
             alwaysApprove = alwaysApprove.isSelected,
             locale = locale.selectedItem as? String ?: "auto",
             notifySound = notifySound.isSelected,
+            termEncoding = termEncoding.selectedItem as? String ?: "utf-8",
         )
 }

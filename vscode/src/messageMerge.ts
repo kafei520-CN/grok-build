@@ -6,10 +6,40 @@ export function mergeTranscript<T extends { id?: string }>(had: T[], incoming: T
   if (!had.length) {
     return incoming;
   }
-  return (
-    mergeLiveMessages(had, incoming) ??
-    had.concat(incoming.filter((row) => row.id && !had.some((item) => item.id === row.id)))
-  );
+  return mergeLiveMessages(had, incoming) ?? appendUnseen(had, incoming);
+}
+
+/**
+ * Live tails merge in place. A hydrate frame only skips history prepends when
+ * the open transcript already overlaps the incoming tail (reconnect), not on a
+ * fresh restore of a large session.
+ */
+export function resolveIncomingMessages<T extends { id?: string }>(
+  had: T[],
+  incoming: T[],
+  flags: { merge?: boolean; mergeTranscript?: boolean; hydrate?: number },
+): { messages: T[]; skipHydrate?: number; live: boolean } {
+  const live = Boolean(flags.merge || flags.mergeTranscript);
+  const messages = live ? mergeTranscript(had, incoming) : incoming;
+  if (typeof flags.hydrate !== 'number') {
+    return { messages, live };
+  }
+  const merged = mergeLiveMessages(had, messages);
+  if (!merged) {
+    return { messages, live };
+  }
+  return { messages: merged, skipHydrate: flags.hydrate, live };
+}
+
+function appendUnseen<T extends { id?: string }>(had: T[], incoming: T[]): T[] {
+  const seen = new Set<string>();
+  for (const row of had) {
+    if (row.id) {
+      seen.add(row.id);
+    }
+  }
+  const extra = incoming.filter((row) => row.id && !seen.has(row.id));
+  return extra.length ? had.concat(extra) : had;
 }
 
 /** If `incoming` is a live tail of `had` (same last id, plus optional new ids), merge in place. */

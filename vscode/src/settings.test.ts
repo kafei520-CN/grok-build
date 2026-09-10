@@ -9,5 +9,6 @@ describe('settings', () => {
     assert.equal(settingNeedsRestart('cliPath'), true);
     assert.equal(settingNeedsRestart('locale'), false);
     assert.equal(settingNeedsRestart('permissionMode'), false);
+    assert.equal(settingNeedsRestart('termEncoding'), false);
   });
 });

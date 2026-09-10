@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { mergeLiveMessages, mergeTranscript } from './messageMerge';
-import { packRemotePayload, REMOTE_STATE_SOFT, chunkMessages } from './remoteState';
+import { mergeLiveMessages, mergeTranscript, resolveIncomingMessages } from './messageMerge';
+import { packDelivery, packRemotePayload, REMOTE_STATE_SOFT, chunkMessages } from './remoteState';
 
 describe('remote state packing', () => {
   it('keeps a small snapshot as one frame', () => {
@@ -54,7 +54,7 @@ describe('remote state packing', () => {
     const boot = JSON.parse(frames[0] ?? '') as {
       type: string;
       hydrate: number;
-      state: { status: string; messages: Array<{ id: string }> };
+      state: { status: string; restoringSession?: boolean; messages: Array<{ id: string }> };
     };
     assert.equal(boot.type, 'state');
     assert.equal(boot.state.status, 'ready');
@@ -82,6 +82,26 @@ describe('remote state packing', () => {
       ids,
       messages.map((row) => row.id),
     );
+    assert.equal(boot.state.restoringSession, true);
+  });
+
+  it('keeps a full restore on the replay path instead of a merge tail', () => {
+    const messages = Array.from({ length: 80 }, (_, i) => ({
+      id: `m${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      text: 'x'.repeat(2000),
+      tools: [],
+    }));
+    const frames = packDelivery({ type: 'state', state: { status: 'ready', messages } });
+    assert.ok(frames.length >= 2);
+    const boot = JSON.parse(frames[0] ?? '') as {
+      merge?: boolean;
+      hydrate?: number;
+      state: { restoringSession?: boolean; messages: Array<{ id: string }> };
+    };
+    assert.equal(boot.merge, undefined);
+    assert.equal(typeof boot.hydrate, 'number');
+    assert.equal(boot.state.restoringSession, true);
   });
 
   it('live updates of a long chat send a merge tail instead of replaying history', () => {
@@ -137,6 +157,27 @@ describe('remote state packing', () => {
       next.map((row) => row.id),
       ['a', 'b', 'c', 'd'],
     );
+  });
+
+  it('does not skip hydrate prepends on a fresh large restore', () => {
+    const tail = [{ id: 'c' }, { id: 'd' }];
+    const fresh = resolveIncomingMessages([], tail, { hydrate: 3 });
+    assert.deepEqual(
+      fresh.messages.map((row) => row.id),
+      ['c', 'd'],
+    );
+    assert.equal(fresh.skipHydrate, undefined);
+    assert.equal(fresh.live, false);
+  });
+
+  it('skips hydrate prepends only when the open transcript already overlaps', () => {
+    const had = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+    const hit = resolveIncomingMessages(had, [{ id: 'c' }, { id: 'd' }], { hydrate: 9 });
+    assert.deepEqual(
+      hit.messages.map((row) => row.id),
+      ['a', 'b', 'c', 'd'],
+    );
+    assert.equal(hit.skipHydrate, 9);
   });
 
   it('chunks messages without dropping a oversized single item', () => {

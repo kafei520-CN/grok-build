@@ -67,7 +67,7 @@ class GrokSession(val project: Project) : Disposable {
         val sc = Sidecar(project) { event ->
             when (event.get("type")?.asString) {
                 "log" -> appendLog(event)
-                "state", "tail" -> enqueueWebview(event)
+                "state", "tail", "messages", "editStats" -> enqueueWebview(event)
                 else -> ApplicationManager.getApplication().invokeLater { onEvent(event) }
             }
         }
@@ -176,8 +176,7 @@ class GrokSession(val project: Project) : Disposable {
     }
 
     private val webviewLock = Any()
-    private var pendingState: String? = null
-    private var pendingTail: String? = null
+    private val pendingWebview = ArrayDeque<String>()
     private var webviewFlushPosted = false
 
     private fun enqueueWebview(event: JsonObject) {
@@ -189,12 +188,7 @@ class GrokSession(val project: Project) : Disposable {
         }
         val json = payload.toString()
         synchronized(webviewLock) {
-            if (event.get("type")?.asString == "state") {
-                pendingState = json
-                pendingTail = null
-            } else {
-                pendingTail = json
-            }
+            pendingWebview.addLast(json)
             if (webviewFlushPosted) {
                 return
             }
@@ -204,27 +198,21 @@ class GrokSession(val project: Project) : Disposable {
     }
 
     private fun flushWebview() {
-        val state: String?
-        val tail: String?
+        val batch: List<String>
         synchronized(webviewLock) {
-            state = pendingState
-            tail = pendingTail
-            pendingState = null
-            pendingTail = null
+            batch = pendingWebview.toList()
+            pendingWebview.clear()
             webviewFlushPosted = false
         }
-        if (state != null) {
-            panel?.postToWebview(state)
-        }
-        if (tail != null) {
-            panel?.postToWebview(tail)
+        for (json in batch) {
+            panel?.postToWebview(json)
         }
     }
 
     private fun onEvent(event: JsonObject) {
         when (event.get("type")?.asString) {
             "host" -> dispatcher?.handle(event)
-            "state", "tail" -> enqueueWebview(event)
+            "state", "tail", "messages", "editStats" -> enqueueWebview(event)
             "ready" -> {
                 ready = true
                 sidecar?.sendContext(lastSelection, lastFile)
