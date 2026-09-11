@@ -1,7 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { DEFAULT_PUBLIC_HOST, DEFAULT_RELAY_PORT } from './remoteDefaults';
+import { DEFAULT_RELAY_PORT } from './remoteDefaults';
 
 export const DEFAULT_MAX_FRAME = 8 * 1024 * 1024;
 export const HARD_MAX_FRAME = 32 * 1024 * 1024;
@@ -22,7 +22,7 @@ export interface RelayFileConfig {
 }
 
 export const DEFAULT_RELAY_FILE: RelayFileConfig = {
-  publicHost: DEFAULT_PUBLIC_HOST,
+  publicHost: '127.0.0.1',
   listenPort: DEFAULT_RELAY_PORT,
   maxFrameBytes: DEFAULT_MAX_FRAME,
   maxFileBytes: DEFAULT_MAX_FILE,
@@ -109,7 +109,7 @@ export function loadRelayConfig(
   }
   const cfg: RelayFileConfig = {
     ...DEFAULT_RELAY_FILE,
-    publicHost: String(raw.publicHost ?? '').trim() || DEFAULT_PUBLIC_HOST,
+    publicHost: String(raw.publicHost ?? '').trim() || DEFAULT_RELAY_FILE.publicHost,
     listenPort: clampListenPort(raw.listenPort),
     maxFrameBytes: clampFrameBytes(raw.maxFrameBytes),
     maxFileBytes: clampFileBytes(raw.maxFileBytes),

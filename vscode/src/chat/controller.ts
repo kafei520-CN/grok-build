@@ -144,8 +144,8 @@ import {
   DEFAULT_PUBLIC_HOST,
   ensureTunnelIdentity,
   resolveForwardPort,
+  parseRelayEndpoint,
   resolvePublicHost,
-  sanitizeTunnelHost,
   sanitizeTunnelUser,
 } from '../remote/remoteTunnel';
 import { BUNDLED_RELAY_TOKEN, PublicRelay } from '../remote/publicRelay';
@@ -1590,8 +1590,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       void plat().setState('ui.remoteRelayKind', fields.kind);
     }
     if (fields.host !== undefined) {
-      this.remoteHost = sanitizeTunnelHost(fields.host);
+      const parsed = parseRelayEndpoint(fields.host);
+      this.remoteHost = parsed.host;
+      this.remoteRelayPort = parsed.port;
       void plat().setState('ui.remoteHost', this.remoteHost);
+      void plat().setState('ui.remoteRelayPort', this.remoteRelayPort);
     }
     if (fields.port !== undefined && Number(fields.port) > 0) {
       this.remoteRelayPort = clampSshPort(fields.port);
@@ -1600,10 +1603,6 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (fields.key !== undefined && fields.key.trim()) {
       this.remoteRelayKey = fields.key.trim();
       void plat().setState('ui.remoteRelayKey', this.remoteRelayKey);
-    }
-    if (this.remoteRelayKind === 'official' && !this.remoteHost) {
-      this.remoteHost = DEFAULT_PUBLIC_HOST;
-      void plat().setState('ui.remoteHost', this.remoteHost);
     }
     this.syncTunnel();
     this.emit();
@@ -1694,11 +1693,10 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (this.remoteRelayKind !== 'custom') {
       this.tunnel.stop();
       this.relay.start({
-        host: this.remoteHost || DEFAULT_PUBLIC_HOST,
+        host: DEFAULT_PUBLIC_HOST,
         localPort,
         token: BUNDLED_RELAY_TOKEN,
         official: true,
-        ...(this.remoteRelayPort && this.remoteRelayPort !== 8788 ? { port: this.remoteRelayPort } : {}),
       });
       return;
     }
@@ -1771,7 +1769,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const extra = {
       tunnel,
       tunnelError,
-      tunnelHost: this.remoteHost || DEFAULT_PUBLIC_HOST,
+      tunnelHost: this.remoteRelayKind === 'custom' ? this.remoteHost : DEFAULT_PUBLIC_HOST,
       tunnelUser: this.remoteUser,
       sshPort: this.remoteSshPort,
       forwardPort: this.remoteForwardPort,

@@ -153,64 +153,25 @@ function relayKindBlock(remote: typeof ui.state.remote): HTMLElement {
   hint.className = 'settings-hint';
   hint.textContent = tr('settingsRemoteRelayHint');
   wrap.append(name, seg, hint);
-  wrap.append(relayHostRow(remote, kind));
-  wrap.append(relayPortRow(remote, kind));
   if (kind === 'custom') {
     wrap.append(customRelayFields(remote));
   }
   return wrap;
 }
 
-function relayHostRow(remote: typeof ui.state.remote, kind: 'official' | 'custom'): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'settings-row stack';
-  const name = document.createElement('div');
-  name.className = 'settings-label';
-  name.textContent = tr('settingsRemoteHost');
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'settings-field';
-  input.id = 'relay-host';
-  input.placeholder = 'IP / 域名';
-  input.spellcheck = false;
-  input.value = remote?.tunnelHost ?? '';
-  if (kind === 'official') {
-    input.addEventListener('change', () => {
-      post({ type: 'setRemoteRelay', kind, host: input.value });
-    });
-  }
-  row.append(name, input);
-  return row;
-}
-
-function relayPortRow(remote: typeof ui.state.remote, kind: 'official' | 'custom'): HTMLElement {
-  const row = document.createElement('div');
-  row.className = 'settings-row stack';
-  const name = document.createElement('div');
-  name.className = 'settings-label';
-  name.textContent = tr('settingsRemoteRelayPort');
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.className = 'settings-field';
-  input.id = 'relay-port';
-  input.min = '1';
-  input.max = '65535';
-  input.value = String(remote?.relayPort || 8788);
-  if (kind === 'official') {
-    input.addEventListener('change', () => {
-      post({ type: 'setRemoteRelay', kind, port: Number(input.value) });
-    });
-  }
-  const hint = document.createElement('div');
-  hint.className = 'settings-hint';
-  hint.textContent = tr('settingsRemoteRelayPortHint');
-  row.append(name, input, hint);
-  return row;
-}
-
 function customRelayFields(remote: typeof ui.state.remote): HTMLElement {
   const box = document.createElement('div');
   box.className = 'settings-row stack';
+  const hostName = document.createElement('div');
+  hostName.className = 'settings-label';
+  hostName.textContent = tr('settingsRemoteHost');
+  const host = document.createElement('input');
+  host.type = 'text';
+  host.className = 'settings-field';
+  host.id = 'relay-host';
+  host.placeholder = 'IP / 域名';
+  host.spellcheck = false;
+  host.value = remote?.bundledRelay ? '' : (remote?.tunnelHost ?? '');
   const keyName = document.createElement('div');
   keyName.className = 'settings-label';
   keyName.textContent = tr('settingsRemoteRelayKey');
@@ -224,21 +185,36 @@ function customRelayFields(remote: typeof ui.state.remote): HTMLElement {
   save.type = 'button';
   save.className = 'btn';
   save.textContent = tr('settingsRemoteCustomSave');
+  const portWrap = document.createElement('details');
+  portWrap.className = 'settings-more';
+  const savedPort = remote?.relayPort || 8788;
+  if (savedPort !== 8788) {
+    portWrap.open = true;
+  }
+  const summary = document.createElement('summary');
+  summary.textContent = tr('settingsRemoteRelayPortMore');
+  const port = document.createElement('input');
+  port.type = 'number';
+  port.className = 'settings-field';
+  port.min = '1';
+  port.max = '65535';
+  port.placeholder = '8788';
+  port.value = savedPort !== 8788 ? String(savedPort) : '';
+  portWrap.append(summary, port);
   save.addEventListener('click', () => {
-    const host = (document.getElementById('relay-host') as HTMLInputElement | null)?.value ?? '';
-    const port = Number((document.getElementById('relay-port') as HTMLInputElement | null)?.value);
+    const raw = port.value.trim();
     post({
       type: 'setRemoteRelay',
       kind: 'custom',
-      host,
-      port: Number.isFinite(port) ? port : undefined,
+      host: host.value,
       key: key.value,
+      ...(raw ? { port: Number(raw) } : {}),
     });
   });
   const help = document.createElement('div');
   help.className = 'settings-hint';
   help.textContent = tr('settingsRemoteRelayKeyHint');
-  box.append(keyName, key, save, help);
+  box.append(hostName, host, keyName, key, portWrap, save, help);
   return box;
 }
 

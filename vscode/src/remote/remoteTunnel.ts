@@ -8,6 +8,7 @@ import {
   DEFAULT_FORWARD_PORT,
   DEFAULT_PUBLIC_HOST,
   DEFAULT_PUBLIC_USER,
+  DEFAULT_RELAY_PORT,
   DEFAULT_SSH_PORT,
 } from './remoteDefaults';
 import { randomBytes } from 'node:crypto';
@@ -48,6 +49,36 @@ const HOST_KEY_FAIL =
 const KEY_FILE_FAIL = /invalid format|unprotected private key|bad permissions|error loading key|load key/i;
 const BAD_HOST = /could not resolve hostname|name or service not known/i;
 const BAD_STRICT = /bad configuration option.*stricthostkeychecking|invalid strict host key/i;
+
+export function parseRelayEndpoint(raw: unknown): { host: string; port: number } {
+  const text = String(raw ?? '').trim();
+  let host = '';
+  let port = DEFAULT_RELAY_PORT;
+  try {
+    if (/^https?:\/\//i.test(text)) {
+      const url = new URL(text);
+      host = url.hostname;
+      if (url.port) {
+        port = Number(url.port);
+      }
+    } else {
+      const first = (text.split('/')[0] ?? text).trim();
+      const tagged = /^(.+):(\d{1,5})$/.exec(first);
+      if (tagged) {
+        host = tagged[1] ?? '';
+        port = Number(tagged[2]);
+      } else {
+        host = first;
+      }
+    }
+  } catch {
+    host = '';
+  }
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    port = DEFAULT_RELAY_PORT;
+  }
+  return { host: sanitizeTunnelHost(host), port };
+}
 
 export function sanitizeTunnelHost(raw: unknown): string {
   let text = String(raw ?? '').trim();

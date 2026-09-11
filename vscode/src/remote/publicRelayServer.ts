@@ -2,8 +2,14 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { BUNDLED_RELAY_TOKEN, listenPublicRelay, type PublicRelayListener } from './publicRelay';
 import { handleAdmin, type AdminAuth } from './relayAdmin';
-import { clampListenPort, configPath, loadRelayConfig, saveRelayConfig, type RelayFileConfig } from './relayConfig';
-import { DEFAULT_PUBLIC_HOST } from './remoteDefaults';
+import {
+  clampListenPort,
+  configPath,
+  DEFAULT_RELAY_FILE,
+  loadRelayConfig,
+  saveRelayConfig,
+  type RelayFileConfig,
+} from './relayConfig';
 
 async function main(): Promise<void> {
   const home = process.env.GROK_WEB_HOME?.trim() || path.join(os.homedir(), '.grok', 'web');
@@ -17,7 +23,7 @@ async function main(): Promise<void> {
       auth.hash = next;
     },
   };
-  const publicHost = process.env.GROK_RELAY_HOST?.trim() || cfg.publicHost || DEFAULT_PUBLIC_HOST;
+  const publicHost = process.env.GROK_RELAY_HOST?.trim() || cfg.publicHost || DEFAULT_RELAY_FILE.publicHost;
   cfg.publicHost = publicHost;
   const envPort = Number(process.env.GROK_RELAY_PORT ?? '');
   const envLocked = Number.isInteger(envPort) && envPort > 0;

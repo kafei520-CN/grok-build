@@ -26,6 +26,10 @@ fs.copyFileSync(
   path.join(vscodeRoot, 'resources', 'relay', 'grok-relay.service'),
   path.join(stage, 'grok-web.service'),
 );
+fs.copyFileSync(
+  path.join(vscodeRoot, 'resources', 'relay', 'DEPLOY.md'),
+  path.join(stage, 'DEPLOY.md'),
+);
 fs.writeFileSync(
   path.join(stage, 'start.cmd'),
   [

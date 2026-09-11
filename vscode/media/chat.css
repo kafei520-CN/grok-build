@@ -2865,6 +2865,21 @@ kbd {
   font-weight: 600;
 }
 
+.settings-more {
+  margin-top: 2px;
+}
+
+.settings-more summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+.settings-more .settings-field {
+  margin-top: 8px;
+}
+
 .remote-code {
   margin-top: 6px;
   font-size: 22px;

@@ -9,6 +9,7 @@ import {
   AUTO_FORWARD_MIN,
   DEFAULT_PUBLIC_HOST,
   isBundledRelayHost,
+  parseRelayEndpoint,
   pickAutoForwardPort,
   resolveForwardPort,
   resolvePublicHost,
@@ -52,6 +53,12 @@ describe('reverse tunnel helpers', () => {
     assert.equal(sanitizeTunnelHost('https://vps.example.com:8788/admin'), 'vps.example.com');
     assert.equal(sanitizeTunnelHost('vps.example.com:8788'), 'vps.example.com');
     assert.equal(sanitizeTunnelHost('10.0.0.8; rm -rf /'), '');
+    assert.deepEqual(parseRelayEndpoint('vps.example.com'), { host: 'vps.example.com', port: 8788 });
+    assert.deepEqual(parseRelayEndpoint('10.0.0.8:9000'), { host: '10.0.0.8', port: 9000 });
+    assert.deepEqual(parseRelayEndpoint('http://vps.example.com:9000/admin'), {
+      host: 'vps.example.com',
+      port: 9000,
+    });
     assert.equal(sanitizeTunnelUser('ubuntu'), 'ubuntu');
     assert.equal(sanitizeTunnelUser('root;id'), 'root');
     assert.equal(clampSshPort(22), 22);
