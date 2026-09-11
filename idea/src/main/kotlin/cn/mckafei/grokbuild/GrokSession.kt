@@ -1,5 +1,13 @@
 package cn.mckafei.grokbuild
 
+import cn.mckafei.grokbuild.chat.GrokChatPanel
+import cn.mckafei.grokbuild.theme.GrokWallpaper
+import cn.mckafei.grokbuild.diff.GrokDiffSupport
+import cn.mckafei.grokbuild.sidecar.HostRpc
+import cn.mckafei.grokbuild.sidecar.SharedAssets
+import cn.mckafei.grokbuild.sidecar.Sidecar
+import cn.mckafei.grokbuild.ui.GrokContext
+
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.execution.filters.TextConsoleBuilderFactory

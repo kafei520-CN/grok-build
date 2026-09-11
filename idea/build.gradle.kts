@@ -97,4 +97,9 @@ tasks {
     wrapper {
         gradleVersion = "8.13"
     }
+
+    // Install zips go to repo packages/idea/, not idea/build/distributions/
+    named<Zip>("buildPlugin") {
+        destinationDirectory.set(rootProject.projectDir.resolve("../packages/idea"))
+    }
 }

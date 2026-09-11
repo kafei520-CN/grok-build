@@ -2126,9 +2126,37 @@ textarea:focus-visible {
 }
 
 .queue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 4px 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--ice) 28%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ice) 8%, var(--elev));
+}
+
+.queue-head {
   font-size: 11px;
   color: var(--ice);
-  margin: 0 4px 8px;
+  font-weight: 600;
+}
+
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.queue-text {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--fg);
 }
 
 .composer-card textarea {

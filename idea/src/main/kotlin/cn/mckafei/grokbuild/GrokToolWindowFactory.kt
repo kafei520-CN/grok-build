@@ -1,5 +1,8 @@
 package cn.mckafei.grokbuild
 
+import cn.mckafei.grokbuild.chat.GrokChatPanel
+import cn.mckafei.grokbuild.jcef.GrokJcef
+
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.project.DumbAware

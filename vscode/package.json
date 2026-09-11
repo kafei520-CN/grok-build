@@ -2,17 +2,17 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.72",
+  "version": "0.2.74",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/kafei520-CN/Grok-For-VS-Code",
+  "homepage": "https://github.com/kafei520-CN/grok-build",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kafei520-CN/Grok-For-VS-Code.git"
+    "url": "https://github.com/kafei520-CN/grok-build.git"
   },
   "bugs": {
-    "url": "https://github.com/kafei520-CN/Grok-For-VS-Code/issues"
+    "url": "https://github.com/kafei520-CN/grok-build/issues"
   },
   "private": false,
   "engines": {
@@ -294,8 +294,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
-    "test": "node esbuild.mjs --test && node --test dist/test/*.js dist/test/webview/*.js",
-    "package": "npx --yes @vscode/vsce package"
+    "test": "node esbuild.mjs --test && node --test dist/test/**/*.js",
+    "package": "node ./scripts/package-vsix.cjs"
   },
   "devDependencies": {
     "@shikijs/monaco": "^4.4.3",

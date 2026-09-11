@@ -4,6 +4,7 @@
 vscode/node_modules/
 vscode/dist/
 vscode/*.vsix
+packages/
 idea/.gradle/
 idea/build/
 idea/.intellijPlatform/

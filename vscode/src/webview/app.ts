@@ -1,6 +1,6 @@
-import type { ChatState, WebviewToHost } from '../types';
-import { t, type StringKey, type UiLocale } from '../i18n';
-import { normalizeTheme } from '../theme';
+import type { ChatState, WebviewToHost } from '../core/types';
+import { t, type StringKey, type UiLocale } from '../core/i18n';
+import { normalizeTheme } from '../settings/theme';
 
 export type WsFile = {
   path: string;

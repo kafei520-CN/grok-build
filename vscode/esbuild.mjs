@@ -1,10 +1,13 @@
 import * as esbuild from 'esbuild';
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, globSync, mkdirSync, rmSync } from 'node:fs';
 import * as path from 'node:path';
 
 const watch = process.argv.includes('--watch');
 const test = process.argv.includes('--test');
 
+if (test) {
+  rmSync('dist/test', { recursive: true, force: true });
+}
 mkdirSync('dist/test', { recursive: true });
 
 const common = {
@@ -35,7 +38,7 @@ const webview = {
 
 const diffView = {
   ...common,
-  entryPoints: ['src/webview/diff.ts'],
+  entryPoints: ['src/webview/editor/diff.ts'],
   outfile: 'dist/diff.js',
   platform: 'browser',
   format: 'iife',
@@ -45,7 +48,7 @@ const diffView = {
 
 const host = {
   ...common,
-  entryPoints: ['src/sidecar.ts'],
+  entryPoints: ['src/chat/sidecar.ts'],
   outfile: 'dist/host.js',
   format: 'cjs',
   banner: { js: '#!/usr/bin/env node' },
@@ -53,7 +56,7 @@ const host = {
 
 const relay = {
   ...common,
-  entryPoints: ['src/publicRelayServer.ts'],
+  entryPoints: ['src/remote/publicRelayServer.ts'],
   outfile: 'dist/relay.js',
   format: 'cjs',
   banner: { js: '#!/usr/bin/env node' },
@@ -61,7 +64,7 @@ const relay = {
 
 const shikiMonaco = {
   ...common,
-  entryPoints: ['src/webview/shiki-monaco.ts'],
+  entryPoints: ['src/webview/editor/shiki-monaco.ts'],
   outfile: 'dist/shiki-monaco.js',
   platform: 'browser',
   format: 'iife',
@@ -71,69 +74,7 @@ const shikiMonaco = {
 
 const tests = {
   ...common,
-  entryPoints: [
-    'src/authMethods.test.ts',
-    'src/billing.test.ts',
-    'src/cli.test.ts',
-    'src/rpc.test.ts',
-    'src/slash.test.ts',
-    'src/edits.test.ts',
-    'src/i18n.test.ts',
-    'src/snapshots.test.ts',
-    'src/sessionDiffs.test.ts',
-    'src/diff.test.ts',
-    'src/context.test.ts',
-    'src/clipboard.test.ts',
-    'src/contextWindow.test.ts',
-    'src/wallpaper.test.ts',
-    'src/markdown.test.ts',
-    'src/streamTail.test.ts',
-    'src/termText.test.ts',
-    'src/imageTool.test.ts',
-    'src/settings.test.ts',
-    'src/sessionUpdates.test.ts',
-    'src/sessionRow.test.ts',
-    'src/sessionGroups.test.ts',
-    'src/rulesHost.test.ts',
-    'src/skillsHost.test.ts',
-    'src/grokDirs.test.ts',
-    'src/apiEndpoints.test.ts',
-    'src/turnModels.test.ts',
-    'src/incoming.test.ts',
-    'src/workspaceImages.test.ts',
-    'src/errors.test.ts',
-    'src/theme.test.ts',
-    'src/permissions.test.ts',
-    'src/mcpHost.test.ts',
-    'src/clientHandlers.test.ts',
-    'src/startup.test.ts',
-    'src/acpTerminal.test.ts',
-    'src/fileSearch.test.ts',
-    'src/fork.test.ts',
-    'src/roster.test.ts',
-    'src/agentsHost.test.ts',
-    'src/personasHost.test.ts',
-    'src/worktreeHost.test.ts',
-    'src/extensionsHost.test.ts',
-    'src/tasksHost.test.ts',
-    'src/planAsk.test.ts',
-    'src/attachments.test.ts',
-    'src/slashHost.test.ts',
-    'src/liveEdits.test.ts',
-    'src/permissionView.test.ts',
-    'src/webview/scroll.test.ts',
-    'src/webview/popover.test.ts',
-    'src/webview/monaco.test.ts',
-    'src/controller.test.ts',
-    'src/dispatch.test.ts',
-    'src/reconnect.test.ts',
-    'src/notify.test.ts',
-    'src/remoteGateway.test.ts',
-    'src/remoteState.test.ts',
-    'src/remoteTunnel.test.ts',
-    'src/publicRelay.test.ts',
-    'src/workspaceIndex.test.ts',
-  ],
+  entryPoints: globSync('src/**/*.test.ts').map((file) => file.replaceAll('\\', '/')),
   outdir: 'dist/test',
   format: 'cjs',
   external: ['vscode'],

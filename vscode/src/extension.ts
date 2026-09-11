@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { registerChatView } from './chatView';
-import { COMMANDS } from './constants';
-import { GrokController } from './controller';
-import { logInfo } from './logger';
-import { createVscodePlatform } from './vscodePlatform';
+import { registerChatView } from './chat/chatView';
+import { COMMANDS } from './core/constants';
+import { GrokController } from './chat/controller';
+import { logInfo } from './core/logger';
+import { createVscodePlatform } from './core/platform/vscodePlatform';
 
 export function activate(context: vscode.ExtensionContext): void {
   const controller = new GrokController(createVscodePlatform(context));

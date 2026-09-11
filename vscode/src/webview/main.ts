@@ -1,20 +1,20 @@
-import type { ChatState, StreamTail } from '../types';
-import { applyEditStatsToMessages, type EditStatsItem } from '../editStats';
-import { resolveIncomingMessages } from '../messageMerge';
-import { mergeStreamTail } from '../streamTail';
-import { applyThemeTo } from '../theme';
+import type { ChatState, StreamTail } from '../core/types';
+import { applyEditStatsToMessages, type EditStatsItem } from '../edits/editStats';
+import { resolveIncomingMessages } from '../chat/messageMerge';
+import { mergeStreamTail } from '../chat/streamTail';
+import { applyThemeTo } from '../settings/theme';
 import { bindRender, isBooting, isRemoteWeb, normalizeState, persistUi, post, root, ui } from './app';
 import { patchHeader, renderDrawer, renderLightbox } from './chrome';
-import { mountComposer, patchComposer } from './composer';
+import { mountComposer, patchComposer } from './chrome/composer';
 import { removeSlot, replaceSlot } from './dom';
 import { closeSettingsPicker, patchSettings, settingsBackMessage } from './settings';
-import { bindFileDrop, syncDropHint } from './drop';
-import { bindQuoteMenu } from './quoteMenu';
+import { bindFileDrop, syncDropHint } from './chrome/drop';
+import { bindQuoteMenu } from './chrome/quoteMenu';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
-import { chromeKeepers, overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './wallpaper';
-import { playNotify } from './notify';
-import { hideRemoteOverlays, showRemoteDiff, showRemoteFile } from './remoteOverlay';
-import { reflowFloating } from './popover';
+import { chromeKeepers, overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './chrome/wallpaper';
+import { playNotify } from './chrome/notify';
+import { hideRemoteOverlays, showRemoteDiff, showRemoteFile } from './shell/remoteOverlay';
+import { reflowFloating } from './chrome/popover';
 import {
   appendWorkspaceDiff,
   applyWorkspaceFile,
@@ -24,7 +24,7 @@ import {
   applyWorkspaceSave,
   hideWorkspace,
   patchWorkspace,
-} from './workspace';
+} from './shell/workspace';
 
 bindRender(render);
 
@@ -171,10 +171,14 @@ window.addEventListener('message', (event: MessageEvent<HostMsg>) => {
 let tailPaint = 0;
 
 function applyTail(tail: StreamTail): void {
+  if (tail.queue !== undefined) {
+    ui.state.queue = tail.queue;
+  }
   const messages = ui.state.messages;
   const incoming = tail.message;
   const at = messages.findIndex((item) => item.id === incoming.id);
   if (at < 0) {
+    patchComposer();
     return;
   }
   messages[at] = mergeStreamTail(messages[at], tail);

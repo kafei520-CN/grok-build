@@ -320,7 +320,7 @@ fn invocation_for(shell: &WindowsShell, command: &str) -> ShellInvocation {
                 "-NoProfile".to_string(),
                 "-NonInteractive".to_string(),
                 "-Command".to_string(),
-                command.to_string(),
+                utf8_powershell_command(command),
             ],
             env: utf8_env.to_vec(),
         },
@@ -330,16 +330,30 @@ fn invocation_for(shell: &WindowsShell, command: &str) -> ShellInvocation {
                 "-NoProfile".to_string(),
                 "-NonInteractive".to_string(),
                 "-Command".to_string(),
-                command.to_string(),
+                utf8_powershell_command(command),
             ],
             env: utf8_env.to_vec(),
         },
         WindowsShell::Cmd => ShellInvocation {
             program: "cmd".to_string(),
-            args: vec!["/C".to_string(), command.to_string()],
+            args: vec!["/C".to_string(), utf8_cmd_command(command)],
             env: utf8_env.to_vec(),
         },
     }
+}
+
+/// Codex-style: `-NoProfile` skips UTF-8 in the user's profile, so set it here.
+#[cfg(not(unix))]
+fn utf8_powershell_command(command: &str) -> String {
+    format!(
+        "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new();$OutputEncoding=[System.Text.UTF8Encoding]::new();{command}"
+    )
+}
+
+/// Force the OEM code page to UTF-8 before the command, matching `chcp 65001`.
+#[cfg(not(unix))]
+fn utf8_cmd_command(command: &str) -> String {
+    format!("chcp 65001>nul & {command}")
 }
 
 // =============================================================================
@@ -645,6 +659,23 @@ mod tests {
         ];
         for shell in &variants {
             let inv = invocation_for(shell, "echo hi");
+            match shell {
+                WindowsShell::Cmd => {
+                    assert!(
+                        inv.args.iter().any(|arg| arg.contains("chcp 65001")),
+                        "cmd should force UTF-8 code page, got {:?}",
+                        inv.args
+                    );
+                }
+                WindowsShell::Pwsh | WindowsShell::PowerShell => {
+                    assert!(
+                        inv.args.iter().any(|arg| arg.contains("UTF8Encoding")),
+                        "PowerShell should set UTF-8 output encoding, got {:?}",
+                        inv.args
+                    );
+                }
+                WindowsShell::GitBash(_) => {}
+            }
             assert!(
                 inv.env.contains(&("PYTHONUTF8", "1")),
                 "expected PYTHONUTF8=1 in env for {shell:?}, got {:?}",
