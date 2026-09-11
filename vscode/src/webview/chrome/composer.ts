@@ -146,6 +146,7 @@ export function patchComposer(): void {
   }
   patchLiveEdits();
   patchJumpBottom();
+  syncComposerLift();
   if (input.dataset.composing !== '1') {
     autosize(input);
   }
@@ -746,6 +747,26 @@ function autosize(input: HTMLTextAreaElement): void {
   }
 }
 
+function syncComposerLift(): void {
+  const wrap = document.getElementById('composer-wrap');
+  if (!wrap) {
+    return;
+  }
+  let lift = 0;
+  for (const id of ['composer-queue', 'composer-chips', 'live-edits']) {
+    const el = document.getElementById(id);
+    if (!el || el.hidden) {
+      continue;
+    }
+    const style = getComputedStyle(el);
+    if (style.display === 'none') {
+      continue;
+    }
+    lift += el.offsetHeight + (Number.parseFloat(style.marginTop) || 0) + (Number.parseFloat(style.marginBottom) || 0);
+  }
+  wrap.style.setProperty('--composer-lift', `${Math.round(lift)}px`);
+}
+
 function composerPlaceholder(): string {
   if (ui.state.status === 'login' || ui.state.status === 'authenticating') {
     return tr('placeholderLogin');
@@ -887,6 +908,7 @@ function hideLiveEdits(el: HTMLElement): void {
     el.replaceChildren();
     liveShown = { files: 0, added: 0, removed: 0 };
     liveHideTimer = undefined;
+    syncComposerLift();
   }, 180);
 }
 

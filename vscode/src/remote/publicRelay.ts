@@ -5,6 +5,7 @@ import {
   DEFAULT_RELAY_PORT,
   RELAY_FALLBACK_PORT,
 } from './remoteDefaults';
+import { DEFAULT_MAX_FILE, DEFAULT_MAX_FRAME, HARD_MAX_FRAME, newHostKey, normalizeIp } from './relayConfig';
 import type { TunnelState } from './remoteTunnel';
 
 export {
@@ -17,7 +18,7 @@ export const BUNDLED_RELAY_TOKEN =
   'gb1.8c2e1a7b4d9f0c6e3a5b7d1f9c4e8a2b6d0f3c5e7a9b1d3f5c7e9a1b3d5f7';
 export const SLOT_COOKIE = 'grok_slot';
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
-const MAX_FRAME = 8 * 1024 * 1024;
+const MAX_FRAME = HARD_MAX_FRAME;
 const MAX_HEADER = 16 * 1024;
 const MAX_STREAMS = 64;
 const BEAT_MS = 20_000;
@@ -40,6 +41,27 @@ export function advertisedRelayUrl(host: string, port: number, slot: string): st
 export function parseRelaySlot(pathname: string): string | undefined {
   const match = /^\/s\/([A-Za-z0-9_-]{8,24})\/?$/.exec(pathname);
   return match?.[1];
+}
+
+/** Path only, including when the request line carries an absolute URL. */
+export function requestPath(url: string): string {
+  const raw = String(url ?? '').trim().split('?')[0] || '/';
+  let path = raw;
+  if (raw.includes('://')) {
+    try {
+      path = new URL(raw).pathname || '/';
+    } catch {
+      path = raw;
+    }
+  }
+  if (!path.startsWith('/')) {
+    path = `/${path}`;
+  }
+  return path.replace(/\/+$/, '') || '/';
+}
+
+export function isAdminPath(pathName: string): boolean {
+  return pathName === '/admin' || pathName.startsWith('/admin/');
 }
 
 export function encodeMux(type: number, id: number, payload = Buffer.alloc(0)): Buffer {
@@ -83,6 +105,7 @@ export interface RelayStartOpts {
   localPort: number;
   port?: number;
   token?: string;
+  official?: boolean;
 }
 
 export class PublicRelay {
@@ -113,7 +136,7 @@ export class PublicRelay {
       port: this.boundPort,
       slot: this.slot,
       publicUrl: this.publicUrl,
-      bundledRelay: true,
+      bundledRelay: this.cfg?.official !== false,
     };
   }
 
@@ -272,7 +295,7 @@ export class PublicRelay {
       try {
         const row = JSON.parse(payload.toString('utf8')) as { slot?: string; url?: string };
         this.slot = String(row.slot ?? '');
-        this.publicUrl = String(row.url ?? '') || advertisedRelayUrl(this.cfg?.host ?? '', this.boundPort, this.slot);
+        this.publicUrl = advertisedRelayUrl(this.cfg?.host ?? '', this.boundPort, this.slot);
         if (!this.slot) {
           this.fail('relay', true);
           return;
@@ -426,32 +449,146 @@ interface LocalStream {
   ready: boolean;
 }
 
-export interface PublicRelayListener {
+export interface RelayPeer {
+  slot: string;
+  pluginIp: string;
+  browsers: string[];
+  since: number;
+  kind: 'official' | 'custom';
+}
+
+export interface RelayControl {
   port: number;
+  publicHost: string;
+  maxFrameBytes: number;
+  maxFileBytes: number;
+  customKeySet: boolean;
+  peers(): RelayPeer[];
+  kick(ip?: string, slot?: string): number;
+  ban(ip: string): void;
+  unban(ip: string): void;
+  banned(): string[];
+  patchSettings(fields: {
+    publicHost?: string;
+    maxFrameBytes?: number;
+    maxFileBytes?: number;
+    hostKey?: string;
+  }): void;
+  rotateHostKey(): string;
+}
+
+export interface PublicRelayListener extends RelayControl {
   host: string;
   close(): Promise<void>;
   slots(): string[];
 }
 
+type HttpHandler = (
+  socket: Socket,
+  head: HttpHead,
+  leftover: Buffer,
+  control: RelayControl,
+) => boolean;
+
 export async function listenPublicRelay(opts: {
   port?: number;
   bind?: string;
-  token: string;
+  token?: string;
+  officialToken?: string;
+  customToken?: string;
   publicHost: string;
   advertisePort?: number;
+  maxFrameBytes?: number;
+  maxFileBytes?: number;
+  bannedIps?: string[];
+  onHttp?: HttpHandler;
 }): Promise<PublicRelayListener> {
   const bind = opts.bind ?? '0.0.0.0';
   const wanted = opts.port ?? 0;
   const hosts = new Map<string, HostSession>();
   const sockets = new Set<Socket>();
+  const banned = new Set((opts.bannedIps ?? []).map((ip) => normalizeIp(ip)).filter(Boolean));
+  const state = {
+    publicHost: opts.publicHost,
+    officialToken: opts.officialToken || BUNDLED_RELAY_TOKEN,
+    customToken: opts.customToken ?? '',
+    legacyToken: opts.token ?? '',
+    maxFrameBytes: opts.maxFrameBytes ?? DEFAULT_MAX_FRAME,
+    maxFileBytes: opts.maxFileBytes ?? DEFAULT_MAX_FILE,
+  };
+  const control: RelayControl = {
+    get port() {
+      return livePort(server, wanted);
+    },
+    get publicHost() {
+      return state.publicHost;
+    },
+    get maxFrameBytes() {
+      return state.maxFrameBytes;
+    },
+    get maxFileBytes() {
+      return state.maxFileBytes;
+    },
+    get customKeySet() {
+      return Boolean(state.customToken);
+    },
+    peers: () => [...hosts.values()].map((row) => row.peer()),
+    kick(ip, slot) {
+      let n = 0;
+      for (const row of [...hosts.values()]) {
+        if (slot && row.slot === slot) {
+          row.close();
+          n += 1;
+          continue;
+        }
+        if (ip && row.dropIp(ip)) {
+          n += 1;
+        }
+      }
+      return n;
+    },
+    ban(ip) {
+      const id = normalizeIp(ip);
+      if (!id) {
+        return;
+      }
+      banned.add(id);
+      control.kick(id);
+    },
+    unban(ip) {
+      banned.delete(normalizeIp(ip));
+    },
+    banned: () => [...banned],
+    patchSettings(fields) {
+      if (fields.publicHost?.trim()) {
+        state.publicHost = fields.publicHost.trim();
+      }
+      if (fields.maxFrameBytes) {
+        state.maxFrameBytes = fields.maxFrameBytes;
+      }
+      if (fields.maxFileBytes) {
+        state.maxFileBytes = fields.maxFileBytes;
+      }
+      if (fields.hostKey !== undefined) {
+        state.customToken = fields.hostKey;
+      }
+    },
+    rotateHostKey() {
+      const next = newHostKey();
+      state.customToken = next;
+      return next;
+    },
+  };
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on('close', () => sockets.delete(socket));
     acceptBrowser(socket, {
-      token: opts.token,
-      publicHost: opts.publicHost,
+      state,
+      banned,
       advertisePort: () => opts.advertisePort ?? livePort(server, wanted),
       hosts,
+      control,
+      onHttp: opts.onHttp,
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -460,6 +597,7 @@ export async function listenPublicRelay(opts: {
   });
   const port = livePort(server, wanted);
   return {
+    ...control,
     port,
     host: bind,
     slots: () => [...hosts.keys()],
@@ -485,12 +623,26 @@ function livePort(server: Server, fallback: number): number {
 function acceptBrowser(
   socket: Socket,
   ctx: {
-    token: string;
-    publicHost: string;
+    state: {
+      publicHost: string;
+      officialToken: string;
+      customToken: string;
+      legacyToken: string;
+      maxFrameBytes: number;
+      maxFileBytes: number;
+    };
+    banned: Set<string>;
     advertisePort: () => number;
     hosts: Map<string, HostSession>;
+    control: RelayControl;
+    onHttp?: HttpHandler;
   },
 ): void {
+  const ip = normalizeIp(socket.remoteAddress);
+  if (ip && ctx.banned.has(ip)) {
+    writeHttp(socket, 403, landingPage(false, '此 IP 已被拉黑。'));
+    return;
+  }
   let buf = Buffer.alloc(0);
   const onData = (chunk: Buffer): void => {
     buf = Buffer.concat([buf, chunk]);
@@ -504,9 +656,20 @@ function acceptBrowser(
     }
     socket.removeListener('data', onData);
     const leftover = buf.subarray(head.raw.length);
-    const pathName = head.url.split('?')[0] ?? '/';
+    const pathName = requestPath(head.url);
+    if (ctx.onHttp?.(socket, head, leftover, ctx.control)) {
+      return;
+    }
+    if (isAdminPath(pathName)) {
+      writeHttp(
+        socket,
+        404,
+        landingPage(false, '这台机器还在跑旧版中继。请用新的 grok-web 包替换 relay.js 并重启，再打开 /admin。'),
+      );
+      return;
+    }
     if (pathName === '/host' && isWsUpgrade(head.headers)) {
-      upgradeHost(socket, head, leftover, ctx);
+      upgradeHost(socket, head, leftover, ctx, ip);
       return;
     }
     const pathSlot = parseRelaySlot(pathName);
@@ -515,24 +678,19 @@ function acceptBrowser(
         writeHttp(socket, 404, landingPage(true));
         return;
       }
-      writeHttp(
-        socket,
-        302,
-        '',
-        [
-          'Location: /',
-          `Set-Cookie: ${SLOT_COOKIE}=${pathSlot}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
-        ],
-      );
+      writeHttp(socket, 302, '', [
+        'Location: /',
+        `Set-Cookie: ${SLOT_COOKIE}=${pathSlot}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`,
+      ]);
       return;
     }
     const cookieSlot = cookieValue(head.headers.cookie, SLOT_COOKIE);
     const session = cookieSlot ? ctx.hosts.get(cookieSlot) : undefined;
     if (!session) {
-      writeHttp(socket, 200, landingPage(false));
+      writeHttp(socket, 200, pathName === '/' ? homePage() : landingPage(false));
       return;
     }
-    session.splice(socket, Buffer.concat([head.raw, leftover]));
+    session.splice(socket, Buffer.concat([head.raw, leftover]), ip, ctx.state.maxFileBytes);
   };
   socket.on('data', onData);
   socket.on('error', () => socket.destroy());
@@ -543,14 +701,21 @@ function upgradeHost(
   head: HttpHead,
   leftover: Buffer,
   ctx: {
-    token: string;
-    publicHost: string;
+    state: {
+      publicHost: string;
+      officialToken: string;
+      customToken: string;
+      legacyToken: string;
+      maxFrameBytes: number;
+    };
     advertisePort: () => number;
     hosts: Map<string, HostSession>;
   },
+  pluginIp: string,
 ): void {
   const token = bearerToken(head.headers.authorization) || queryToken(head.url);
-  if (!tokensEqual(token, ctx.token)) {
+  const kind = hostKind(token, ctx.state);
+  if (!kind) {
     writeHttp(socket, 401, 'auth');
     return;
   }
@@ -565,8 +730,10 @@ function upgradeHost(
       `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
   );
   const slot = randomBytes(9).toString('base64url');
-  const url = advertisedRelayUrl(ctx.publicHost || DEFAULT_PUBLIC_HOST, ctx.advertisePort(), slot);
-  const session = new HostSession(slot, socket, () => ctx.hosts.delete(slot));
+  const url = advertisedRelayUrl(ctx.state.publicHost || DEFAULT_PUBLIC_HOST, ctx.advertisePort(), slot);
+  const session = new HostSession(slot, socket, pluginIp, kind, ctx.state.maxFrameBytes, () =>
+    ctx.hosts.delete(slot),
+  );
   ctx.hosts.set(slot, session);
   session.send(MUX_HELLO, 0, Buffer.from(JSON.stringify({ slot, url }), 'utf8'));
   if (leftover.length) {
@@ -574,16 +741,36 @@ function upgradeHost(
   }
 }
 
+function hostKind(
+  token: string,
+  state: { officialToken: string; customToken: string; legacyToken: string },
+): 'official' | 'custom' | undefined {
+  if (state.legacyToken && tokensEqual(token, state.legacyToken)) {
+    return tokensEqual(token, BUNDLED_RELAY_TOKEN) ? 'official' : 'custom';
+  }
+  if (tokensEqual(token, state.officialToken)) {
+    return 'official';
+  }
+  if (state.customToken && tokensEqual(token, state.customToken)) {
+    return 'custom';
+  }
+  return undefined;
+}
+
 class HostSession {
   private readonly ws: WsConn;
-  private readonly streams = new Map<number, Socket>();
+  private readonly streams = new Map<number, { sock: Socket; ip: string }>();
   private nextId = 0;
   private muxBuf = Buffer.alloc(0);
   private dead = false;
+  readonly since = Date.now();
 
   constructor(
     readonly slot: string,
     socket: Socket,
+    readonly pluginIp: string,
+    readonly kind: 'official' | 'custom',
+    private readonly maxFrameBytes: number,
     private readonly gone: () => void,
   ) {
     this.ws = new WsConn(socket, false);
@@ -606,12 +793,19 @@ class HostSession {
           break;
         }
         this.muxBuf = this.muxBuf.subarray(msg.consumed);
-        if (msg.type === MUX_DATA) {
-          this.streams.get(msg.id)?.write(msg.payload);
-        } else if (msg.type === MUX_CLOSE) {
-          const sock = this.streams.get(msg.id);
+        if (msg.payload.length > this.maxFrameBytes) {
+          this.send(MUX_CLOSE, msg.id);
+          const row = this.streams.get(msg.id);
           this.streams.delete(msg.id);
-          sock?.destroy();
+          row?.sock.destroy();
+          continue;
+        }
+        if (msg.type === MUX_DATA) {
+          this.streams.get(msg.id)?.sock.write(msg.payload);
+        } else if (msg.type === MUX_CLOSE) {
+          const row = this.streams.get(msg.id);
+          this.streams.delete(msg.id);
+          row?.sock.destroy();
         }
       }
     });
@@ -626,13 +820,17 @@ class HostSession {
     this.ws.push(chunk);
   }
 
-  splice(browser: Socket, first: Buffer): void {
+  splice(browser: Socket, first: Buffer, ip: string, maxFileBytes: number): void {
     if (this.streams.size >= MAX_STREAMS) {
       browser.destroy();
       return;
     }
+    if (httpBodyTooLarge(first, maxFileBytes)) {
+      writeHttp(browser, 413, landingPage(false, '文件超过服务端上限。'));
+      return;
+    }
     const id = (this.nextId += 1);
-    this.streams.set(id, browser);
+    this.streams.set(id, { sock: browser, ip });
     this.send(MUX_OPEN, id);
     if (first.length) {
       this.send(MUX_DATA, id, first);
@@ -651,13 +849,45 @@ class HostSession {
     });
   }
 
+  peer(): RelayPeer {
+    return {
+      slot: this.slot,
+      pluginIp: this.pluginIp,
+      browsers: [...new Set([...this.streams.values()].map((row) => row.ip).filter(Boolean))],
+      since: this.since,
+      kind: this.kind,
+    };
+  }
+
+  dropIp(ip: string): boolean {
+    const want = normalizeIp(ip);
+    if (!want) {
+      return false;
+    }
+    if (this.pluginIp === want) {
+      this.close();
+      return true;
+    }
+    let hit = false;
+    for (const [id, row] of [...this.streams.entries()]) {
+      if (row.ip !== want) {
+        continue;
+      }
+      hit = true;
+      this.streams.delete(id);
+      row.sock.destroy();
+      this.send(MUX_CLOSE, id);
+    }
+    return hit;
+  }
+
   close(): void {
     if (this.dead) {
       return;
     }
     this.dead = true;
-    for (const sock of this.streams.values()) {
-      sock.destroy();
+    for (const row of this.streams.values()) {
+      row.sock.destroy();
     }
     this.streams.clear();
     this.ws.close();
@@ -788,9 +1018,28 @@ function tokensEqual(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
+function httpBodyTooLarge(buf: Buffer, maxFileBytes: number): boolean {
+  const head = parseHttpHead(buf);
+  if (!head) {
+    return false;
+  }
+  const n = Number(head.headers['content-length']);
+  return Number.isFinite(n) && n > maxFileBytes;
+}
+
 function writeHttp(socket: Socket, status: number, body: string, extra: string[] = []): void {
   const reason =
-    status === 302 ? 'Found' : status === 401 ? 'Unauthorized' : status === 404 ? 'Not Found' : 'OK';
+    status === 302
+      ? 'Found'
+      : status === 401
+        ? 'Unauthorized'
+        : status === 403
+          ? 'Forbidden'
+          : status === 404
+            ? 'Not Found'
+            : status === 413
+              ? 'Payload Too Large'
+              : 'OK';
   const payload = Buffer.from(body, 'utf8');
   const headers = [
     `HTTP/1.1 ${status} ${reason}`,
@@ -804,11 +1053,28 @@ function writeHttp(socket: Socket, status: number, body: string, extra: string[]
   socket.end(Buffer.concat([Buffer.from(headers, 'utf8'), payload]));
 }
 
-function landingPage(missing: boolean): string {
+function homePage(): string {
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Grok Web</title>
+<style>
+:root{color-scheme:dark}body{margin:0;font:15px/1.45 system-ui,sans-serif;background:#111;color:#eee;display:grid;place-items:center;min-height:100dvh}
+main{width:min(440px,92vw)}h1{font-size:1.35rem;margin:0 0 10px}p{color:#9aa;margin:0 0 16px}
+a{display:inline-block;background:#3b82f6;color:#fff;text-decoration:none;border-radius:8px;padding:8px 14px}
+</style></head>
+<body><main>
+<h1>Grok Web</h1>
+<p>这是公网中转服务。管理这台服务器请打开控制面板。对话请用插件复制的地址（带 /s/…），并输入授权码。</p>
+<p><a href="/admin">打开控制面板</a></p>
+</main></body></html>`;
+}
+
+function landingPage(missing: boolean, hintOverride?: string): string {
   const title = missing ? '会话不在线' : 'Grok Build';
-  const hint = missing
-    ? '这套插件已经关掉公网，或地址已失效。请让对方重新打开「公网开放」再发一次地址。'
-    : '请使用插件里复制的公网地址打开。不要从收藏夹打开根路径。';
+  const hint =
+    hintOverride ??
+    (missing
+      ? '这套插件已经关掉公网，或地址已失效。请让对方重新打开「公网开放」再发一次地址。'
+      : '请使用插件里复制的公网地址打开，并输入授权码。');
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>${title}</title>
 <style>body{font:15px/1.45 system-ui,sans-serif;background:#111;color:#eee;display:grid;place-items:center;min-height:100dvh;margin:0}main{width:min(420px,92vw)}h1{font-size:1.25rem;margin:0 0 12px}p{color:#aaa}</style></head>
 <body><main><h1>${title}</h1><p>${hint}</p></main></body></html>`;

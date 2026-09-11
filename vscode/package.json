@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.74",
+  "version": "0.2.79",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -295,7 +295,8 @@
     "compile": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "test": "node esbuild.mjs --test && node --test dist/test/**/*.js",
-    "package": "node ./scripts/package-vsix.cjs"
+    "package": "node ./scripts/package-vsix.cjs",
+    "package:web": "node ./scripts/package-web.cjs"
   },
   "devDependencies": {
     "@shikijs/monaco": "^4.4.3",

@@ -101,6 +101,7 @@ function publicCard(localOn: boolean, publicOn: boolean): HTMLElement {
     switchRow(tr('settingsRemotePublic'), tr('settingsRemotePublicHint'), publicOn, () => {
       post({ type: 'startRemote', port: currentPort(), local: localOn, public: !publicOn });
     }),
+    relayKindBlock(remote),
   );
   if (publicOn) {
     const status = document.createElement('div');
@@ -120,6 +121,125 @@ function publicCard(localOn: boolean, publicOn: boolean): HTMLElement {
     }
   }
   return card;
+}
+
+function relayKindBlock(remote: typeof ui.state.remote): HTMLElement {
+  const kind = remote?.relayKind === 'custom' ? 'custom' : 'official';
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-row stack';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('settingsRemoteRelay');
+  const seg = document.createElement('div');
+  seg.className = 'seg settings-seg';
+  for (const [id, label] of [
+    ['official', tr('settingsRemoteRelayOfficial')],
+    ['custom', tr('settingsRemoteRelayCustom')],
+  ] as const) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    if (id === kind) {
+      btn.classList.add('on');
+    }
+    btn.addEventListener('click', () => {
+      if (id !== kind) {
+        post({ type: 'setRemoteRelay', kind: id });
+      }
+    });
+    seg.append(btn);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'settings-hint';
+  hint.textContent = tr('settingsRemoteRelayHint');
+  wrap.append(name, seg, hint);
+  wrap.append(relayHostRow(remote, kind));
+  wrap.append(relayPortRow(remote, kind));
+  if (kind === 'custom') {
+    wrap.append(customRelayFields(remote));
+  }
+  return wrap;
+}
+
+function relayHostRow(remote: typeof ui.state.remote, kind: 'official' | 'custom'): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'settings-row stack';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('settingsRemoteHost');
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'settings-field';
+  input.id = 'relay-host';
+  input.placeholder = 'IP / 域名';
+  input.spellcheck = false;
+  input.value = remote?.tunnelHost ?? '';
+  if (kind === 'official') {
+    input.addEventListener('change', () => {
+      post({ type: 'setRemoteRelay', kind, host: input.value });
+    });
+  }
+  row.append(name, input);
+  return row;
+}
+
+function relayPortRow(remote: typeof ui.state.remote, kind: 'official' | 'custom'): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'settings-row stack';
+  const name = document.createElement('div');
+  name.className = 'settings-label';
+  name.textContent = tr('settingsRemoteRelayPort');
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.className = 'settings-field';
+  input.id = 'relay-port';
+  input.min = '1';
+  input.max = '65535';
+  input.value = String(remote?.relayPort || 8788);
+  if (kind === 'official') {
+    input.addEventListener('change', () => {
+      post({ type: 'setRemoteRelay', kind, port: Number(input.value) });
+    });
+  }
+  const hint = document.createElement('div');
+  hint.className = 'settings-hint';
+  hint.textContent = tr('settingsRemoteRelayPortHint');
+  row.append(name, input, hint);
+  return row;
+}
+
+function customRelayFields(remote: typeof ui.state.remote): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'settings-row stack';
+  const keyName = document.createElement('div');
+  keyName.className = 'settings-label';
+  keyName.textContent = tr('settingsRemoteRelayKey');
+  const key = document.createElement('input');
+  key.type = 'password';
+  key.className = 'settings-field';
+  key.autocomplete = 'off';
+  key.spellcheck = false;
+  key.placeholder = remote?.hasRelayKey ? '••••••••' : 'gb1.…';
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'btn';
+  save.textContent = tr('settingsRemoteCustomSave');
+  save.addEventListener('click', () => {
+    const host = (document.getElementById('relay-host') as HTMLInputElement | null)?.value ?? '';
+    const port = Number((document.getElementById('relay-port') as HTMLInputElement | null)?.value);
+    post({
+      type: 'setRemoteRelay',
+      kind: 'custom',
+      host,
+      port: Number.isFinite(port) ? port : undefined,
+      key: key.value,
+    });
+  });
+  const help = document.createElement('div');
+  help.className = 'settings-hint';
+  help.textContent = tr('settingsRemoteRelayKeyHint');
+  box.append(keyName, key, save, help);
+  return box;
 }
 
 function tunnelStatus(
@@ -146,6 +266,8 @@ function tunnelStatus(
       return tr('settingsRemoteTunnelErrReject');
     case 'relay':
       return tr('settingsRemoteTunnelErrRelay');
+    case 'need-key':
+      return tr('settingsRemoteTunnelErrNeedKey');
     case 'network':
       return tr('settingsRemoteTunnelErrNetwork');
     case 'missing':

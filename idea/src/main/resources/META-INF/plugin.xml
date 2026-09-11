@@ -12,7 +12,12 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.74: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.79: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.79 — Custom relay save keeps IP/domain and key. Share URL uses the host you entered (domain allowed). Official needs no key.</p>
+<p>0.2.78 — Official public relay host is editable (no SSH). Lost admin passwords reset with --reset-admin. Root URL is a Grok Web home that links to /admin.</p>
+<p>0.2.77 — Grok Web listen port is configurable (default 8788, not 80). /admin is the control panel, not the pairing landing page. Official plugins try 8788 then 80.</p>
+<p>0.2.76 — Grok Web public relay has an admin panel (file size limits, kick/ban IPs). The plugin can pick the official relay (no key) or a custom Grok Web host (needs that server’s key).</p>
+<p>0.2.75 — The queue strip is hidden until a prompt is actually queued. Jump-to-latest and the live-edit bar move up so the queue does not cover them.</p>
 <p>0.2.74 — Repository URL is github.com/kafei520-CN/grok-build. Queued prompts show as a list while a turn runs. Plan/todo steps update in place. Source files are grouped by feature.</p>
 <p>0.2.73 — Windows shells force UTF-8 like Codex. Workspace explorer drops attach to chat. Toggling official models no longer 401s or requires an Agent restart.</p>
 <p>0.2.72 — Official grok.com models appear in API manager with the same on/off switch. Turning one off hides it from the model picker; official models cannot be deleted.</p>

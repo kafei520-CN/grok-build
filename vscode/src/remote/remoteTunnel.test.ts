@@ -49,6 +49,8 @@ describe('reverse tunnel helpers', () => {
   it('sanitizes host, user, and ssh port', () => {
     assert.equal(sanitizeTunnelHost('vps.example.com'), 'vps.example.com');
     assert.equal(sanitizeTunnelHost('10.0.0.8'), '10.0.0.8');
+    assert.equal(sanitizeTunnelHost('https://vps.example.com:8788/admin'), 'vps.example.com');
+    assert.equal(sanitizeTunnelHost('vps.example.com:8788'), 'vps.example.com');
     assert.equal(sanitizeTunnelHost('10.0.0.8; rm -rf /'), '');
     assert.equal(sanitizeTunnelUser('ubuntu'), 'ubuntu');
     assert.equal(sanitizeTunnelUser('root;id'), 'root');

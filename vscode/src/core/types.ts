@@ -559,6 +559,9 @@ export interface RemoteAccessInfo {
   forwardPort?: number;
   sshPublicKey?: string;
   bundledRelay?: boolean;
+  relayKind?: 'official' | 'custom';
+  relayPort?: number;
+  hasRelayKey?: boolean;
 }
 
 export interface AuthMethodWire {
@@ -735,6 +738,13 @@ export type WebviewToHost =
   | { type: 'rotateRemoteCode' }
   | { type: 'setRemoteAuth'; mode?: 'random' | 'custom'; secret?: string }
   | { type: 'setRemotePublicUrl'; url: string }
+  | {
+      type: 'setRemoteRelay';
+      kind?: 'official' | 'custom';
+      host?: string;
+      port?: number;
+      key?: string;
+    }
   | {
       type: 'setRemoteTunnel';
       host?: string;

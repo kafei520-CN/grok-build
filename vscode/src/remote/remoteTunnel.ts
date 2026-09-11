@@ -50,7 +50,22 @@ const BAD_HOST = /could not resolve hostname|name or service not known/i;
 const BAD_STRICT = /bad configuration option.*stricthostkeychecking|invalid strict host key/i;
 
 export function sanitizeTunnelHost(raw: unknown): string {
-  const text = String(raw ?? '').trim();
+  let text = String(raw ?? '').trim();
+  if (!text) {
+    return '';
+  }
+  try {
+    if (/^https?:\/\//i.test(text)) {
+      text = new URL(text).hostname;
+    } else {
+      text = (text.split('/')[0] ?? text).trim();
+      if (!text.startsWith('[')) {
+        text = text.split(':')[0] ?? text;
+      }
+    }
+  } catch {
+    return '';
+  }
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(text) || /^[A-Za-z0-9.-]+$/.test(text)) {
     return text;
   }

@@ -236,6 +236,14 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'setRemotePublicUrl':
       await controller.setRemotePublicUrl(message.url);
       return;
+    case 'setRemoteRelay':
+      controller.setRemoteRelay({
+        kind: message.kind,
+        host: message.host,
+        port: message.port,
+        key: message.key,
+      });
+      return;
     case 'setRemoteTunnel':
       await controller.setRemoteTunnel({
         host: message.host,
