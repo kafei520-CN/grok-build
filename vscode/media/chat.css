@@ -177,6 +177,27 @@ textarea:focus-visible {
   filter: drop-shadow(0 0 6px var(--ice-dim));
 }
 
+.brand .rtt {
+  margin-left: 2px;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.brand .rtt.ok {
+  color: var(--ok);
+}
+
+.brand .rtt.slow {
+  color: var(--warn);
+}
+
+.brand .rtt.bad {
+  color: var(--error);
+}
+
 .brand .mark.pulse,
 .work.live > summary .mark,
 .pulse .mark {

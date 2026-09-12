@@ -87,6 +87,8 @@ describe('remote gateway http', () => {
     const live = gw.info();
     const actualPort = new URL(live.urls[0] ?? `http://127.0.0.1:${port}`).port;
     const base = `http://127.0.0.1:${actualPort}`;
+    const ping = await fetch(`${base}/ping`, { method: 'HEAD' });
+    assert.equal(ping.status, 204);
     const bad = await fetch(`${base}/pair`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },

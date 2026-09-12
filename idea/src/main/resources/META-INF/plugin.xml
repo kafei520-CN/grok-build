@@ -12,7 +12,10 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[Grok Build By Kafei 0.2.80: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[Grok Build By Kafei 0.2.83: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.83 — Official public relay host is 103.118.255.198:8788.</p>
+<p>0.2.82 — Public web chat shows round-trip latency next to Grok in the header.</p>
+<p>0.2.81 — Official public relay host is 216.167.125.202:8788.</p>
 <p>0.2.80 — Official relay has no extra fields. Custom port is optional (default 8788). Grok Web default public host is 127.0.0.1.</p>
 <p>0.2.79 — Custom relay save keeps IP/domain and key. Share URL uses the host you entered (domain allowed). Official needs no key.</p>
 <p>0.2.78 — Official public relay host is editable (no SSH). Lost admin passwords reset with --reset-admin. Root URL is a Grok Web home that links to /admin.</p>

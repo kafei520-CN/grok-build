@@ -47,6 +47,60 @@ export function patchHeader(parent: HTMLElement): void {
     }
   }
   syncMoreMenu(el);
+  if (isRemoteWeb()) {
+    ensureRttLoop();
+  }
+}
+
+function rttBadge(): HTMLElement {
+  const el = document.createElement('span');
+  el.className = 'rtt';
+  el.id = 'conn-rtt';
+  el.title = tr('connRttHint');
+  el.textContent = '—';
+  return el;
+}
+
+let rttTimer: number | undefined;
+let rttBusy = false;
+
+function ensureRttLoop(): void {
+  if (rttTimer !== undefined) {
+    return;
+  }
+  void tickRtt();
+  rttTimer = window.setInterval(() => {
+    void tickRtt();
+  }, 4000);
+}
+
+async function tickRtt(): Promise<void> {
+  if (rttBusy || document.hidden) {
+    return;
+  }
+  const el = document.getElementById('conn-rtt');
+  if (!el) {
+    return;
+  }
+  rttBusy = true;
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/ping', { method: 'HEAD', cache: 'no-store' });
+    const ms = Math.max(0, Math.round(performance.now() - t0));
+    if (!res.ok && res.status !== 204) {
+      throw new Error('ping');
+    }
+    el.textContent = `${ms}ms`;
+    el.classList.toggle('ok', ms < 120);
+    el.classList.toggle('slow', ms >= 120 && ms < 320);
+    el.classList.toggle('bad', ms >= 320);
+  } catch {
+    el.textContent = '—';
+    el.classList.remove('ok', 'slow');
+    el.classList.add('bad');
+  } finally {
+    rttBusy = false;
+  }
 }
 
 export function renderHeader(): HTMLElement {
@@ -60,6 +114,10 @@ export function renderHeader(): HTMLElement {
   const name = document.createElement('span');
   name.textContent = tr('grok');
   brand.append(mark, name);
+  if (isRemoteWeb()) {
+    brand.append(rttBadge());
+    ensureRttLoop();
+  }
   const actions = document.createElement('div');
   actions.className = 'header-actions';
   const sessions = iconButton(tr('sessions'), iconClock(), () =>

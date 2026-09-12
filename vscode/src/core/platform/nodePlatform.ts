@@ -34,8 +34,11 @@ export class NodePlatform implements Platform {
   ) {
     const dir = path.join(os.homedir(), '.grok');
     fs.mkdirSync(dir, { recursive: true });
-    this.settingsFile = path.join(dir, 'idea-settings.json');
-    this.stateFile = path.join(dir, 'idea-ui.json');
+    this.settingsFile =
+      process.env['GROK_SETTINGS_FILE']?.trim() || path.join(dir, 'idea-settings.json');
+    this.stateFile = process.env['GROK_STATE_FILE']?.trim() || path.join(dir, 'idea-ui.json');
+    fs.mkdirSync(path.dirname(this.settingsFile), { recursive: true });
+    fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
     void this.refreshChrome();
   }
 

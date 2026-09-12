@@ -404,6 +404,11 @@ export class RemoteGateway {
 
   private async http(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/ping') {
+      res.writeHead(204, { 'cache-control': 'no-store' });
+      res.end();
+      return;
+    }
     if (req.method === 'POST' && url.pathname === '/pair') {
       this.pair(req, res);
       return;

@@ -1,5 +1,5 @@
 /** Built-in public relay. Users can replace these in Settings. */
-export const DEFAULT_PUBLIC_HOST = '189.24.78.197';
+export const DEFAULT_PUBLIC_HOST = '103.118.255.198';
 export const DEFAULT_PUBLIC_USER = 'root';
 export const DEFAULT_SSH_PORT = 22;
 /** HTTP port the built-in WebSocket relay listens on. 80 is the fallback. */
