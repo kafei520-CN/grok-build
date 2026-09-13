@@ -70,6 +70,24 @@ function onHostMessage(data: HostMsg | null | undefined): void {
     } else if (resolved.live) {
       incoming.restoringSession = false;
     }
+    if (incoming.currentSessionId !== ui.state.currentSessionId) {
+      ui.chosenModelId = undefined;
+      ui.chosenEffort = undefined;
+    }
+    if (
+      ui.chosenModelId &&
+      incoming.models?.available.some((model) => model.id === ui.chosenModelId)
+    ) {
+      incoming.models = {
+        ...incoming.models,
+        currentId: ui.chosenModelId,
+        available: incoming.models.available.map((model) =>
+          model.id === ui.chosenModelId && ui.chosenEffort
+            ? { ...model, currentEffort: ui.chosenEffort }
+            : model,
+        ),
+      };
+    }
     ui.state = incoming;
     persistUi();
     const cue = ui.state.notify;

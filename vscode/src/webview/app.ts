@@ -89,6 +89,8 @@ export const ui = {
   wsFolderOpen: new Set<string>(),
   wsNavPx: readPx(vscode.getState(), 'wsNavPx', 220),
   wsChatPx: readPx(vscode.getState(), 'wsChatPx', 360),
+  chosenModelId: undefined as string | undefined,
+  chosenEffort: undefined as string | undefined,
 };
 
 export function loc(): UiLocale {
