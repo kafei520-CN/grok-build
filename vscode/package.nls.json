@@ -1,5 +1,5 @@
 {
-  "displayName": "Grok For VS Code By Kafei",
+  "displayName": "OpenGrok Plugins",
   "description": "Grok Build coding agent for VS Code. Sign in with your browser, then chat, edit, and run tools in the sidebar.",
   "command.openChat": "Open Chat",
   "command.newSession": "New Session",
@@ -19,8 +19,8 @@
   "command.forkSession": "Fork Session",
   "command.exportSession": "Export Conversation",
   "command.usage": "Usage",
-  "view.container": "Grok For VS Code By Kafei",
-  "view.chat": "Grok For VS Code By Kafei",
+  "view.container": "OpenGrok Plugins",
+  "view.chat": "OpenGrok Plugins",
   "config.title": "Grok Build",
   "config.cliPath": "Absolute path to the grok binary. Empty means auto-detect (PATH, then ~/.grok/bin).",
   "config.preferWorkspaceBinary": "When this repo has been built, prefer target/release/xai-grok-pager over the installed grok CLI.",

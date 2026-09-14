@@ -1,4 +1,4 @@
-# Grok For VS Code By Kafei
+# OpenGrok Plugins
 
 Sidebar client for the Grok Build CLI. It speaks ACP (`grok agent stdio`) and
 signs you in through the same browser OAuth flow as `grok login`.
@@ -15,9 +15,9 @@ Publisher: `kafei520cn` · Extension: `kafei520cn.grok-for-vs-code`
 
    macOS / Linux: `curl -fsSL https://x.ai/cli/install.sh | bash`
 
-2. Install **Grok For VS Code By Kafei** from the VS Code Marketplace, or
+2. Install **OpenGrok Plugins** from the VS Code Marketplace, or
    `npm run package` then Install from VSIX.
-3. Open **Grok For VS Code By Kafei** in the activity bar, or press
+3. Open **OpenGrok Plugins** in the activity bar, or press
    `Ctrl+;` / `Cmd+;`.
 4. Click **Sign in with Grok**. VS Code opens `auth.x.ai`. After the browser
    round-trip, chat in the sidebar.
@@ -44,9 +44,9 @@ grok CLI，登录流程与 `grok login` 相同：用浏览器打开 `auth.x.ai` 
 
    macOS / Linux：`curl -fsSL https://x.ai/cli/install.sh | bash`
 
-2. 从 VS Code 扩展市场安装 **Grok For VS Code By Kafei**，或本地
+2. 从 VS Code 扩展市场安装 **OpenGrok Plugins**，或本地
    `npm run package` 后选择“从 VSIX 安装”。
-3. 在活动栏打开 **Grok For VS Code By Kafei**，或按 `Ctrl+;` / `Cmd+;`。
+3. 在活动栏打开 **OpenGrok Plugins**，或按 `Ctrl+;` / `Cmd+;`。
 4. 点击 **使用 Grok 登录**。VS Code 会打开 `auth.x.ai`，浏览器登录完成后即可
    在侧边栏对话。
 

@@ -1,4 +1,4 @@
-# Grok For VS Code By Kafei
+# OpenGrok Plugins
 
 面向 VS Code 的 Grok Build 编程助手。通过 ACP（`grok agent stdio`）连接本机
 grok CLI，登录流程与 `grok login` 相同：用浏览器打开 `auth.x.ai` 即可。
@@ -15,9 +15,9 @@ grok CLI，登录流程与 `grok login` 相同：用浏览器打开 `auth.x.ai` 
 
    macOS / Linux：`curl -fsSL https://x.ai/cli/install.sh | bash`
 
-2. 从 VS Code 扩展市场安装 **Grok For VS Code By Kafei**，或本地
+2. 从 VS Code 扩展市场安装 **OpenGrok Plugins**，或本地
    `npm run package` 后选择“从 VSIX 安装”。
-3. 在活动栏打开 **Grok For VS Code By Kafei**，或按 `Ctrl+;` / `Cmd+;`。
+3. 在活动栏打开 **OpenGrok Plugins**，或按 `Ctrl+;` / `Cmd+;`。
 4. 点击 **使用 Grok 登录**。VS Code 会打开 `auth.x.ai`，浏览器登录完成后即可
    在侧边栏对话。
 

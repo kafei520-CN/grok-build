@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.84",
+  "version": "0.2.85",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -185,7 +185,7 @@
         {
           "id": "grok",
           "title": "%view.container%",
-          "icon": "media/icon.svg"
+          "icon": "resources/icon.png"
         }
       ]
     },
@@ -195,7 +195,7 @@
           "type": "webview",
           "id": "grok.chat",
           "name": "%view.chat%",
-          "icon": "media/icon.svg"
+          "icon": "resources/icon.png"
         }
       ]
     },

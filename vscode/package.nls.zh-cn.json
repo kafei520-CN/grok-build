@@ -1,5 +1,5 @@
 {
-  "displayName": "Grok For VS Code By Kafei",
+  "displayName": "OpenGrok Plugins",
   "description": "Grok Build 的 VS Code 编程助手。浏览器登录后，在侧边栏对话、改文件、运行工具，用法与 grok CLI 一致。",
   "command.openChat": "打开聊天",
   "command.newSession": "新会话",
@@ -19,8 +19,8 @@
   "command.forkSession": "分叉会话",
   "command.exportSession": "导出对话",
   "command.usage": "用量",
-  "view.container": "Grok For VS Code By Kafei",
-  "view.chat": "Grok For VS Code By Kafei",
+  "view.container": "OpenGrok Plugins",
+  "view.chat": "OpenGrok Plugins",
   "config.title": "Grok Build",
   "config.cliPath": "grok 可执行文件的绝对路径。留空则自动检测（PATH，然后 ~/.grok/bin）。",
   "config.preferWorkspaceBinary": "当本仓库已编译时，优先使用 target/release/xai-grok-pager，而不是已安装的 grok CLI。",
