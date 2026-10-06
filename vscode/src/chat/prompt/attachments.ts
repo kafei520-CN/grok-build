@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { clipboardToPath, splitClipboardPaths } from './clipboard';
 import { isImagePath, looksLikeImage, mimeFromImagePath } from '../../agent/clientHandlers';
 import { plat } from '../../core/platform';
-import type { Attachment } from '../../core/types';
+import type { Attachment, ChatMessage, MediaItem, MessageFile, QueuedPrompt } from '../../core/types';
 
 /** Inline file text above this size is dropped; the chip stays path-only. */
 export const ATTACH_TEXT_MAX = 256_000;
@@ -63,6 +63,112 @@ export function addActiveFile(host: AttachmentHost): void {
   plat().focusChat();
 }
 
+export function packUserMedia(attachments: Attachment[]): {
+  images?: MediaItem[];
+  files?: MessageFile[];
+} {
+  const images = attachments
+    .filter((item) => item.data && item.mimeType?.startsWith('image/'))
+    .map((item) => ({
+      mimeType: item.mimeType ?? 'image/png',
+      data: item.data,
+    }));
+  const files = attachments
+    .filter((item) => !(item.data && item.mimeType?.startsWith('image/')))
+    .map((item) => ({
+      label: item.label,
+      path: item.path,
+      mimeType: item.mimeType,
+      folder: item.folder,
+    }));
+  return {
+    images: images.length ? images : undefined,
+    files: files.length ? files : undefined,
+  };
+}
+
+export function makeQueuedPrompt(text: string, attachments: Attachment[], id: string): QueuedPrompt {
+  return {
+    id,
+    text,
+    attachments: attachments.map((item) => ({ ...item })),
+  };
+}
+
+const USER_MEDIA_KEY = 'session.userMedia';
+const USER_MEDIA_IMAGE_MAX = 1_500_000;
+
+type UserMediaStamp = { text: string; files?: MessageFile[]; images?: MediaItem[] };
+
+export function applyStoredUserMedia(messages: ChatMessage[], stamps: UserMediaStamp[] | undefined): void {
+  if (!stamps?.length) {
+    return;
+  }
+  const unused = [...stamps];
+  for (const message of messages) {
+    if (message.role !== 'user' || message.files?.length || message.images?.length) {
+      continue;
+    }
+    const matched = unused.findIndex((stamp) => stamp.text === message.text);
+    if (matched < 0) {
+      continue;
+    }
+    const stamp = unused.splice(matched, 1)[0];
+    if (stamp?.files?.length) {
+      message.files = stamp.files.map((file) => ({ ...file }));
+    }
+    if (stamp?.images?.length) {
+      message.images = stamp.images.map((image) => ({ ...image }));
+    }
+  }
+}
+
+export function readStoredUserMedia(sessionId: string | undefined): UserMediaStamp[] {
+  if (!sessionId) {
+    return [];
+  }
+  const store = plat().getState<Record<string, UserMediaStamp[]>>(USER_MEDIA_KEY, {});
+  return store[sessionId] ?? [];
+}
+
+export async function persistUserMedia(sessionId: string | undefined, messages: ChatMessage[]): Promise<void> {
+  if (!sessionId) {
+    return;
+  }
+  const budget = { left: USER_MEDIA_IMAGE_MAX };
+  const stamps = messages
+    .filter((message) => message.role === 'user')
+    .map((message) => {
+      const stamp: UserMediaStamp = { text: message.text };
+      if (message.files?.length) {
+        stamp.files = message.files.map((file) => ({ ...file }));
+      }
+      if (message.images?.length) {
+        const images: MediaItem[] = [];
+        for (const image of message.images) {
+          const size = image.data?.length ?? 0;
+          if (size > budget.left) {
+            break;
+          }
+          budget.left -= size;
+          images.push({ ...image });
+        }
+        if (images.length) {
+          stamp.images = images;
+        }
+      }
+      return stamp;
+    })
+    .filter((stamp) => Boolean(stamp.files?.length || stamp.images?.length));
+  const store = { ...plat().getState<Record<string, UserMediaStamp[]>>(USER_MEDIA_KEY, {}) };
+  if (!stamps.length) {
+    delete store[sessionId];
+  } else {
+    store[sessionId] = stamps;
+  }
+  await plat().setState(USER_MEDIA_KEY, store);
+}
+
 export function removeAttachment(host: AttachmentHost, id: string): void {
   host.attachments = host.attachments.filter((item) => item.id !== id);
   host.emit();
@@ -87,16 +193,21 @@ export async function attachPath(host: AttachmentHost, filePath: string): Promis
   let data: string | undefined;
   try {
     const bytes = await plat().readFile(filePath);
-    if (isImagePath(filePath) || looksLikeImage(bytes)) {
+    if (isPdfPath(filePath) || looksLikePdf(bytes)) {
+      mimeType = 'application/pdf';
+    } else if ((isImagePath(filePath) && !isPdfPath(filePath)) || looksLikeImage(bytes)) {
       mimeType = mimeFromImagePath(filePath) ?? mimeFromMagic(bytes) ?? 'image/png';
       if (bytes.byteLength <= IMAGE_ATTACH_MAX) {
         data = Buffer.from(bytes).toString('base64');
       }
-    } else if (bytes.byteLength < ATTACH_TEXT_MAX) {
+    } else if (bytes.byteLength < ATTACH_TEXT_MAX && isUtf8Payload(bytes)) {
       text = Buffer.from(bytes).toString('utf8');
+    } else {
+      mimeType = mimeFromFileName(filePath);
     }
   } catch {
-    /* path-only chip */
+    /* folder or unreadable path — keep a path-only chip */
+    mimeType = mimeFromFileName(filePath);
   }
   host.attachments = [
     ...host.attachments.filter((item) => item.id !== filePath),
@@ -111,6 +222,34 @@ export async function attachPath(host: AttachmentHost, filePath: string): Promis
   ];
   host.fileHits = undefined;
   host.emit();
+}
+
+function isPdfPath(filePath: string): boolean {
+  return path.extname(filePath).replace(/^\./, '').toLowerCase() === 'pdf';
+}
+
+function looksLikePdf(bytes: Uint8Array): boolean {
+  return bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+}
+
+function isUtf8Payload(bytes: Uint8Array): boolean {
+  if (bytes.includes(0)) {
+    return false;
+  }
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function mimeFromFileName(filePath: string): string | undefined {
+  const ext = path.extname(filePath).replace(/^\./, '').toLowerCase();
+  if (ext === 'pdf') {
+    return 'application/pdf';
+  }
+  return undefined;
 }
 
 function mimeFromMagic(bytes: Uint8Array): string | undefined {
@@ -141,7 +280,7 @@ export async function pasteClipboard(
     text?: string;
     uris?: string[];
     images?: Array<{ name: string; mimeType: string; data: string }>;
-    files?: Array<{ name: string; mimeType?: string; text?: string }>;
+    files?: Array<{ name: string; mimeType?: string; text?: string; data?: string }>;
   },
 ): Promise<void> {
   for (const image of payload.images ?? []) {
@@ -158,18 +297,17 @@ export async function pasteClipboard(
     );
   }
   for (const file of payload.files ?? []) {
+    const name = file.name.trim() || 'file';
     const text = file.text;
-    if (!text) {
-      continue;
-    }
-    const name = file.name.trim() || 'file.txt';
     upsert(
       host,
       {
         id: `upload:${Date.now()}:${name}:${host.attachments.length}`,
         label: name,
-        mimeType: file.mimeType,
-        text: Buffer.byteLength(text, 'utf8') < ATTACH_TEXT_MAX ? text : undefined,
+        mimeType: file.mimeType ?? mimeFromFileName(name),
+        text:
+          text && Buffer.byteLength(text, 'utf8') < ATTACH_TEXT_MAX ? text : undefined,
+        data: file.data,
       },
       false,
     );

@@ -10,8 +10,10 @@ import { scrollTranscript } from '../transcript';
 import { iconButton } from '../dom';
 import { pickRemoteFiles, sendBrowserFiles } from './drop';
 import { bindHoverPin, findPinned, pinFloating, releaseByClass } from './popover';
-import { iconChevron, iconClose, iconDown, iconPlus, iconStar, iconStop } from '../icons';
+import { iconChevron, iconClose, iconDown, iconExpand, iconPause, iconPlay, iconPlus, iconSendNow, iconStar, iconStop, iconTarget, iconTrash } from '../icons';
+import { formatGoalChip, goalElapsedMs, truncateGoal } from '../../chat/goal';
 import { escapeHtml } from '../transcript/markdown';
+import { fileLinkHtml } from '../transcript/fileLinks';
 
 const FALLBACK_EFFORTS = ['low', 'medium', 'high', 'xhigh'];
 
@@ -46,13 +48,7 @@ export function mountComposer(parent: HTMLElement): void {
   const bar = document.createElement('div');
   bar.id = 'composer-bar';
   bar.className = 'composer-bar';
-  const jump = document.createElement('button');
-  jump.type = 'button';
-  jump.id = 'jump-bottom';
-  jump.className = 'jump-bottom';
-  jump.hidden = true;
-  jump.addEventListener('click', jumpToLatest);
-  card.append(input, bar, jump);
+  card.append(input, bar);
   footer.append(queue, chips, menuBox, live, card);
   parent.append(footer);
   ui.composer = input;
@@ -92,13 +88,16 @@ export function patchComposer(): void {
     releaseByClass('ctx-tip');
     pendingEffortModel = undefined;
   }
+  if (!slashCommandsEnabled() && ui.menu === 'slash') {
+    ui.menu = undefined;
+  }
   const menuSlot = document.getElementById('composer-menu-slot');
-  const nextMenuKey = `${ui.menu ?? ''}:${ui.draft}:${(ui.state.fileHits ?? []).length}`;
+  const nextMenuKey = `${ui.menu ?? ''}:${ui.draft}:${(ui.state.fileHits ?? []).length}:${slashCommandsEnabled() ? '1' : '0'}`;
   if (menuSlot && nextMenuKey !== menuKey) {
     menuKey = nextMenuKey;
     menuSlot.replaceChildren();
     releaseByClass('menu');
-    if (!isBooting() && !ui.state.settingsOpen && ui.menu === 'slash') {
+    if (!isBooting() && !ui.state.settingsOpen && ui.menu === 'slash' && slashCommandsEnabled()) {
       pinFloating(slashMenu(), input, { prefer: 'above', align: 'start' });
     } else if (!isBooting() && !ui.state.settingsOpen && ui.menu === 'files') {
       pinFloating(fileMenu(), input, { prefer: 'above', align: 'start' });
@@ -126,7 +125,11 @@ export function patchComposer(): void {
       autosize(input);
     }
     input.focus();
-    input.setSelectionRange(ui.draft.length, ui.draft.length);
+    if (ui.editingGoal) {
+      input.setSelectionRange(0, ui.draft.length);
+    } else {
+      input.setSelectionRange(ui.draft.length, ui.draft.length);
+    }
   } else if (focused || composing) {
     ui.draft = input.value;
   } else if (input.value !== ui.draft) {
@@ -170,7 +173,7 @@ function bindComposerInput(input: HTMLTextAreaElement): void {
     ui.draft = input.value;
     autosize(input);
     const last = ui.draft.split(/\s+/).pop() ?? '';
-    if (last.startsWith('/')) {
+    if (last.startsWith('/') && slashCommandsEnabled()) {
       ui.menu = 'slash';
       ui.picker = undefined;
       render();
@@ -193,6 +196,16 @@ function bindComposerInput(input: HTMLTextAreaElement): void {
   });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
+      if (ui.editingGoal) {
+        event.preventDefault();
+        event.stopPropagation();
+        ui.editingGoal = false;
+        ui.draft = '';
+        input.value = '';
+        autosize(input);
+        render();
+        return;
+      }
       if (ui.lightboxSrc || ui.menu || ui.picker) {
         event.preventDefault();
         event.stopPropagation();
@@ -223,10 +236,11 @@ function fillComposerBar(bar: HTMLElement, input: HTMLTextAreaElement): void {
   });
   const send = document.createElement('button');
   send.type = 'button';
-  send.className = ui.state.status === 'streaming' ? 'send-fab stop' : 'send-fab';
-  send.title = ui.state.status === 'streaming' ? tr('stop') : tr('send');
-  send.disabled = ui.state.status === 'streaming' ? false : !canSend();
-  if (ui.state.status === 'streaming') {
+  const stopping = ui.state.status === 'streaming' && !ui.editingGoal;
+  send.className = stopping ? 'send-fab stop' : 'send-fab';
+  send.title = stopping ? tr('stop') : tr('send');
+  send.disabled = stopping ? false : !canSend();
+  if (stopping) {
     send.innerHTML = iconStop();
     send.addEventListener('click', () => post({ type: 'cancel' }));
   } else {
@@ -245,6 +259,9 @@ function composerBarKey(): string {
   return [
     ui.state.status,
     ui.state.modeId ?? '',
+    ui.state.goal?.status ?? '',
+    ui.state.goal?.text ?? '',
+    ui.editingGoal ? 'edit' : '',
     currentId ?? '',
     effort,
     current?.efforts?.join(',') ?? '',
@@ -393,7 +410,10 @@ function currentModelLabel(): string {
 
 function currentModeId(): string {
   const current = ui.state.modeId ?? 'default';
-  return current === 'ask' || current === 'plan' ? current : 'default';
+  if (current === 'ask' || current === 'plan' || current === 'goal') {
+    return current;
+  }
+  return 'default';
 }
 
 function currentModeLabel(): string {
@@ -403,6 +423,9 @@ function currentModeLabel(): string {
   }
   if (id === 'plan') {
     return tr('modePlan');
+  }
+  if (id === 'goal') {
+    return tr('modeGoal');
   }
   return tr('modeAgent');
 }
@@ -454,6 +477,7 @@ function modePicker(): HTMLElement {
       { id: 'ask', label: tr('modeAsk'), selected: current === 'ask' },
       { id: 'plan', label: tr('modePlan'), selected: current === 'plan' },
       { id: 'default', label: tr('modeAgent'), selected: current === 'default' },
+      { id: 'goal', label: tr('modeGoal'), selected: current === 'goal' },
     ],
     onPick: (id) => post({ type: 'setMode', modeId: id }),
   });
@@ -624,12 +648,15 @@ function pickerMenu(
   return list;
 }
 
+function slashCommandsEnabled(): boolean {
+  return ui.state.settings?.useTerminal !== false;
+}
+
 function slashMenu(): HTMLElement {
   const query = (ui.draft.split(/\s+/).pop() ?? '').replace(/^\//, '');
-  const hits = filterCommands(
-    ui.state.commands.length ? ui.state.commands : FALLBACK_COMMANDS,
-    query,
-  );
+  const hits = slashCommandsEnabled()
+    ? filterCommands(ui.state.commands.length ? ui.state.commands : FALLBACK_COMMANDS, query)
+    : [];
   const el = document.createElement('div');
   el.className = 'menu';
   el.addEventListener('click', (event) => event.stopPropagation());
@@ -704,11 +731,107 @@ function handlePaste(event: ClipboardEvent): void {
   void sendBrowserFiles(files, { text, uris });
 }
 
+let goalClock: ReturnType<typeof setInterval> | undefined;
+
+function stopGoalClock(): void {
+  if (goalClock) {
+    clearInterval(goalClock);
+    goalClock = undefined;
+  }
+}
+
+function patchGoalBar(el: HTMLElement): void {
+  const goal = ui.state.goal;
+  if (!goal) {
+    return;
+  }
+  el.hidden = false;
+  el.classList.add('goal-bar');
+  el.classList.remove('queue');
+  el.classList.toggle('is-paused', goal.status === 'paused');
+  const clock = formatGoalChip(goalElapsedMs(goal));
+  const title = truncateGoal(goal.text, 28);
+  const label = goal.status === 'paused' ? tr('goalBarPaused') : tr('goalBarRunning');
+  const key = `${goal.status}:${goal.text}:${goal.startedAt}:${goal.elapsedMs}:${ui.editingGoal ? '1' : '0'}`;
+  if (el.dataset.g !== key) {
+    el.dataset.g = key;
+    el.dataset.q = '';
+    el.replaceChildren();
+    const mark = document.createElement('span');
+    mark.className = 'goal-icon';
+    mark.innerHTML = iconTarget();
+    const copy = document.createElement('span');
+    copy.className = 'goal-copy';
+    copy.title = goal.text;
+    const labelEl = document.createElement('span');
+    labelEl.className = 'goal-label';
+    labelEl.textContent = label;
+    const textEl = document.createElement('span');
+    textEl.className = 'goal-text';
+    textEl.textContent = title;
+    const meta = document.createElement('span');
+    meta.className = 'goal-meta';
+    const dot = document.createElement('span');
+    dot.className = 'goal-dot';
+    dot.textContent = '•';
+    const timeEl = document.createElement('span');
+    timeEl.className = 'goal-time';
+    timeEl.textContent = clock;
+    meta.append(dot, timeEl);
+    copy.append(labelEl, textEl, meta);
+    const acts = document.createElement('div');
+    acts.className = 'goal-acts';
+    const trash = iconButton(tr('goalClose'), iconTrash(), () => post({ type: 'clearGoal' }));
+    const pause = iconButton(
+      goal.status === 'paused' ? tr('goalResume') : tr('goalPause'),
+      goal.status === 'paused' ? iconPlay() : iconPause(),
+      () => post({ type: goal.status === 'paused' ? 'resumeGoal' : 'pauseGoal' }),
+    );
+    const more = iconButton(tr('goalEdit'), iconExpand(), beginEditGoal);
+    if (ui.editingGoal) {
+      more.classList.add('open');
+    }
+    trash.classList.add('goal-act');
+    pause.classList.add('goal-act');
+    more.classList.add('goal-act');
+    acts.append(trash, pause, more);
+    el.append(mark, copy, acts);
+  } else {
+    const time = el.querySelector('.goal-time');
+    if (time) {
+      time.textContent = clock;
+    }
+  }
+  if (goal.status === 'running' && !goalClock) {
+    goalClock = setInterval(() => {
+      const live = ui.state.goal;
+      const node = document.querySelector('#composer-queue .goal-time');
+      if (!live || live.status !== 'running' || !node) {
+        stopGoalClock();
+        return;
+      }
+      node.textContent = formatGoalChip(goalElapsedMs(live));
+    }, 1000);
+  }
+  if (goal.status !== 'running') {
+    stopGoalClock();
+  }
+}
+
 function patchQueue(): void {
   const el = document.getElementById('composer-queue');
   if (!el) {
     return;
   }
+  if (ui.state.modeId === 'goal' && ui.state.goal) {
+    patchGoalBar(el);
+    return;
+  }
+  stopGoalClock();
+  ui.editingGoal = false;
+  el.classList.remove('goal-bar', 'is-paused');
+  el.classList.add('queue');
+  el.dataset.g = '';
   const items = ui.state.queue ?? [];
   el.hidden = items.length === 0;
   if (!items.length) {
@@ -722,22 +845,37 @@ function patchQueue(): void {
   }
   el.dataset.q = key;
   el.replaceChildren();
-  const head = document.createElement('div');
-  head.className = 'queue-head';
-  head.textContent = tr('queued', { n: items.length });
-  el.append(head);
   for (let i = 0; i < items.length; i += 1) {
     const row = document.createElement('div');
     row.className = 'queue-item';
     const text = document.createElement('span');
     text.className = 'queue-text';
     text.textContent = items[i] ?? '';
+    const now = document.createElement('button');
+    now.type = 'button';
+    now.className = 'queue-now';
+    now.title = tr('queueSendNow');
+    now.innerHTML = `${iconSendNow()}<span>${escapeHtml(tr('queueSendNow'))}</span>`;
+    now.addEventListener('click', () => post({ type: 'sendNow', index: i }));
     const drop = iconButton(tr('cancel'), iconClose(), () => {
       post({ type: 'dropQueue', index: i });
     });
-    row.append(text, drop);
+    row.append(text, now, drop);
     el.append(row);
   }
+}
+
+function beginEditGoal(): void {
+  const goal = ui.state.goal;
+  if (!goal) {
+    return;
+  }
+  ui.editingGoal = true;
+  ui.draft = goal.text;
+  ui.wantFocus = true;
+  ui.menu = undefined;
+  ui.picker = undefined;
+  render();
 }
 
 function sendFrom(input: HTMLTextAreaElement): void {
@@ -745,7 +883,12 @@ function sendFrom(input: HTMLTextAreaElement): void {
   if ((!text && !ui.state.attachments?.length) || !canType()) {
     return;
   }
-  post({ type: 'send', text });
+  if (ui.editingGoal) {
+    ui.editingGoal = false;
+    post({ type: 'editGoal', text });
+  } else {
+    post({ type: 'send', text });
+  }
   ui.draft = '';
   ui.menu = undefined;
   ui.stickToBottom = true;
@@ -788,6 +931,18 @@ function composerPlaceholder(): string {
   if (ui.state.status === 'login' || ui.state.status === 'authenticating') {
     return tr('placeholderLogin');
   }
+  if (ui.state.modeId === 'goal') {
+    if (ui.editingGoal) {
+      return tr('goalEditHint');
+    }
+    if (ui.state.goal?.status === 'running') {
+      return tr('goalRunningHint');
+    }
+    if (ui.state.goal?.status === 'paused') {
+      return tr('goalResumeHint');
+    }
+    return tr('goalStartHint');
+  }
   if (ui.state.status === 'streaming') {
     return tr('placeholderQueue');
   }
@@ -821,17 +976,32 @@ function attachmentChip(attachment: Attachment): HTMLElement {
     tile.append(img, x);
     return tile;
   }
+  const quote = Boolean(attachment.text) && !attachment.path && !attachment.data && !attachment.folder;
   const chip = document.createElement('span');
-  chip.className = 'chip';
-  const label = document.createElement('span');
-  label.textContent = attachment.label;
+  chip.className = quote ? 'chip chip-quote' : 'chip chip-file';
   const x = document.createElement('button');
   x.type = 'button';
   x.className = 'chip-x';
   x.title = tr('removeAttach');
   x.textContent = '×';
   x.addEventListener('click', () => post({ type: 'removeAttachment', id: attachment.id }));
-  chip.append(label, x);
+  if (quote) {
+    const label = document.createElement('span');
+    label.textContent = attachment.label;
+    chip.append(label, x);
+    return chip;
+  }
+  const wrap = document.createElement('span');
+  wrap.innerHTML = fileLinkHtml(
+    attachment.folder
+      ? { kind: 'folder', name: attachment.label, path: attachment.path }
+      : { kind: 'file', name: attachment.label, path: attachment.path ?? attachment.label },
+  );
+  const link = wrap.firstElementChild;
+  if (link) {
+    chip.append(link);
+  }
+  chip.append(x);
   return chip;
 }
 
@@ -999,19 +1169,21 @@ export function patchJumpBottom(): void {
 }
 
 function ensureJumpBottom(): HTMLButtonElement | null {
-  const card = document.getElementById('composer-card');
+  const host = document.getElementById('composer-wrap');
   let el = document.getElementById('jump-bottom') as HTMLButtonElement | null;
-  if (!el && card) {
+  if (!host) {
+    return el;
+  }
+  if (!el) {
     el = document.createElement('button');
     el.type = 'button';
     el.id = 'jump-bottom';
     el.className = 'jump-bottom';
     el.hidden = true;
     el.addEventListener('click', jumpToLatest);
-    card.append(el);
-  }
-  if (el && card && el.parentElement !== card) {
-    card.append(el);
+    host.prepend(el);
+  } else if (el.parentElement !== host || host.firstElementChild !== el) {
+    host.prepend(el);
   }
   return el;
 }

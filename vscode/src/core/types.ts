@@ -67,6 +67,22 @@ export interface ContextUsage {
   categories?: ContextCategory[];
 }
 
+export type CronKind = 'once' | 'daily' | 'weekly' | 'interval';
+
+export interface CronJob {
+  id: string;
+  title: string;
+  prompt: string;
+  enabled: boolean;
+  kind: CronKind;
+  at?: string;
+  weekday?: number;
+  everyMs?: number;
+  lastRunAt?: number;
+  nextRunAt?: number;
+  createdAt: number;
+}
+
 export type SettingsPage =
   | 'main'
   | 'rules'
@@ -80,7 +96,8 @@ export type SettingsPage =
   | 'worktrees'
   | 'extensions'
   | 'memory'
-  | 'remote';
+  | 'remote'
+  | 'cron';
 
 export interface ThemeColors {
   primary: string;
@@ -178,7 +195,7 @@ export interface SkillItem {
   description?: string;
   dirPath: string;
   skillFile: string;
-  scope: 'global' | 'project';
+  scope: 'global' | 'project' | 'bundled';
   enabled: boolean;
 }
 
@@ -316,6 +333,8 @@ export interface MemoryFile {
   scope: 'global' | 'workspace';
 }
 
+export type SessionRunState = 'running' | 'done' | 'stopped';
+
 export interface SessionRow {
   id: string;
   title: string;
@@ -325,6 +344,10 @@ export interface SessionRow {
   sessionKind?: string;
   numChatMessages?: number;
   numMessages?: number;
+  /** True when this session still has a turn running in the background. */
+  live?: boolean;
+  /** History-list status: running yellow, unread-complete green, interrupted red. Idle rows omit this. */
+  runState?: SessionRunState;
 }
 
 export interface MediaItem {
@@ -340,6 +363,21 @@ export interface Attachment {
   text?: string;
   mimeType?: string;
   data?: string;
+  folder?: boolean;
+}
+
+export interface MessageFile {
+  label: string;
+  path?: string;
+  mimeType?: string;
+  folder?: boolean;
+}
+
+/** One composer send waiting behind a live turn. Attachments stay on this item. */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  attachments: Attachment[];
 }
 
 export interface FileEdit {
@@ -379,13 +417,22 @@ export interface PlanStep {
   id?: string;
 }
 
+/** One slice of a turn, in the order the host emitted it. */
+export type TurnBeat =
+  | { kind: 'think'; text: string }
+  | { kind: 'tool'; id: string }
+  | { kind: 'task'; phase: 'started' | 'completed'; text: string; id: string };
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   thinking?: string;
+  /** Saved order of thinking slices and tool calls. */
+  beats?: TurnBeat[];
   tools: ToolCard[];
   images?: MediaItem[];
+  files?: MessageFile[];
   edits?: FileEdit[];
   plan?: string;
   steps?: PlanStep[];
@@ -394,12 +441,16 @@ export interface ChatMessage {
   endedAt?: string;
   /** `null` on a stream tail means the retry/error card was cleared. */
   error?: TurnError | null;
+  /** User or host stopped this assistant turn before it finished. */
+  stopped?: boolean;
   /** Catalog id at the time this assistant turn started. */
   modelId?: string;
   /** Picker display name for that model. */
   modelName?: string;
   /** Reasoning effort sent with this turn. */
   effort?: string;
+  /** Host compact card: auto prefire vs /compact. */
+  compact?: 'auto' | 'manual';
 }
 
 export interface PermissionOption {
@@ -451,6 +502,8 @@ export interface GrokSettings {
   permissionMode: 'ask' | 'auto' | 'acceptEdits';
   includeSelectionOnSend: boolean;
   alwaysApprove: boolean;
+  /** Allow execute / terminal / shell tools. */
+  useTerminal: boolean;
   locale: 'auto' | 'en' | 'zh-CN';
   /** Play a chime when a turn finishes or is interrupted. */
   notifySound: boolean;
@@ -465,6 +518,7 @@ export const DEFAULT_SETTINGS: GrokSettings = {
   permissionMode: 'ask',
   includeSelectionOnSend: true,
   alwaysApprove: false,
+  useTerminal: true,
   locale: 'auto',
   notifySound: true,
   termEncoding: 'utf-8',
@@ -501,6 +555,12 @@ export interface ChatState {
   timestamps?: boolean;
   multiline?: boolean;
   queue?: string[];
+  goal?: {
+    text: string;
+    status: 'running' | 'paused';
+    startedAt: number;
+    elapsedMs: number;
+  };
   alwaysApprove?: boolean;
   notify?: 'done' | 'fail';
   currentSessionId?: string;
@@ -530,6 +590,7 @@ export interface ChatState {
   marketplace?: MarketplacePlugin[];
   workflows?: WorkflowItem[];
   tasks?: TaskItem[];
+  cronJobs?: CronJob[];
   memoryFiles?: MemoryFile[];
   extTab?: 'plugins' | 'marketplace' | 'hooks' | 'workflows';
   theme?: ThemeColors;
@@ -632,6 +693,7 @@ export interface SessionUpdate {
   streamStartMs?: number;
   agentTimestampMs?: number;
   entries?: unknown;
+  objective?: string;
 }
 
 export interface HostToWebview {
@@ -666,7 +728,27 @@ export type WebviewToHost =
   | { type: 'logout' }
   | { type: 'send'; text: string }
   | { type: 'dropQueue'; index: number }
+  | { type: 'sendNow'; index?: number }
+  | { type: 'openCron' }
+  | { type: 'closeCron' }
+  | {
+      type: 'addCronJob';
+      title: string;
+      prompt: string;
+      kind: CronKind;
+      at?: string;
+      weekday?: number;
+      everyMs?: number;
+    }
+  | { type: 'patchCronJob'; id: string; enabled?: boolean }
+  | { type: 'deleteCronJob'; id: string }
+  | { type: 'runCronJob'; id: string }
   | { type: 'cancel' }
+  | { type: 'pauseGoal' }
+  | { type: 'resumeGoal' }
+  | { type: 'clearGoal' }
+  | { type: 'editGoal'; text: string }
+  | { type: 'goalStatus' }
   | { type: 'newSession' }
   | { type: 'restart' }
   | { type: 'choosePermission'; optionId: string }
@@ -675,6 +757,7 @@ export type WebviewToHost =
   | { type: 'cancelAsk' }
   | { type: 'removeAttachment'; id: string }
   | { type: 'openFile'; path: string }
+  | { type: 'revealFile'; path: string }
   | { type: 'openUrl'; url: string }
   | { type: 'setModel'; modelId: string }
   | { type: 'setMode'; modeId: string }
@@ -822,7 +905,7 @@ export type WebviewToHost =
       text?: string;
       uris?: string[];
       images?: Array<{ name: string; mimeType: string; data: string }>;
-      files?: Array<{ name: string; mimeType?: string; text?: string }>;
+      files?: Array<{ name: string; mimeType?: string; text?: string; data?: string }>;
     }
   | { type: 'undoEdits'; messageId?: string }
   | { type: 'reviewEdits'; messageId?: string; path?: string }

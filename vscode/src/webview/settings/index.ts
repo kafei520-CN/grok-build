@@ -21,6 +21,7 @@ import { mountWorktreesBody, worktreesNavRow } from './worktrees';
 import { mountThemeBody, themeNavRow } from './theme';
 import { mountThemePreview } from './themePreview';
 import { mountRemoteBody, remoteNavRow } from './remote';
+import { cronNavRow, mountCronBody } from './cron';
 
 let paintedKey: string | undefined;
 
@@ -51,6 +52,7 @@ export function patchSettings(parent: HTMLElement): void {
     (ui.state.marketplace ?? []).map((row) => row.id).join('|'),
     (ui.state.workflows ?? []).map((row) => row.id).join('|'),
     (ui.state.memoryFiles ?? []).map((row) => row.id).join('|'),
+    (ui.state.cronJobs ?? []).map((row) => `${row.id}:${row.enabled}:${row.nextRunAt ?? ''}`).join('|'),
     `${ui.state.theme?.wallpaper ?? ''}|${ui.state.theme?.wallpaperUrl ?? ''}|${ui.state.theme?.surface ?? ''}|${ui.state.theme?.fontUrl ?? ''}|${ui.state.theme?.fontPath ?? ''}`,
     `${ui.state.remote?.running ? '1' : '0'}|${ui.state.remote?.local ? '1' : '0'}|${ui.state.remote?.public ? '1' : '0'}|${ui.state.remote?.port ?? ''}|${ui.state.remote?.code ?? ''}|${ui.state.remote?.codeMode ?? ''}|${ui.state.remote?.publicUrl ?? ''}|${ui.state.remote?.tunnel ?? ''}|${ui.state.remote?.tunnelError ?? ''}|${ui.state.remote?.tunnelHost ?? ''}|${ui.state.remote?.forwardPort ?? ''}|${ui.state.remote?.clients ?? 0}|${ui.state.remote?.error ?? ''}|${ui.state.remote?.sshPublicKey ?? ''}|${ui.state.remote?.bundledRelay ? '1' : '0'}|${ui.state.remote?.relayKind ?? ''}|${ui.state.remote?.relayPort ?? ''}|${ui.state.remote?.hasRelayKey ? '1' : '0'}`,
   ].join(':');
@@ -97,7 +99,8 @@ function mountSettings(): HTMLElement {
     page === 'worktrees' ||
     page === 'extensions' ||
     page === 'memory' ||
-    page === 'remote'
+    page === 'remote' ||
+    page === 'cron'
   ) {
     tools.append(iconButton(tr('settingsRulesBack'), iconBack(), () => post(settingsBackMessage(page))));
   }
@@ -147,11 +150,16 @@ function mountSettings(): HTMLElement {
     el.append(head, mountRemoteBody());
     return el;
   }
+  if (page === 'cron') {
+    el.append(head, mountCronBody());
+    return el;
+  }
   const body = document.createElement('div');
   body.className = 'settings-body';
   body.append(
     section(tr('settingsUi'), [
       themeNavRow(),
+      cronNavRow(),
       remoteNavRow(),
       localeRow(),
       termEncodingRow(),
@@ -197,6 +205,13 @@ function mountSettings(): HTMLElement {
         tr('settingsAlwaysHint'),
         () => Boolean(current().alwaysApprove),
         () => post({ type: 'updateSetting', key: 'alwaysApprove', value: !current().alwaysApprove }),
+      ),
+      toggleRow(
+        'useTerminal',
+        tr('settingsTerminal'),
+        tr('settingsTerminalHint'),
+        () => Boolean(current().useTerminal),
+        () => post({ type: 'updateSetting', key: 'useTerminal', value: !current().useTerminal }),
       ),
       toggleRow(
         'includeSelectionOnSend',
@@ -265,6 +280,8 @@ export function settingsBackMessage(page: string): WebviewToHost {
       return { type: 'closeTheme' };
     case 'remote':
       return { type: 'closeRemote' };
+    case 'cron':
+      return { type: 'closeCron' };
     case 'theme-preview':
       return { type: 'closeThemePreview' };
     case 'mcps':
@@ -317,6 +334,9 @@ function settingsTitle(page: string): string {
   }
   if (page === 'memory') {
     return tr('settingsMemory');
+  }
+  if (page === 'cron') {
+    return tr('cronTitle');
   }
   return tr('settingsTitle');
 }
@@ -527,7 +547,12 @@ function toggleRow(
   const knob = document.createElement('span');
   knob.className = 'knob';
   btn.append(knob);
-  btn.addEventListener('click', toggle);
+  btn.addEventListener('click', () => {
+    const next = !btn.classList.contains('on');
+    btn.classList.toggle('on', next);
+    btn.setAttribute('aria-checked', next ? 'true' : 'false');
+    toggle();
+  });
   row.append(copy, btn);
   return row;
 }
@@ -647,6 +672,7 @@ function syncSettings(root: HTMLElement): void {
   syncSwitch(root, 'timestamps', Boolean(ui.state.timestamps));
   syncSwitch(root, 'notifySound', settings.notifySound !== false);
   syncSwitch(root, 'alwaysApprove', settings.alwaysApprove);
+  syncSwitch(root, 'useTerminal', settings.useTerminal);
   syncSwitch(root, 'includeSelectionOnSend', settings.includeSelectionOnSend);
   syncSwitch(root, 'preferWorkspaceBinary', settings.preferWorkspaceBinary);
   syncChoice(root, 'locale', settings.locale);

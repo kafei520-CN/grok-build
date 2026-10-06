@@ -3,7 +3,8 @@ import { formatRelativeTime } from '../../core/i18n';
 import { isBooting, isRemoteWeb, loc, persistUi, post, render, tr, ui } from '../app';
 import { button, iconButton } from '../dom';
 import { findPinned, pinFloating, releaseFloating } from './popover';
-import { iconClock, iconClose, iconEdit, iconGrid, iconMore, iconStar } from '../icons';
+import { grokBootMark, iconClock, iconClose, iconEdit, iconGrid, iconMore, iconStar } from '../icons';
+import { superGrokKind, superGrokMark } from '../shell/superGrokMark';
 import { escapeHtml } from '../transcript/markdown';
 import { mountDashboard } from '../shell/dashboard';
 import { listedSessions, mountSessionsDrawer } from '../shell/sessions';
@@ -22,7 +23,7 @@ export function patchHeader(parent: HTMLElement): void {
     }
     return;
   }
-  const locale = ui.state.locale ?? 'en';
+  const locale = `${ui.state.locale ?? 'en'}:${superGrokKind(ui.state.account, ui.state.billing) ?? ''}`;
   if (!el || headerLocale !== locale) {
     const next = renderHeader();
     next.id = 'grok-header';
@@ -36,7 +37,7 @@ export function patchHeader(parent: HTMLElement): void {
     return;
   }
   const mark = el.querySelector('.brand .mark');
-  if (mark) {
+  if (mark instanceof HTMLElement && !el.querySelector('.brand .og-tier-mark')) {
     mark.className = ui.state.status === 'streaming' ? 'mark pulse' : 'mark';
   }
   const more = el.querySelector('[data-act="more"]');
@@ -108,12 +109,17 @@ export function renderHeader(): HTMLElement {
   el.className = 'topbar';
   const brand = document.createElement('div');
   brand.className = 'brand';
-  const mark = document.createElement('span');
-  mark.className = ui.state.status === 'streaming' ? 'mark pulse' : 'mark';
-  mark.innerHTML = iconStar();
-  const name = document.createElement('span');
-  name.textContent = tr('grok');
-  brand.append(mark, name);
+  const kind = superGrokKind(ui.state.account, ui.state.billing);
+  if (kind) {
+    brand.append(superGrokMark(kind));
+  } else {
+    const mark = document.createElement('span');
+    mark.className = 'mark';
+    mark.innerHTML = grokBootMark();
+    const name = document.createElement('span');
+    name.textContent = tr('grok');
+    brand.append(mark, name);
+  }
   if (isRemoteWeb()) {
     brand.append(rttBadge());
     ensureRttLoop();
@@ -441,20 +447,32 @@ export function errorCard(): HTMLElement {
   return card;
 }
 
+function homeBrand(): HTMLElement | null {
+  if (ui.state.billingLoading) {
+    return null;
+  }
+  const kind = superGrokKind(ui.state.account, ui.state.billing);
+  if (kind) {
+    return superGrokMark(kind);
+  }
+  const logo = document.createElement('div');
+  logo.className = 'home-logo';
+  logo.innerHTML = grokBootMark();
+  return logo;
+}
+
 export function home(): HTMLElement {
   const el = document.createElement('section');
   el.className = 'home';
-  const halo = document.createElement('div');
-  halo.className = 'home-star';
-  const mark = document.createElement('div');
-  mark.className = 'mark';
-  mark.innerHTML = iconStar();
-  halo.append(mark);
+  const brand = homeBrand();
+  if (brand) {
+    el.append(brand);
+  }
   const title = document.createElement('h1');
   title.textContent = tr('homeTitle');
   const blurb = document.createElement('p');
   blurb.textContent = tr('homeBody');
-  el.append(halo, title, blurb);
+  el.append(title, blurb);
   const starters = document.createElement('div');
   starters.className = 'starters';
   for (const idea of [tr('starter1'), tr('starter2'), tr('starter3')]) {

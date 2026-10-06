@@ -14,6 +14,8 @@ import type {
   SlashCommandInfo,
 } from '../core/types';
 import { asObject, asString } from '../core/wire';
+import { stripWrapUpText } from '../chat/prompt/wrapUp';
+import { noteTaskBeats, noteThink, noteToolBeat } from './traceBeats';
 
 export interface SessionView {
   replaying: boolean;
@@ -180,7 +182,10 @@ function applySteps(
   if (!canBindSteps(session, assistant)) {
     return;
   }
-  assistant.steps = overlayPlanSteps(assistant.steps, steps);
+  const prev = assistant.steps;
+  const next = overlayPlanSteps(prev, steps);
+  noteTaskBeats(assistant, prev, next);
+  assistant.steps = next;
 }
 
 export function applySessionUpdate(session: SessionView, update: SessionUpdate): void {
@@ -231,13 +236,13 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
       stampTimes(last, update, true);
     }
     if (last?.role === 'user') {
-      last.text += text;
+      last.text = stripWrapUpText(last.text + text);
       stampTimes(last, update, true);
     } else {
       session.messages.push({
         id: `user-replay-${session.nextTurn()}`,
         role: 'user',
-        text,
+        text: stripWrapUpText(text),
         tools: [],
         createdAt: isoFromMs(update.turnStartMs ?? update.agentTimestampMs) ?? new Date().toISOString(),
       });
@@ -290,7 +295,7 @@ export function applySessionUpdate(session: SessionView, update: SessionUpdate):
   if (kind === 'agent_message_chunk') {
     assistant.text += textFromContent(update.content);
   } else if (kind === 'agent_thought_chunk') {
-    assistant.thinking = (assistant.thinking ?? '') + textFromContent(update.content);
+    noteThink(assistant, textFromContent(update.content));
   } else if (kind === 'tool_call' || kind === 'tool_call_update') {
     applyTool(session, assistant, update);
     applySteps(assistant, parsePlanEntries(todoListFromUpdate(update)), session);
@@ -663,6 +668,7 @@ function applyTool(session: SessionView, assistant: ChatMessage, update: Session
       status: update.status ?? 'pending',
     };
     assistant.tools.push(card);
+    noteToolBeat(assistant, id);
   }
   if (update.title) {
     card.title = update.title;

@@ -2,7 +2,7 @@
   "name": "grok-for-vs-code",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.2.85",
+  "version": "0.2.95",
   "publisher": "kafei520cn",
   "author": "mckafei_CN",
   "license": "Apache-2.0",
@@ -41,7 +41,10 @@
         "command": "grok.openChat",
         "title": "%command.openChat%",
         "category": "Grok Build",
-        "icon": "$(comment-discussion)"
+        "icon": {
+          "light": "media/grok-icon.svg",
+          "dark": "media/grok-icon.svg"
+        }
       },
       {
         "command": "grok.newSession",
@@ -166,6 +169,18 @@
           "group": "navigation"
         }
       ],
+      "editor/title": [
+        {
+          "command": "grok.openChat",
+          "group": "navigation"
+        }
+      ],
+      "ChatTitleBarMenu": [
+        {
+          "command": "grok.openChat",
+          "group": "navigation"
+        }
+      ],
       "editor/context": [
         {
           "command": "grok.addSelection",
@@ -185,7 +200,7 @@
         {
           "id": "grok",
           "title": "%view.container%",
-          "icon": "resources/icon.png"
+          "icon": "media/grok-mark.svg"
         }
       ]
     },
@@ -195,7 +210,7 @@
           "type": "webview",
           "id": "grok.chat",
           "name": "%view.chat%",
-          "icon": "resources/icon.png"
+          "icon": "media/grok-mark.svg"
         }
       ]
     },
@@ -241,6 +256,11 @@
           "type": "boolean",
           "default": false,
           "description": "%config.alwaysApprove%"
+        },
+        "grok.useTerminal": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.useTerminal%"
         },
         "grok.notifySound": {
           "type": "boolean",

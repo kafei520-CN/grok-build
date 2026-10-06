@@ -1,3 +1,7 @@
+export function iconCompress(): string {
+  return '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.2h10M3 12.8h10M8 5.2 5.5 7.6h5L8 5.2zM8 10.8 5.5 8.4h5L8 10.8z"/></svg>';
+}
+
 export function iconClock(): string {
   return '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2 1.3"/></svg>';
 }
@@ -18,12 +22,40 @@ export function iconStar(size = '100%'): string {
   return `<svg viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="currentColor" d="M12 1.1 14.35 9.65 22.9 12 14.35 14.35 12 22.9 9.65 14.35 1.1 12 9.65 9.65z"/></svg>`;
 }
 
+/** Grok mark: left comma first, right spike second. Same paths as the desktop boot logo. */
+export function grokBootMark(): string {
+  return `<svg class="boot-logo" viewBox="0 0 35 33" width="72" height="68" fill="none" aria-hidden="true">
+    <path class="boot-a" pathLength="1" d="M10.9503 23.0313C7.07343 19.3235 7.74185 13.5853 11.0498 10.2763C13.4959 7.82722 17.5036 6.82767 21.0021 8.2971L24.7595 6.55998C24.0826 6.07017 23.215 5.54334 22.2195 5.17313C17.7198 3.31926 12.3326 4.24192 8.67479 7.90126C5.15635 11.4239 4.0499 16.8403 5.94992 21.4622C7.36924 24.9165 5.04257 27.3598 2.69884 29.826C1.86829 30.7002 1.0349 31.5745 0.36364 32.5L10.9474 23.0341"/>
+    <path class="boot-b" pathLength="1" d="M13.2371 21.0407L24.3186 12.8506C24.8619 12.4491 25.6384 12.6057 25.8973 13.2294C27.2597 16.5185 26.651 20.4712 23.9403 23.1851C21.2297 25.8989 17.4581 26.4941 14.0108 25.1386L10.2449 26.8843C15.6463 30.5806 22.2053 29.6665 26.304 25.5601C29.5551 22.3051 30.562 17.8683 29.6205 13.8673L29.629 13.8758C28.2637 7.99809 29.9647 5.64871 33.449 0.844576C33.5314 0.730667 33.6139 0.616757 33.6964 0.5L29.1113 5.09055V5.07631L13.2343 21.0436"/>
+  </svg>`;
+}
+
 export function iconMore(): string {
   return '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="4" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12" cy="8" r="1.2"/></svg>';
 }
 
 export function iconStop(): string {
   return '<svg viewBox="0 0 16 16" width="10" height="10"><rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor"/></svg>';
+}
+
+export function iconTarget(): string {
+  return '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.4"/><circle cx="8" cy="8" r="2.4"/><circle cx="8" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg>';
+}
+
+export function iconPause(): string {
+  return '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><rect x="4.2" y="3.2" width="2.4" height="9.6" rx="0.7"/><rect x="9.4" y="3.2" width="2.4" height="9.6" rx="0.7"/></svg>';
+}
+
+export function iconPlay(): string {
+  return '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M5.2 3.4 12.4 8 5.2 12.6z"/></svg>';
+}
+
+export function iconSendNow(): string {
+  return '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M2.4 3.2 8.2 8 2.4 12.8z"/><path d="M8.6 3.2 14.4 8 8.6 12.8z"/></svg>';
+}
+
+export function iconExpand(): string {
+  return '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M9.5 3.5h3v3M13.5 3.5 9.2 7.8M6.5 12.5h-3v-3M2.5 12.5 6.8 8.2"/></svg>';
 }
 
 export function iconCopy(): string {
@@ -67,6 +99,10 @@ export function iconFolder(): string {
   return '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M2.4 4.6h4.1l1.3 1.5h5.8v6.7H2.4z"/><path d="M2.4 6.1h11.2"/></svg>';
 }
 
+export function iconFile(size = '12'): string {
+  return `<svg class="md-file-icon" viewBox="0 0 16 16" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 2.4h5.2L12 5.1v8.5H4.2z"/><path d="M9.3 2.4V5h2.6"/></svg>`;
+}
+
 export function iconTrash(): string {
   return '<svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M3.5 4.5h9M6.2 4.5V3.4h3.6v1.1M5.2 6.2v6.2M8 6.2v6.2M10.8 6.2v6.2M4.4 4.5l.6 8.4h6l.6-8.4"/></svg>';
 }
@@ -79,6 +115,10 @@ export function iconSearch(): string {
   return '<svg viewBox="0 0 16 16" width="70%" height="70%" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round"><circle cx="6.8" cy="6.8" r="4.35"/><path d="m10.3 10.3 3.2 3.2"/></svg>';
 }
 
+export function iconTerminal(): string {
+  return '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3.3 5.2 6.5 8 3.3 10.8"/><path d="M8.2 11.1h4.5"/></svg>';
+}
+
 export function toolIcon(kind?: string): string {
   switch (kind) {
     case 'edit':
@@ -88,11 +128,13 @@ export function toolIcon(kind?: string): string {
       return iconBook();
     case 'execute':
     case 'terminal':
-      return '▷';
+      return iconTerminal();
     case 'search':
       return iconSearch();
     case 'delete':
       return '⌫';
+    case 'compact':
+      return iconCompress();
     default:
       return '⚙';
   }

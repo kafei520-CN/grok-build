@@ -227,9 +227,22 @@ export function applyThemeTo(
   style.setProperty('--glass-blur', `${bgBlur}px`);
   style.setProperty('--glass-1-blur', `${bgBlur}px`);
   style.setProperty('--glass-bg-pad', bgBlur > 0 ? '1.08' : '1');
+  style.setProperty('--glass-plate-filter', bgBlur > 0 ? `blur(${bgBlur}px) saturate(1.45)` : 'none');
   for (let layer = 2; layer <= 7; layer += 1) {
     style.setProperty(`--glass-${layer}-blur`, `${chromeLayerBlur(chromeBlur, layer)}px`);
   }
+  style.setProperty(
+    '--glass-chrome-filter',
+    chromeBlur > 0 ? `blur(${chromeLayerBlur(chromeBlur, 4)}px) saturate(1.35)` : 'none',
+  );
+  style.setProperty(
+    '--glass-frost',
+    chromeBlur > 0 ? `blur(${chromeLayerBlur(chromeBlur, 4)}px) saturate(1.7) brightness(1.06)` : 'none',
+  );
+  style.setProperty(
+    '--glass-2-filter',
+    chromeBlur > 0 ? `blur(${chromeLayerBlur(chromeBlur, 2)}px) saturate(1.7) brightness(1.06)` : 'none',
+  );
   const chromeFill = theme.chromeGlassOpacity ?? DEFAULT_CHROME_GLASS_OPACITY;
   style.setProperty('--chrome-fill', `${chromeFill}%`);
 }

@@ -16,7 +16,9 @@ import type { ThemeColors } from '../../core/types';
 import {
   DEFAULT_CHROME_BLUR,
   DEFAULT_GLASS_BLUR,
+  DEFAULT_GLASS_OPACITY,
   DEFAULT_WALLPAPER_OPACITY,
+  MAX_GLASS_BLUR,
 } from '../../settings/wallpaper';
 import { isRemoteWeb, post, tr, ui } from '../app';
 import { iconChevron } from '../icons';
@@ -250,10 +252,26 @@ function surfaceCard(initial: ThemeColors): HTMLElement {
     hint,
     row,
     sliderRow(
+      'fill',
+      tr('themeGlassOpacity'),
+      0,
+      100,
+      initial.glassOpacity ?? DEFAULT_GLASS_OPACITY,
+      current !== 'glass',
+      (n, persist) => {
+        live = { ...live, glassOpacity: n };
+        if (persist) {
+          commit(live, true);
+        } else {
+          applyLive();
+        }
+      },
+    ),
+    sliderRow(
       'blur',
       tr('themeGlassBlur'),
       0,
-      40,
+      MAX_GLASS_BLUR,
       initial.glassBlur ?? DEFAULT_GLASS_BLUR,
       current !== 'glass',
       (n, persist) => {
@@ -264,13 +282,12 @@ function surfaceCard(initial: ThemeColors): HTMLElement {
           applyLive();
         }
       },
-      'px',
     ),
     sliderRow(
       'chrome-blur',
       tr('themeChromeBlur'),
       0,
-      40,
+      MAX_GLASS_BLUR,
       initial.chromeBlur ?? DEFAULT_CHROME_BLUR,
       current !== 'glass',
       (n, persist) => {
@@ -281,7 +298,6 @@ function surfaceCard(initial: ThemeColors): HTMLElement {
           applyLive();
         }
       },
-      'px',
     ),
   );
   return card;
@@ -333,13 +349,6 @@ function wallpaperCard(initial: ThemeColors): HTMLElement {
   hint.textContent = tr('themeWallpaperHint');
   const actions = document.createElement('div');
   actions.className = 'settings-actions';
-  const icon = document.createElement('button');
-  icon.type = 'button';
-  icon.className = 'btn';
-  icon.textContent = tr('themeWallpaperIcon');
-  icon.addEventListener('click', () => {
-    commit({ ...live, wallpaper: 'icon' }, true);
-  });
   const pick = document.createElement('button');
   pick.type = 'button';
   pick.className = 'btn';
@@ -366,7 +375,7 @@ function wallpaperCard(initial: ThemeColors): HTMLElement {
   preview.textContent = tr('themePreviewOpen');
   preview.disabled = !initial.wallpaper;
   preview.addEventListener('click', () => post({ type: 'openThemePreview' }));
-  actions.append(icon, pick, clear, preview);
+  actions.append(pick, clear, preview);
   card.append(
     hint,
     actions,
@@ -379,7 +388,6 @@ function wallpaperCard(initial: ThemeColors): HTMLElement {
       }
     }),
   );
-  icon.classList.toggle('primary', initial.wallpaper === 'icon');
   return card;
 }
 

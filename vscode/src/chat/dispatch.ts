@@ -39,8 +39,51 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'dropQueue':
       controller.dropQueue(message.index);
       return;
+    case 'sendNow':
+      await controller.sendNow(message.index);
+      return;
+    case 'openCron':
+      controller.openCron();
+      return;
+    case 'closeCron':
+      controller.closeCron();
+      return;
+    case 'addCronJob':
+      controller.addCronJob({
+        title: message.title,
+        prompt: message.prompt,
+        kind: message.kind,
+        at: message.at ?? '',
+        weekday: message.weekday ?? 1,
+        everyMs: message.everyMs ?? 60 * 60_000,
+      });
+      return;
+    case 'patchCronJob':
+      controller.patchCronJob(message.id, { enabled: message.enabled });
+      return;
+    case 'deleteCronJob':
+      controller.deleteCronJob(message.id);
+      return;
+    case 'runCronJob':
+      await controller.runCronJob(message.id);
+      return;
     case 'cancel':
       controller.cancelTurn();
+      return;
+    case 'pauseGoal':
+      await controller.pauseGoal();
+      return;
+    case 'resumeGoal':
+      await controller.resumeGoal();
+      return;
+    case 'clearGoal':
+      await controller.clearGoal();
+      return;
+    case 'editGoal':
+      await controller.editGoal(message.text);
+      return;
+    case 'goalStatus':
+      await controller.send('/goal status', { hidden: true });
       return;
     case 'newSession':
       await controller.newSession();
@@ -73,6 +116,13 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       } catch {
         /* Browser overlay already has the file; the IDE may not. */
       }
+      return;
+    case 'revealFile':
+      if (plat().revealFile) {
+        await plat().revealFile(message.path);
+        return;
+      }
+      await plat().openFile(message.path, true);
       return;
     case 'openUrl': {
       if (!/^https?:/i.test(message.url) && !message.url.toLowerCase().startsWith('mailto:')) {
@@ -112,7 +162,7 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       controller.closeDrawer();
       return;
     case 'loadSession':
-      await controller.loadSession(message.sessionId, message.cwd);
+      void controller.loadSession(message.sessionId, message.cwd);
       return;
     case 'renameSession':
       await controller.renameListedSession(message.sessionId);
@@ -382,7 +432,7 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
       await controller.flushMemory();
       return;
     case 'switchRosterSession':
-      await controller.loadSession(message.sessionId, message.cwd);
+      void controller.loadSession(message.sessionId, message.cwd);
       return;
     case 'stopRosterSession':
       controller.stopRosterSession(message.sessionId);

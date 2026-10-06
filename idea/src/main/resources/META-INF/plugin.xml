@@ -12,7 +12,12 @@
   <li>Add editor selection or the active file as context</li>
 </ul>
 ]]></description>
-  <change-notes><![CDATA[OpenGrok Plugins 0.2.85: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+  <change-notes><![CDATA[OpenGrok Plugins 0.2.90: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.90 — Switching sessions mid-run loads the full history. User bubbles are not dropped by a live tail.</p>
+<p>0.2.89 — Sidebar title icon is the Grok mark on a transparent mask, not a solid white square.</p>
+<p>0.2.88 — IDE chrome uses a white-badge Grok SVG; the marketplace listing still uses the original PNG logo.</p>
+<p>0.2.87 — Open Chat sits in the editor title bar. Activity-bar and tool-window icons use the Grok mark instead of a white square. Turning off terminal actually blocks shell tools.</p>
+<p>0.2.86 — Long sessions paint recent turns first. Context auto-compacts near the window. Paths in replies become clickable chips. Finished work ends with a wrap-up recap.</p>
 <p>0.2.85 — Display name is OpenGrok Plugins. Marketplace and tool-window icons use the desktop white-background logo.</p>
 <p>0.2.84 — Sidecar can use GROK_SETTINGS_FILE / GROK_STATE_FILE for desktop hosts.</p>
 <p>0.2.83 — Official public relay host is 103.118.255.198:8788.</p>
@@ -134,7 +139,7 @@
   <extensions defaultExtensionNs="com.intellij">
     <toolWindow id="Grok Build"
                 anchor="right"
-                icon="/icons/plugin-icon.png"
+                icon="/icons/grok-icon.svg"
                 factoryClass="cn.mckafei.grokbuild.GrokToolWindowFactory"/>
     <notificationGroup id="Grok Build" displayType="BALLOON" isLogByDefault="true"/>
     <statusBarWidgetFactory id="GrokBuildWidget"
@@ -155,9 +160,12 @@
       <action id="Grok.OpenChat"
               class="cn.mckafei.grokbuild.ui.OpenChatAction"
               text="Open Grok Build"
-              description="Focus the Grok Build tool window">
+              description="Focus the Grok Build tool window"
+              icon="/icons/grok-icon.svg">
         <keyboard-shortcut keymap="$default" first-keystroke="control SEMICOLON"/>
         <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta SEMICOLON"/>
+        <add-to-group group-id="MainToolbarRight" anchor="last"/>
+        <add-to-group group-id="NavBarToolBar" anchor="last"/>
       </action>
       <separator/>
       <action id="Grok.NewSession"

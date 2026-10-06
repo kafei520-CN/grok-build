@@ -7,7 +7,7 @@ import {
   USER_SCROLL_HOLD_MS,
   jumpBottomKind,
   nearBottom,
-  onUserScroll,
+  stickFromScroll,
   shouldPinToBottom,
   userHeldScroll,
   type TranscriptScroll,
@@ -77,15 +77,15 @@ describe('transcript scroll', () => {
       nearBottom({ scrollTop: 0, scrollHeight: 800, clientHeight: 200 }),
       false,
     );
-    const dragged = onUserScroll(idle({ lastUserScroll: 500 }), 500, lowerHalf);
+    const dragged = stickFromScroll(idle({ lastUserScroll: 500 }), lowerHalf);
     assert.equal(dragged.stickToBottom, false);
     assert.equal(dragged.lastUserScroll, 500);
     assert.equal(dragged.transcriptScroll, 400);
-    const atEnd = onUserScroll(idle({ lastUserScroll: 500 }), 500, atBottom);
+    const atEnd = stickFromScroll(idle({ stickToBottom: false, lastUserScroll: 500 }), atBottom);
     assert.equal(atEnd.stickToBottom, true);
-    const pinned = onUserScroll(idle({ pinLock: true, stickToBottom: false }), 500, atBottom);
-    assert.equal(pinned.stickToBottom, false);
-    assert.equal(pinned.lastUserScroll, 0);
+    assert.equal(atEnd.lastUserScroll, 500);
+    const locked = idle({ pinLock: true, stickToBottom: false });
+    assert.equal(stickFromScroll(locked, atBottom), locked);
   });
 
   it('hides at the bottom even while streaming', () => {

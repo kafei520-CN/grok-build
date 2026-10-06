@@ -20,6 +20,9 @@ export function isTerminalMethod(name: string): boolean {
 export async function handleTerminalMethod(name: string, params: unknown): Promise<unknown> {
   const op = terminalOp(name);
   if (op === 'terminal/create') {
+    if (plat().getConfig('useTerminal', true) !== true) {
+      throw new Error('Terminal tools are disabled in Settings.');
+    }
     return createTerm(params);
   }
   const id = terminalIdOf(params);

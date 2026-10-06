@@ -13,6 +13,7 @@ object GrokSettingsStore {
         var permissionMode: String = "ask",
         var includeSelectionOnSend: Boolean = true,
         var alwaysApprove: Boolean = false,
+        var useTerminal: Boolean = true,
         var locale: String = "auto",
         var notifySound: Boolean = true,
         var termEncoding: String = "utf-8",
@@ -33,6 +34,7 @@ object GrokSettingsStore {
             permissionMode = str(raw, "permissionMode", "ask"),
             includeSelectionOnSend = bool(raw, "includeSelectionOnSend", true),
             alwaysApprove = bool(raw, "alwaysApprove", false),
+            useTerminal = bool(raw, "useTerminal", true),
             locale = str(raw, "locale", "auto"),
             notifySound = bool(raw, "notifySound", true),
             termEncoding = str(raw, "termEncoding", "utf-8"),
@@ -42,13 +44,18 @@ object GrokSettingsStore {
     fun save(snapshot: Snapshot) {
         val out = File(System.getProperty("user.home"), ".grok")
         out.mkdirs()
-        val obj = JsonObject()
+        val obj = try {
+            JsonParser.parseString(file().readText(Charsets.UTF_8)).asJsonObject
+        } catch (_: Exception) {
+            JsonObject()
+        }
         obj.addProperty("cliPath", snapshot.cliPath)
         obj.addProperty("preferWorkspaceBinary", snapshot.preferWorkspaceBinary)
         obj.addProperty("minCliVersion", snapshot.minCliVersion)
         obj.addProperty("permissionMode", snapshot.permissionMode)
         obj.addProperty("includeSelectionOnSend", snapshot.includeSelectionOnSend)
         obj.addProperty("alwaysApprove", snapshot.alwaysApprove)
+        obj.addProperty("useTerminal", snapshot.useTerminal)
         obj.addProperty("locale", snapshot.locale)
         obj.addProperty("notifySound", snapshot.notifySound)
         obj.addProperty("termEncoding", snapshot.termEncoding)

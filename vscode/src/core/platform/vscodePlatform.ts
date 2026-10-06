@@ -66,9 +66,21 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
       return vscode.workspace.getConfiguration('grok').get(key, fallback) as T;
     },
     async setConfig(key, value) {
-      await vscode.workspace
-        .getConfiguration('grok')
-        .update(key, value, vscode.ConfigurationTarget.Global);
+      const config = vscode.workspace.getConfiguration('grok');
+      const inspect = config.inspect(key);
+      const targets: vscode.ConfigurationTarget[] = [];
+      if (inspect?.workspaceFolderValue !== undefined) {
+        targets.push(vscode.ConfigurationTarget.WorkspaceFolder);
+      }
+      if (inspect?.workspaceValue !== undefined) {
+        targets.push(vscode.ConfigurationTarget.Workspace);
+      }
+      if (targets.length === 0) {
+        targets.push(vscode.ConfigurationTarget.Global);
+      }
+      for (const target of targets) {
+        await config.update(key, value, target);
+      }
     },
     getState<T>(key: string, fallback: T): T {
       return (context.globalState.get(key) as T | undefined) ?? fallback;
@@ -146,6 +158,9 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
     },
     async openFile(filePath, preview = true) {
       await vscode.window.showTextDocument(vscode.Uri.file(filePath), { preview });
+    },
+    async revealFile(filePath) {
+      await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
     },
     async clipboardWrite(text) {
       await vscode.env.clipboard.writeText(text);

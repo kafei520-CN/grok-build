@@ -103,4 +103,15 @@ describe('acp terminal', () => {
       /terminal not found/,
     );
   });
+
+  it('refuses to spawn when useTerminal is off', async () => {
+    const plat = fakePlat();
+    plat.getConfig = (key, fallback) =>
+      key === 'useTerminal' ? (false as typeof fallback) : fallback;
+    bindPlatform(plat);
+    await assert.rejects(
+      () => handleTerminalMethod('terminal/create', { command: 'echo' }),
+      /disabled/i,
+    );
+  });
 });

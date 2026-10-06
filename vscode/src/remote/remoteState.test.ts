@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { mergeLiveMessages, mergeTranscript, resolveIncomingMessages } from '../chat/messageMerge';
+import {
+  mergeLiveMessages,
+  mergeTranscript,
+  pairedLiveTail,
+  resolveIncomingMessages,
+} from '../chat/messageMerge';
 import { packDelivery, packRemotePayload, REMOTE_STATE_SOFT, chunkMessages } from './remoteState';
 
 describe('remote state packing', () => {
@@ -10,6 +15,35 @@ describe('remote state packing', () => {
     const row = JSON.parse(frames[0] ?? '') as { type: string; state: { status: string } };
     assert.equal(row.type, 'state');
     assert.equal(row.state.status, 'ready');
+  });
+
+  it('tags hydrate message frames with the session id', () => {
+    const messages = Array.from({ length: 80 }, (_, i) => ({
+      id: `m${i}`,
+      text: 'x'.repeat(2000),
+      tools: [],
+    }));
+    const frames = packRemotePayload({
+      type: 'state',
+      state: { status: 'ready', messages, currentSessionId: 'sess-1' },
+    });
+    const part = frames
+      .map((frame) => JSON.parse(frame) as { type: string; sessionId?: string })
+      .find((row) => row.type === 'messages');
+    assert.equal(part?.type, 'messages');
+    assert.equal(part?.sessionId, 'sess-1');
+  });
+
+  it('splits a 16-message restore without a full-payload size check', () => {
+    const messages = Array.from({ length: 16 }, (_, i) => ({
+      id: `m${i}`,
+      text: 'hi',
+      tools: [],
+    }));
+    const frames = packRemotePayload({ type: 'state', state: { status: 'ready', messages } });
+    const boot = JSON.parse(frames[0] ?? '') as { type: string; hydrate?: number };
+    assert.equal(boot.type, 'state');
+    assert.equal(typeof boot.hydrate, 'number');
   });
 
   it('does not pack non-state payloads', () => {
@@ -183,6 +217,31 @@ describe('remote state packing', () => {
     assert.deepEqual(
       next.map((row) => row.id),
       ['a', 'b', 'c', 'd'],
+    );
+  });
+
+  it('does not merge or skip hydrate when replacing a different session', () => {
+    const had = [{ id: 'assistant-1' }, { id: 'user-2' }];
+    const incoming = [{ id: 'user-2' }, { id: 'assistant-2' }];
+    const hit = resolveIncomingMessages(had, incoming, { hydrate: 4, merge: true, replace: true });
+    assert.deepEqual(
+      hit.messages.map((row) => row.id),
+      ['user-2', 'assistant-2'],
+    );
+    assert.equal(hit.skipHydrate, undefined);
+    assert.equal(hit.live, false);
+  });
+
+  it('keeps the user bubble that belongs to a live assistant tail', () => {
+    const messages = [
+      { id: 'u1', role: 'user' },
+      { id: 'a1', role: 'assistant' },
+      { id: 'u2', role: 'user' },
+      { id: 'a2', role: 'assistant' },
+    ];
+    assert.deepEqual(
+      pairedLiveTail(messages, 1).map((row) => row.id),
+      ['u2', 'a2'],
     );
   });
 

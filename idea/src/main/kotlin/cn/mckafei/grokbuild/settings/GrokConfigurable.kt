@@ -23,6 +23,7 @@ class GrokConfigurable : Configurable {
     private val preferWorkspace = JBCheckBox("Prefer workspace grok binary")
     private val includeSelection = JBCheckBox("Include current selection when sending")
     private val alwaysApprove = JBCheckBox("Always approve tool permissions")
+    private val useTerminal = JBCheckBox("Allow slash commands, skills, and shell tools")
     private val notifySound = JBCheckBox("Play a sound when a turn finishes or is interrupted")
     private val permission = ComboBox(arrayOf("ask", "acceptEdits", "auto"))
     private val locale = ComboBox(arrayOf("auto", "en", "zh-CN"))
@@ -50,6 +51,7 @@ class GrokConfigurable : Configurable {
             .addComponent(preferWorkspace, 8)
             .addComponent(includeSelection, 4)
             .addComponent(alwaysApprove, 4)
+            .addComponent(useTerminal, 4)
             .addComponent(notifySound, 4)
             .addComponentFillVertically(JPanel(), 0)
             .panel
@@ -85,6 +87,7 @@ class GrokConfigurable : Configurable {
         preferWorkspace.isSelected = original.preferWorkspaceBinary
         includeSelection.isSelected = original.includeSelectionOnSend
         alwaysApprove.isSelected = original.alwaysApprove
+        useTerminal.isSelected = original.useTerminal
         notifySound.isSelected = original.notifySound
         permission.selectedItem = original.permissionMode
         locale.selectedItem = original.locale
@@ -103,6 +106,7 @@ class GrokConfigurable : Configurable {
             permissionMode = permission.selectedItem as? String ?: "ask",
             includeSelectionOnSend = includeSelection.isSelected,
             alwaysApprove = alwaysApprove.isSelected,
+            useTerminal = useTerminal.isSelected,
             locale = locale.selectedItem as? String ?: "auto",
             notifySound = notifySound.isSelected,
             termEncoding = termEncoding.selectedItem as? String ?: "utf-8",

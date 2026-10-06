@@ -17,8 +17,11 @@ export function mergeTranscript<T extends { id?: string }>(had: T[], incoming: T
 export function resolveIncomingMessages<T extends { id?: string }>(
   had: T[],
   incoming: T[],
-  flags: { merge?: boolean; mergeTranscript?: boolean; hydrate?: number },
+  flags: { merge?: boolean; mergeTranscript?: boolean; hydrate?: number; replace?: boolean },
 ): { messages: T[]; skipHydrate?: number; live: boolean } {
+  if (flags.replace) {
+    return { messages: incoming, live: false };
+  }
   const live = Boolean(flags.merge || flags.mergeTranscript);
   const messages = live ? mergeTranscript(had, incoming) : incoming;
   if (typeof flags.hydrate !== 'number') {
@@ -29,6 +32,18 @@ export function resolveIncomingMessages<T extends { id?: string }>(
     return { messages, live };
   }
   return { messages: merged, skipHydrate: flags.hydrate, live };
+}
+
+/** Live tail plus the user bubble that belongs to the streaming assistant. */
+export function pairedLiveTail<T extends { role?: string }>(messages: T[], min = 2): T[] {
+  if (messages.length <= min) {
+    return messages;
+  }
+  let start = messages.length - min;
+  if (start > 0 && messages[start]?.role === 'assistant' && messages[start - 1]?.role === 'user') {
+    start -= 1;
+  }
+  return messages.slice(start);
 }
 
 function appendUnseen<T extends { id?: string }>(had: T[], incoming: T[]): T[] {

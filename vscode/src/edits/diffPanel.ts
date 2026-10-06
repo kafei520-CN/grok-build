@@ -47,7 +47,7 @@ export class GrokDiffPanel {
         ],
       },
     );
-    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'icon.png');
+    panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'grok-icon.svg');
     const view = new GrokDiffPanel(context, panel, payload, handlers);
     GrokDiffPanel.current = view;
     return view;

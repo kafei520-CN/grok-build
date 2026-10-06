@@ -3,6 +3,7 @@ import { formatDuration, toolKindLabel, turnSourceText } from '../../core/i18n';
 import { permissionButtonClass, permissionLabelKey } from '../../core/permissions';
 import { permissionActions, permissionNeedsCancel, permissionTarget } from '../../core/permissions/permissionView';
 import { renderTermHtml } from '../../terminal/termAnsi';
+import { traceBeats, type TurnBeat } from '../../session/traceBeats';
 import type {
   ChatMessage,
   ChatState,
@@ -14,8 +15,15 @@ import type {
 import { copyText, loc, post, render, tr, ui } from '../app';
 import { bindHoverPin } from '../chrome/popover';
 import { patchJumpBottom } from '../chrome/composer';
-import { onUserScroll, shouldPinToBottom, type TranscriptScroll } from '../chrome/scroll';
+import {
+  nearBottom,
+  shouldPinToBottom,
+  stickFromScroll,
+  userHeldScroll,
+  type TranscriptScroll,
+} from '../chrome/scroll';
 import { bootStar, errorCard, home, loginCard, panel, setupCard } from '../chrome';
+import { superGrokKind } from '../shell/superGrokMark';
 import { button, iconButton } from '../dom';
 import {
   iconAskHint,
@@ -27,9 +35,12 @@ import {
   iconEdit,
   iconFork,
   iconRewind,
+  grokBootMark,
   iconStar,
   toolIcon,
 } from '../icons';
+import { fileIconSvg } from './fileIcons';
+import { fileLinkHtml, takeHeroFiles } from './fileLinks';
 import {
   fileName,
   renderMarkdown,
@@ -37,6 +48,14 @@ import {
   STREAM_LIVE_KEEP,
   streamingMarkdownPatch,
 } from './markdown';
+import {
+  HISTORY_FLUSH_TURNS,
+  HISTORY_SLICE_MS,
+  HISTORY_SLICE_TURNS,
+  HISTORY_TAIL,
+  paintAlign,
+  tailStart,
+} from './historyPaint';
 
 type Turn = { user?: ChatMessage; assistant?: ChatMessage };
 
@@ -56,6 +75,7 @@ export function patchBody(parent: HTMLElement): void {
   const kind = bodyKind(ui.state);
   let body = document.getElementById('grok-body') as HTMLElement | null;
   if (!body) {
+    cancelHistoryPaint();
     body = renderBody();
     body.id = 'grok-body';
     const header = document.getElementById('grok-header');
@@ -72,6 +92,7 @@ export function patchBody(parent: HTMLElement): void {
     return;
   }
   if (body.dataset.kind !== kind) {
+    cancelHistoryPaint();
     const next = renderBody();
     next.id = 'grok-body';
     body.replaceWith(next);
@@ -113,7 +134,10 @@ function bodyKind(state: ChatState): string {
     return 'restoring';
   }
   if (state.messages.length === 0) {
-    return `home:${state.sessions?.length ?? 0}:${state.currentSessionId ?? ''}`;
+    const brand = state.billingLoading
+      ? 'wait'
+      : (superGrokKind(state.account, state.billing) ?? 'logo');
+    return `home:${state.sessions?.length ?? 0}:${state.currentSessionId ?? ''}:${brand}`;
   }
   return 'chat';
 }
@@ -146,21 +170,24 @@ function fillBody(el: HTMLElement): void {
   }
   if (ui.state.messages.length === 0) {
     el.append(home());
+    if (ui.state.permission) {
+      el.append(permissionBar());
+    }
+    if (visibleAsk()) {
+      el.append(askBar());
+    }
   } else {
     const transcript = document.createElement('div');
     transcript.className = 'transcript';
     transcript.id = 'transcript';
-    const grouped = groupTurns(ui.state.messages);
-    grouped.forEach((turn, index) => {
-      transcript.append(turnEl(turn, index < grouped.length - 1));
-    });
+    syncTranscript(transcript);
+    if (ui.state.permission) {
+      transcript.append(permissionBar());
+    }
+    if (visibleAsk()) {
+      transcript.append(askBar());
+    }
     el.append(transcript);
-  }
-  if (ui.state.permission) {
-    el.append(permissionBar());
-  }
-  if (visibleAsk()) {
-    el.append(askBar());
   }
   if (ui.state.error && status === 'error') {
     el.append(errorBanner(ui.state.error));
@@ -175,53 +202,244 @@ function patchTranscript(): void {
   if (
     ui.state.status === 'streaming' &&
     !ui.editingUserId &&
+    transcript.dataset.sid === (ui.state.currentSessionId ?? '') &&
     patchLastStreamingTurn(transcript)
   ) {
     scrollTranscript();
     syncWorkClock();
     return;
   }
-  const grouped = groupTurns(ui.state.messages);
-  const nodes = [...transcript.children] as HTMLElement[];
-  for (let i = 0; i < grouped.length; i++) {
-    const turn = grouped[i];
-    const id = turnId(turn);
-    const split = i < grouped.length - 1;
-    const node = nodes[i];
-    if (!node || node.dataset.turnId !== id) {
-      const fresh = turnEl(turn, split);
-      if (node) {
-        node.replaceWith(fresh);
-      } else {
-        transcript.append(fresh);
-      }
-      continue;
-    }
-    if (turn.assistant?.streaming) {
-      syncUserBubble(node, turn.user);
-      patchStreamingTurn(node, turn);
-      continue;
-    }
-    if (turn.assistant && thinkingWork(node)?.classList.contains('live')) {
-      ui.workOpen.set(turn.assistant.id, false);
-    }
-    const sig = turnSig(turn, split);
-    if (node.dataset.sig !== sig) {
-      node.replaceWith(turnEl(turn, split));
-    } else if (turn.assistant && visibleSteps(turn.assistant).length && !node.querySelector('.steps-card')) {
-      node.replaceWith(turnEl(turn, split));
-    } else if (turn.assistant && ui.workOpen.get(turn.assistant.id) === false) {
-      const work = thinkingWork(node);
-      if (work?.open) {
-        work.open = false;
-      }
-    }
-  }
-  while (transcript.children.length > grouped.length) {
-    transcript.lastElementChild?.remove();
-  }
+  syncTranscript(transcript);
+  dockPrompts(transcript);
   scrollTranscript();
   syncWorkClock();
+}
+
+let historyPaintGen = 0;
+let historyPaintRaf = 0;
+
+function cancelHistoryPaint(): void {
+  historyPaintGen += 1;
+  if (historyPaintRaf) {
+    cancelAnimationFrame(historyPaintRaf);
+    historyPaintRaf = 0;
+  }
+  document.getElementById('transcript')?.classList.remove('catching-up');
+}
+
+function syncTranscript(transcript: HTMLElement): void {
+  const session = ui.state.currentSessionId ?? '';
+  if (transcript.dataset.sid !== session) {
+    cancelHistoryPaint();
+    clearTurns(transcript);
+    transcript.dataset.sid = session;
+  }
+  const grouped = groupTurns(ui.state.messages);
+  const wanted = grouped.map(turnId);
+  const nodes = turnNodes(transcript);
+  const align = paintAlign(
+    wanted,
+    nodes.map((node) => node.dataset.turnId ?? ''),
+  );
+  if (align.kind === 'equal') {
+    patchTurnRange(grouped, nodes, 0);
+    return;
+  }
+  if (align.kind === 'prefix') {
+    patchTurnRange(grouped, nodes, 0);
+    if (align.extra <= HISTORY_TAIL) {
+      paintTurnRange(transcript, grouped, nodes.length, grouped.length);
+    } else {
+      scheduleHistoryPaint(transcript);
+    }
+    return;
+  }
+  if (align.kind === 'trim') {
+    patchTurnRange(grouped, nodes.slice(0, grouped.length), 0);
+    while (turnNodes(transcript).length > grouped.length) {
+      turnNodes(transcript).at(-1)?.remove();
+    }
+    return;
+  }
+  if (align.kind === 'suffix') {
+    scheduleHistoryPaint(transcript);
+    return;
+  }
+  cancelHistoryPaint();
+  clearTurns(transcript);
+  const start = tailStart(grouped.length);
+  paintTurnRange(transcript, grouped, start, grouped.length);
+  if (start > 0) {
+    scheduleHistoryPaint(transcript);
+  }
+}
+
+function clearTurns(transcript: HTMLElement): void {
+  for (const node of turnNodes(transcript)) {
+    node.remove();
+  }
+}
+
+function paintTurnRange(
+  transcript: HTMLElement,
+  grouped: Turn[],
+  start: number,
+  end: number,
+): void {
+  if (start >= end) {
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (let i = start; i < end; i++) {
+    frag.append(turnEl(grouped[i], i < grouped.length - 1));
+  }
+  const anchor = promptAnchor(transcript);
+  if (anchor) {
+    transcript.insertBefore(frag, anchor);
+  } else {
+    transcript.append(frag);
+  }
+}
+
+function patchTurnRange(grouped: Turn[], nodes: HTMLElement[], offset: number): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const at = offset + i;
+    const turn = grouped[at];
+    if (!turn) {
+      break;
+    }
+    syncTurnNode(nodes[i], turn, at < grouped.length - 1);
+  }
+}
+
+function syncTurnNode(node: HTMLElement, turn: Turn, split: boolean): void {
+  const id = turnId(turn);
+  if (node.dataset.turnId !== id) {
+    node.replaceWith(turnEl(turn, split));
+    return;
+  }
+  if (turn.assistant?.streaming) {
+    syncUserBubble(node, turn.user);
+    patchStreamingTurn(node, turn);
+    return;
+  }
+  if (turn.assistant && node.querySelector('.trace.live, details.work.live')) {
+    ui.workOpen.set(turn.assistant.id, false);
+  }
+  const sig = turnSig(turn, split);
+  if (node.dataset.sig !== sig) {
+    node.replaceWith(turnEl(turn, split));
+  } else if (turn.assistant && visibleSteps(turn.assistant).length && !node.querySelector('.steps-card')) {
+    node.replaceWith(turnEl(turn, split));
+  } else if (turn.assistant && ui.workOpen.get(turn.assistant.id) === false) {
+    const work = thinkingWork(node);
+    if (work?.open) {
+      work.open = false;
+    }
+  }
+}
+
+function scheduleHistoryPaint(transcript: HTMLElement): void {
+  if (historyPaintRaf) {
+    return;
+  }
+  const token = historyPaintGen;
+  const pending: HTMLElement[] = [];
+  const finish = (flushed: boolean) => {
+    transcript.classList.remove('catching-up');
+    if (flushed && ui.stickToBottom) {
+      pinTranscript(transcript);
+    }
+  };
+  const flushPending = (before: HTMLElement | null) => {
+    if (!pending.length) {
+      return false;
+    }
+    const fromBottom = transcript.scrollHeight - transcript.scrollTop;
+    const frag = document.createDocumentFragment();
+    for (const node of pending) {
+      frag.append(node);
+    }
+    pending.length = 0;
+    const anchor = before ?? promptAnchor(transcript);
+    if (anchor) {
+      transcript.insertBefore(frag, anchor);
+    } else {
+      transcript.append(frag);
+    }
+    assignScrollTop(transcript, transcript.scrollHeight - fromBottom);
+    return true;
+  };
+  const run = () => {
+    historyPaintRaf = 0;
+    if (token !== historyPaintGen) {
+      return;
+    }
+    if (document.getElementById('transcript') !== transcript) {
+      return;
+    }
+    transcript.classList.add('catching-up');
+    const grouped = groupTurns(ui.state.messages);
+    const wanted = grouped.map(turnId);
+    const nodes = turnNodes(transcript);
+    const next = paintAlign(
+      wanted,
+      nodes.map((node) => node.dataset.turnId ?? ''),
+    );
+    if (next.kind !== 'suffix' && next.kind !== 'prefix') {
+      const flushed = flushPending(nodes[0] ?? null);
+      finish(flushed || next.kind === 'equal');
+      return;
+    }
+    const started = performance.now();
+    let built = 0;
+    if (next.kind === 'suffix') {
+      let idx = next.extra - 1 - pending.length;
+      while (idx >= 0 && built < HISTORY_SLICE_TURNS) {
+        if (built > 0 && performance.now() - started >= HISTORY_SLICE_MS) {
+          break;
+        }
+        const turn = grouped[idx];
+        if (!turn) {
+          break;
+        }
+        pending.unshift(turnEl(turn, idx < grouped.length - 1));
+        built += 1;
+        idx -= 1;
+      }
+      const remain = next.extra - pending.length;
+      if (remain <= 0 || pending.length >= HISTORY_FLUSH_TURNS) {
+        flushPending(nodes[0] ?? null);
+      }
+    } else {
+      let idx = nodes.length + pending.length;
+      while (idx < grouped.length && built < HISTORY_SLICE_TURNS) {
+        if (built > 0 && performance.now() - started >= HISTORY_SLICE_MS) {
+          break;
+        }
+        const turn = grouped[idx];
+        if (!turn) {
+          break;
+        }
+        pending.push(turnEl(turn, idx < grouped.length - 1));
+        built += 1;
+        idx += 1;
+      }
+      if (idx >= grouped.length || pending.length >= HISTORY_FLUSH_TURNS) {
+        flushPending(promptAnchor(transcript) as HTMLElement | null);
+      }
+    }
+    const left = paintAlign(
+      wanted,
+      turnNodes(transcript).map((node) => node.dataset.turnId ?? ''),
+    );
+    if (left.kind === 'suffix' || left.kind === 'prefix' || pending.length) {
+      historyPaintRaf = requestAnimationFrame(run);
+      return;
+    }
+    finish(true);
+  };
+  historyPaintRaf = requestAnimationFrame(run);
 }
 
 function lastTurn(messages: ChatMessage[]): Turn | undefined {
@@ -244,7 +462,7 @@ function patchLastStreamingTurn(transcript: HTMLElement): boolean {
   if (!turn?.assistant?.streaming) {
     return false;
   }
-  const node = transcript.lastElementChild as HTMLElement | null;
+  const node = turnNodes(transcript).at(-1);
   if (!node || node.dataset.turnId !== turnId(turn)) {
     return false;
   }
@@ -267,23 +485,14 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
     return;
   }
   if (hasWork(assistant)) {
-    let work = thinkingWork(col);
-    if (!work) {
-      work = workBlock(assistant);
-      col.prepend(work);
+    let trace = col.querySelector(':scope > .trace') as HTMLElement | null;
+    if (!trace) {
+      col.querySelector(':scope > details.work')?.remove();
+      trace = traceBlock(assistant);
+      col.prepend(trace);
     } else {
-      work.className = assistant.streaming ? 'work live' : 'work';
-      const mark = work.querySelector('summary .mark');
-      if (mark) {
-        mark.className = assistant.streaming ? 'mark pulse' : 'mark';
-      }
-      const label = work.querySelector('summary .work-label');
-      if (label) {
-        label.textContent = workLabel(assistant);
-      }
-      if (work.open) {
-        patchWorkBody(work.querySelector('.work-body') as HTMLElement | null, assistant);
-      }
+      trace.classList.toggle('live', Boolean(assistant.streaming));
+      patchTrace(trace, assistant);
     }
     col.querySelector('.pulse')?.remove();
   }
@@ -292,15 +501,19 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
     if (!answer) {
       answer = document.createElement('div');
       answer.className = 'md answer';
-      const work = thinkingWork(col);
-      if (work) {
-        work.after(answer);
+      const trace = col.querySelector(':scope > .trace, :scope > details.work');
+      if (trace) {
+        trace.after(answer);
       } else {
         col.prepend(answer);
       }
     }
-    setMarkdown(answer, assistant.text, Boolean(assistant.streaming));
+    paintAssistantAnswer(answer, assistant.text, Boolean(assistant.streaming));
     col.querySelector('.pulse')?.remove();
+  }
+  const liveTrace = col.querySelector('.trace');
+  if (liveTrace instanceof HTMLElement) {
+    syncElapsed(liveTrace, assistant);
   }
   patchErrorCard(col, assistant);
   patchStepsCard(col, assistant);
@@ -319,6 +532,8 @@ function patchWorkBody(body: HTMLElement | null, message: ChatMessage): void {
       body.prepend(think);
     }
     setMarkdown(think, message.thinking, streaming);
+  } else {
+    body.querySelector('.md.thinking')?.remove();
   }
   if (message.plan) {
     let plan = body.querySelector('.md.plan') as HTMLElement | null;
@@ -401,7 +616,7 @@ function setMarkdown(el: HTMLElement, src: string, streaming: boolean): void {
     timer: setTimeout(() => {
       const next = pendingMarkdown.get(el);
       pendingMarkdown.delete(el);
-      if (next) {
+      if (next && el.dataset.md !== 'd') {
         flush(next.src, 's');
       }
     }, delay),
@@ -432,7 +647,7 @@ function paintStreamingMarkdown(el: HTMLElement, text: string): void {
     appendCommitted(stable, patch.append);
     streamCommitted.set(el, committed);
   }
-  paintLiveMarkdown(live, rest, rest.length > 800 || text.length > 8_000);
+  paintLiveMarkdown(live, rest, true);
 }
 
 function appendCommitted(stable: HTMLElement, added: string): void {
@@ -491,8 +706,28 @@ function visibleAsk(): ChatState['ask'] {
   return ask;
 }
 
+function promptHost(body: HTMLElement): HTMLElement {
+  return document.getElementById('transcript') ?? body;
+}
+
+function turnNodes(transcript: HTMLElement): HTMLElement[] {
+  return [...transcript.children].filter(
+    (el): el is HTMLElement => el instanceof HTMLElement && el.classList.contains('turn'),
+  );
+}
+
+function promptAnchor(transcript: HTMLElement): Element | null {
+  return transcript.querySelector(':scope > .permission, :scope > .ask-card.ask-prompt');
+}
+
+function dockPrompts(transcript: HTMLElement): void {
+  for (const el of [...transcript.querySelectorAll(':scope > .permission, :scope > .ask-card.ask-prompt')]) {
+    transcript.append(el);
+  }
+}
+
 function promptAskCards(body: HTMLElement): HTMLElement[] {
-  return [...body.querySelectorAll(':scope > .ask-card.ask-prompt')] as HTMLElement[];
+  return [...promptHost(body).querySelectorAll(':scope > .ask-card.ask-prompt')] as HTMLElement[];
 }
 
 function clearAskLocal(): void {
@@ -543,23 +778,26 @@ function patchAsk(body: HTMLElement): void {
   }
   if (existing) {
     fillAskCard(existing);
+    promptHost(body).append(existing);
     return;
   }
-  body.append(fillAskCard());
+  promptHost(body).append(fillAskCard());
 }
 
 function patchPermission(body: HTMLElement): void {
-  const existing = body.querySelector('.permission') as HTMLElement | null;
+  const host = promptHost(body);
+  const existing = host.querySelector(':scope > .permission') as HTMLElement | null;
   const perm = ui.state.permission;
   if (!perm) {
     existing?.remove();
     return;
   }
   if (existing?.dataset.id === perm.requestId) {
+    host.append(existing);
     return;
   }
   existing?.remove();
-  body.append(permissionBar());
+  host.append(permissionBar());
 }
 
 function patchErrorBanner(body: HTMLElement): void {
@@ -589,11 +827,16 @@ const scrollState: TranscriptScroll = {
   pinLock: false,
 };
 
+let pinFrame = 0;
+let pinDepth = 0;
+let lastPinAt = 0;
+let contentObserver: ResizeObserver | null = null;
+let childObserver: MutationObserver | null = null;
+
 function pinChatIfNeeded(): void {
-  if (bodyKind(ui.state) !== 'chat') {
+  if (bodyKind(ui.state) !== 'chat' || !ui.stickToBottom) {
     return;
   }
-  ui.stickToBottom = true;
   scrollTranscript(true);
 }
 
@@ -603,11 +846,13 @@ export function scrollTranscript(force = false): void {
     return;
   }
   bindTranscriptScroll(el);
-  if (force) {
+  if (el.classList.contains('catching-up')) {
+    return;
+  }
+  if (force && ui.stickToBottom) {
     scrollState.lastUserScroll = 0;
   }
   scrollState.stickToBottom = ui.stickToBottom;
-  scrollState.transcriptScroll = ui.transcriptScroll;
   if (
     !shouldPinToBottom({
       stickToBottom: ui.stickToBottom,
@@ -619,27 +864,73 @@ export function scrollTranscript(force = false): void {
   ) {
     return;
   }
-  pinTranscript(el);
-  if (force) {
+  schedulePin();
+}
+
+function holdPinLock(): void {
+  pinDepth += 1;
+  scrollState.pinLock = true;
+}
+
+function releasePinLock(): void {
+  requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      if (!ui.stickToBottom) {
-        return;
-      }
-      const node = document.getElementById('transcript');
-      if (node) {
-        pinTranscript(node);
-      }
+      pinDepth = Math.max(0, pinDepth - 1);
+      scrollState.pinLock = pinDepth > 0;
     });
+  });
+}
+
+function assignScrollTop(el: HTMLElement, top: number): void {
+  const next = Math.max(0, top);
+  if (Math.abs(el.scrollTop - next) < 1) {
+    ui.transcriptScroll = el.scrollTop;
+    scrollState.transcriptScroll = el.scrollTop;
+    return;
   }
-  patchJumpBottom();
+  holdPinLock();
+  el.scrollTop = next;
+  ui.transcriptScroll = el.scrollTop;
+  scrollState.transcriptScroll = el.scrollTop;
+  releasePinLock();
 }
 
 function pinTranscript(el: HTMLElement): void {
-  scrollState.pinLock = true;
-  el.scrollTop = el.scrollHeight;
-  ui.transcriptScroll = el.scrollTop;
-  scrollState.transcriptScroll = el.scrollTop;
-  scrollState.pinLock = false;
+  const top = Math.max(0, el.scrollHeight - el.clientHeight);
+  if (Math.abs(el.scrollTop - top) < 1) {
+    return;
+  }
+  lastPinAt = Date.now();
+  assignScrollTop(el, top);
+}
+
+function schedulePin(): void {
+  if (pinFrame) {
+    return;
+  }
+  pinFrame = requestAnimationFrame(() => {
+    pinFrame = 0;
+    const node = document.getElementById('transcript');
+    if (!node || node.classList.contains('catching-up')) {
+      return;
+    }
+    if (
+      !shouldPinToBottom({
+        stickToBottom: ui.stickToBottom,
+        lightbox: Boolean(ui.lightboxSrc),
+        now: Date.now(),
+        lastUserScroll: scrollState.lastUserScroll,
+      })
+    ) {
+      return;
+    }
+    pinTranscript(node);
+    patchJumpBottom();
+  });
+}
+
+function noteHold(): void {
+  scrollState.lastUserScroll = Date.now();
 }
 
 function bindTranscriptScroll(el?: HTMLElement | null): void {
@@ -648,26 +939,71 @@ function bindTranscriptScroll(el?: HTMLElement | null): void {
     return;
   }
   node.dataset.scrollBound = '1';
-  const markUser = () => {
-    scrollState.lastUserScroll = Date.now();
-  };
-  node.addEventListener('pointerdown', markUser, { passive: true });
-  node.addEventListener('wheel', markUser, { passive: true });
+  node.addEventListener(
+    'pointerdown',
+    () => {
+      let moved = false;
+      noteHold();
+      const move = () => {
+        moved = true;
+        noteHold();
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move);
+        document.removeEventListener('pointerup', up);
+        document.removeEventListener('pointercancel', up);
+        if (!moved) {
+          scrollState.lastUserScroll = 0;
+        }
+      };
+      document.addEventListener('pointermove', move);
+      document.addEventListener('pointerup', up);
+      document.addEventListener('pointercancel', up);
+    },
+    { passive: true },
+  );
+  node.addEventListener('wheel', noteHold, { passive: true });
+  node.addEventListener(
+    'keydown',
+    (event) => {
+      if (
+        event.key === 'PageUp' ||
+        event.key === 'PageDown' ||
+        event.key === 'Home' ||
+        event.key === 'End' ||
+        event.key === 'ArrowUp' ||
+        event.key === 'ArrowDown' ||
+        event.key === ' '
+      ) {
+        noteHold();
+      }
+    },
+    { passive: true },
+  );
   node.addEventListener(
     'scroll',
     () => {
       if (scrollState.pinLock) {
         return;
       }
-      const next = onUserScroll(scrollState, Date.now(), {
+      const metrics = {
         scrollTop: node.scrollTop,
         scrollHeight: node.scrollHeight,
         clientHeight: node.clientHeight,
-      });
+      };
+      // Layout growth and our own pin must not count as the user leaving the bottom.
+      if (!userHeldScroll(Date.now(), scrollState.lastUserScroll)) {
+        scrollState.transcriptScroll = metrics.scrollTop;
+        ui.transcriptScroll = metrics.scrollTop;
+        if (ui.stickToBottom && !nearBottom(metrics) && Date.now() - lastPinAt > 80) {
+          schedulePin();
+        }
+        return;
+      }
+      const next = stickFromScroll(scrollState, metrics);
       if (next === scrollState) {
         return;
       }
-      scrollState.lastUserScroll = next.lastUserScroll;
       scrollState.stickToBottom = next.stickToBottom;
       scrollState.transcriptScroll = next.transcriptScroll;
       ui.stickToBottom = next.stickToBottom;
@@ -676,6 +1012,46 @@ function bindTranscriptScroll(el?: HTMLElement | null): void {
     },
     { passive: true },
   );
+  watchTranscriptSize(node);
+}
+
+function watchTranscriptSize(node: HTMLElement): void {
+  contentObserver?.disconnect();
+  childObserver?.disconnect();
+  let seenHeight = node.scrollHeight;
+  contentObserver = new ResizeObserver(() => {
+    const h = node.scrollHeight;
+    if (h <= seenHeight) {
+      seenHeight = h;
+      return;
+    }
+    seenHeight = h;
+    schedulePin();
+  });
+  contentObserver.observe(node);
+  for (const child of node.children) {
+    if (child instanceof HTMLElement) {
+      contentObserver.observe(child);
+    }
+  }
+  childObserver = new MutationObserver((records) => {
+    if (!contentObserver) {
+      return;
+    }
+    for (const record of records) {
+      for (const removed of record.removedNodes) {
+        if (removed instanceof HTMLElement) {
+          contentObserver.unobserve(removed);
+        }
+      }
+      for (const added of record.addedNodes) {
+        if (added instanceof HTMLElement) {
+          contentObserver.observe(added);
+        }
+      }
+    }
+  });
+  childObserver.observe(node, { childList: true });
 }
 
 function turnId(turn: Turn): string {
@@ -802,11 +1178,39 @@ function userBubble(message: ChatMessage): HTMLElement {
     body.innerHTML = renderMarkdown(message.text);
     bubble.append(body);
   }
+  if (!editing && message.files?.length) {
+    bubble.append(messageFileRow(message));
+  }
   if (!editing && message.images?.length) {
     bubble.append(imageGallery(message.images));
   }
   el.append(bubble, userActions(message, editing));
   return el;
+}
+
+function messageFileRow(message: ChatMessage): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'msg-files';
+  for (const file of message.files ?? []) {
+    if (!file.path && !file.folder && !file.mimeType) {
+      const quote = document.createElement('span');
+      quote.className = 'chip chip-quote';
+      quote.textContent = file.label;
+      row.append(quote);
+      continue;
+    }
+    const wrap = document.createElement('span');
+    wrap.innerHTML = fileLinkHtml(
+      file.folder
+        ? { kind: 'folder', name: file.label, path: file.path }
+        : { kind: 'file', name: file.label, path: file.path ?? file.label },
+    );
+    const node = wrap.firstElementChild;
+    if (node) {
+      row.append(node);
+    }
+  }
+  return row;
 }
 
 function userActions(message: ChatMessage, editing: boolean): HTMLElement {
@@ -879,18 +1283,187 @@ function submitUserEdit(message: ChatMessage): void {
   scrollTranscript(true);
 }
 
+function paintAssistantAnswer(body: HTMLElement, text: string, streaming: boolean): void {
+  const split = takeHeroFiles(text);
+  setMarkdown(body, split.body, streaming);
+  const parent = body.parentElement;
+  if (!parent) {
+    return;
+  }
+  let cards = parent.querySelector(':scope > .hero-files');
+  if (!split.paths.length) {
+    cards?.remove();
+    return;
+  }
+  if (!(cards instanceof HTMLElement)) {
+    cards = document.createElement('div');
+    cards.className = 'hero-files';
+    body.after(cards);
+  }
+  const key = split.paths.join('\n');
+  if (cards.dataset.files === key) {
+    return;
+  }
+  cards.dataset.files = key;
+  cards.replaceChildren(...split.paths.map((path) => heroCard(path)));
+}
+
+function heroCard(path: string): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'hero-file';
+  card.dataset.path = path;
+  const icon = document.createElement('span');
+  icon.className = 'hero-deck';
+  const ext = extOfPath(path);
+  icon.append(deckSheet(), deckFace(fileIconSvg(heroIconExt(path, ext))));
+  const copy = document.createElement('div');
+  copy.className = 'hero-file-copy';
+  const filePath = document.createElement('div');
+  filePath.className = 'hero-file-path';
+  filePath.title = path;
+  filePath.textContent = shortHeroPath(path);
+  const kind = document.createElement('div');
+  kind.className = 'hero-file-kind';
+  kind.textContent = heroKindLabel(heroKindOf(path));
+  copy.append(filePath, kind);
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'hero-file-open';
+  open.textContent = heroOpenLabel(ext);
+  open.addEventListener('click', (event) => {
+    event.stopPropagation();
+    post({ type: 'openFile', path });
+  });
+  const menuBtn = document.createElement('button');
+  menuBtn.type = 'button';
+  menuBtn.className = 'hero-file-menu-btn';
+  menuBtn.innerHTML = iconChevron();
+  const menu = document.createElement('div');
+  menu.className = 'hero-file-menu';
+  menu.hidden = true;
+  const revealItem = document.createElement('button');
+  revealItem.type = 'button';
+  revealItem.className = 'hero-file-menu-item';
+  revealItem.textContent = tr('heroReveal');
+  revealItem.addEventListener('click', (event) => {
+    event.stopPropagation();
+    menu.hidden = true;
+    post({ type: 'revealFile', path });
+  });
+  menu.append(revealItem);
+  menuBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    menu.hidden = !menu.hidden;
+  });
+  const actions = document.createElement('div');
+  actions.className = 'hero-file-actions';
+  actions.append(open, menuBtn, menu);
+  card.addEventListener('click', () => post({ type: 'openFile', path }));
+  card.append(icon, copy, actions);
+  return card;
+}
+
+function deckSheet(): HTMLElement {
+  const sheet = document.createElement('span');
+  sheet.className = 'hero-sheet';
+  const mark = document.createElement('span');
+  mark.className = 'hero-expand';
+  mark.innerHTML =
+    '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 6V2.6H6M10 2.6h3.4V6M13.4 10v3.4H10M6 13.4H2.6V10"/></svg>';
+  sheet.append(mark);
+  return sheet;
+}
+
+function deckFace(svg: string): HTMLElement {
+  const face = document.createElement('span');
+  face.className = 'hero-face';
+  face.innerHTML = svg;
+  return face;
+}
+
+type HeroKind = 'web' | 'image' | 'folder' | 'app' | 'file';
+
+function heroKindOf(path: string): HeroKind {
+  if (/^https?:\/\//i.test(path)) {
+    return 'web';
+  }
+  const ext = extOfPath(path);
+  if (ext === 'html' || ext === 'htm') {
+    return 'web';
+  }
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'].includes(ext)) {
+    return 'image';
+  }
+  if (['exe', 'msi', 'bat', 'cmd', 'lnk', 'app'].includes(ext)) {
+    return 'app';
+  }
+  if (!ext || /[/\\]$/.test(path)) {
+    return 'folder';
+  }
+  return 'file';
+}
+
+function heroIconExt(path: string, ext: string): string {
+  const kind = heroKindOf(path);
+  if (kind === 'web') {
+    return 'html';
+  }
+  if (kind === 'folder') {
+    return 'folder';
+  }
+  return ext || 'default';
+}
+
+function extOfPath(path: string): string {
+  const base = path.replace(/\\/g, '/').split('/').pop() ?? '';
+  const dot = base.lastIndexOf('.');
+  return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
+}
+
+function shortHeroPath(path: string): string {
+  if (path.length <= 42) {
+    return path;
+  }
+  return `${path.slice(0, 24)}…${path.slice(-12)}`;
+}
+
+function heroKindLabel(kind: HeroKind): string {
+  if (kind === 'web') {
+    return tr('heroKindWeb');
+  }
+  if (kind === 'image') {
+    return tr('heroKindImage');
+  }
+  if (kind === 'folder') {
+    return tr('heroKindFolder');
+  }
+  if (kind === 'app') {
+    return tr('heroKindApp');
+  }
+  return tr('heroKindFile');
+}
+
+function heroOpenLabel(ext: string): string {
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(ext)) {
+    return tr('heroOpenImage');
+  }
+  if (['html', 'htm'].includes(ext)) {
+    return tr('heroOpenBrowser');
+  }
+  return tr('heroOpen');
+}
+
 function assistantColumn(message: ChatMessage): HTMLElement {
   const el = document.createElement('article');
   el.className = 'msg assistant';
   if (hasWork(message)) {
-    el.append(workBlock(message));
+    const trace = traceBlock(message);
+    el.append(message.streaming ? trace : finishedWork(message, trace));
   }
   if (message.text) {
     const body = document.createElement('div');
     body.className = 'md answer';
-    body.dataset.len = String(message.text.length);
-    body.dataset.md = message.streaming ? 's' : 'd';
-    body.innerHTML = renderMarkdown(message.text);
+    paintAssistantAnswer(body, message.text, Boolean(message.streaming));
     el.append(body);
   } else if (message.error?.retrying) {
     el.append(turnErrorCard(message));
@@ -898,8 +1471,8 @@ function assistantColumn(message: ChatMessage): HTMLElement {
     const pulse = document.createElement('div');
     pulse.className = 'pulse';
     const star = document.createElement('span');
-    star.className = 'mark pulse';
-    star.innerHTML = iconStar();
+    star.className = 'mark';
+    star.innerHTML = grokBootMark();
     pulse.append(star, document.createTextNode(tr('working')));
     el.append(pulse);
   }
@@ -916,6 +1489,11 @@ function assistantColumn(message: ChatMessage): HTMLElement {
     el.append(turnMeta(message));
     if (message.edits?.length) {
       el.append(changesBlock(message.id, message.edits));
+    }
+  } else {
+    const trace = el.querySelector('.trace');
+    if (trace instanceof HTMLElement) {
+      syncElapsed(trace, message);
     }
   }
   return el;
@@ -941,7 +1519,7 @@ function patchErrorCard(col: HTMLElement, message: ChatMessage): void {
     answer.after(next);
     return;
   }
-  const work = thinkingWork(col);
+  const work = col.querySelector(':scope > .trace, :scope > details.work');
   if (work) {
     work.after(next);
     return;
@@ -1013,6 +1591,14 @@ function isCustomEndpointAuthError(error: { code?: string; message: string }): b
 
 function hasWork(message: ChatMessage): boolean {
   return Boolean(message.thinking || message.plan || message.tools.length);
+}
+
+/** 生成中有思考原文、计划或工具时展开，让思考原文留在面板里。 */
+function workShouldOpen(message: ChatMessage): boolean {
+  return Boolean(
+    message.streaming &&
+      (message.thinking || message.plan || message.tools.length > 0 || visibleSteps(message).length > 0),
+  );
 }
 
 function thinkingWork(root: ParentNode): HTMLDetailsElement | null {
@@ -1214,7 +1800,7 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
   const el = document.createElement('details');
   el.className = message.streaming ? 'work live' : 'work';
   el.dataset.mid = message.id;
-  const open = ui.workOpen.get(message.id) ?? Boolean(message.streaming);
+  const open = ui.workOpen.get(message.id) ?? workShouldOpen(message);
   el.open = open;
   el.addEventListener('toggle', (event) => {
     if (!event.isTrusted) {
@@ -1232,7 +1818,7 @@ function workBlock(message: ChatMessage): HTMLDetailsElement {
   mark.innerHTML = iconStar();
   const label = document.createElement('span');
   label.className = 'work-label';
-  label.textContent = workLabel(message);
+  paintWorkLabel(label, message);
   summary.append(mark, label);
   const body = document.createElement('div');
   body.className = 'work-body';
@@ -1267,17 +1853,8 @@ function paintWorkLabels(): void {
   if (!live || live.role !== 'assistant' || !live.streaming) {
     return;
   }
-  for (const node of document.querySelectorAll('details.work.live[data-mid]')) {
-    if (!(node instanceof HTMLElement) || node.dataset.mid !== live.id) {
-      continue;
-    }
-    const label = node.querySelector('.work-label');
-    if (label) {
-      label.textContent = workLabel(live);
-    }
-  }
   const tools = new Map(live.tools.map((tool) => [tool.id, tool]));
-  for (const node of document.querySelectorAll('.work.live .tool-row[data-id]')) {
+  for (const node of document.querySelectorAll('.trace.live .trace-tool[data-id]')) {
     if (!(node instanceof HTMLElement) || !node.dataset.id) {
       continue;
     }
@@ -1286,6 +1863,17 @@ function paintWorkLabels(): void {
       paintTermElapsed(node, tool);
     }
   }
+  const label = document.querySelector('.trace-live-foot .trace-live-time');
+  if (label) {
+    const time = durationText(live);
+    label.textContent = time ? tr('elapsedLive', { time }) : tr('thinkingNow');
+  }
+}
+
+function paintWorkLabel(el: HTMLElement, message: ChatMessage): void {
+  const text = workLabel(message);
+  el.textContent = text;
+  el.classList.toggle('shiny-text', Boolean(message.streaming && durationText(message)));
 }
 
 function workLabel(message: ChatMessage): string {
@@ -1316,6 +1904,345 @@ function durationText(message: ChatMessage): string {
     return '';
   }
   return formatDuration(ms);
+}
+
+function traceBlock(message: ChatMessage): HTMLElement {
+  const el = document.createElement('div');
+  el.className = message.streaming ? 'trace live' : 'trace';
+  el.dataset.mid = message.id;
+  const beats = document.createElement('div');
+  beats.className = 'trace-beats';
+  el.append(beats);
+  patchTrace(el, message);
+  return el;
+}
+
+function finishedWork(message: ChatMessage, trace: HTMLElement): HTMLElement {
+  const details = document.createElement('details');
+  details.className = 'work';
+  details.dataset.mid = message.id;
+  details.open = ui.workOpen.get(message.id) ?? false;
+  details.addEventListener('toggle', (event) => {
+    if (!event.isTrusted) {
+      return;
+    }
+    ui.workOpen.set(message.id, details.open);
+  });
+  const summary = document.createElement('summary');
+  const label = document.createElement('span');
+  label.className = 'work-label';
+  label.textContent = workLabel(message);
+  summary.append(label);
+  details.append(summary, trace);
+  return details;
+}
+
+function liveFoot(): HTMLElement {
+  const foot = document.createElement('div');
+  foot.className = 'trace-live-foot';
+  foot.hidden = true;
+  const mark = document.createElement('span');
+  mark.className = 'trace-live-mark';
+  mark.innerHTML = grokBootMark();
+  const time = document.createElement('span');
+  time.className = 'trace-live-time';
+  foot.append(mark, time);
+  return foot;
+}
+
+function placeLiveFoot(trace: HTMLElement, show: boolean): HTMLElement | null {
+  const col = trace.closest('.msg.assistant');
+  if (!(col instanceof HTMLElement)) {
+    return null;
+  }
+  trace.querySelector(':scope > .trace-live-foot')?.remove();
+  let foot = col.querySelector(':scope > .trace-live-foot');
+  if (!show) {
+    foot?.remove();
+    return null;
+  }
+  if (!(foot instanceof HTMLElement)) {
+    foot = liveFoot();
+  }
+  if (foot.parentElement !== col || col.lastElementChild !== foot) {
+    col.append(foot);
+  }
+  return foot;
+}
+
+function syncElapsed(trace: HTMLElement, message: ChatMessage): void {
+  const time = durationText(message);
+  const foot = placeLiveFoot(trace, Boolean(message.streaming));
+  if (!(foot instanceof HTMLElement)) {
+    return;
+  }
+  foot.hidden = false;
+  const label = foot.querySelector('.trace-live-time');
+  if (label) {
+    label.textContent = time ? tr('elapsedLive', { time }) : tr('thinkingNow');
+  }
+}
+
+function patchTrace(trace: HTMLElement, message: ChatMessage): void {
+  const host = trace.querySelector(':scope > .trace-beats');
+  if (!(host instanceof HTMLElement)) {
+    return;
+  }
+  const beats = traceBeats(message);
+  const plan = message.plan?.trim() ?? '';
+  const keys = beats.map((beat, index) => beatKey(beat, index));
+  if (plan) {
+    keys.push('plan');
+  }
+  const children = [...host.children] as HTMLElement[];
+  const same =
+    children.length === keys.length && children.every((node, index) => node.dataset.beat === keys[index]);
+  if (!same) {
+    const pool = new Map(children.map((node) => [node.dataset.beat ?? '', node]));
+    const frag = document.createDocumentFragment();
+    beats.forEach((beat, index) => {
+      const key = beatKey(beat, index);
+      const node = pool.get(key) ?? createBeat(beat, message);
+      node.dataset.beat = key;
+      updateBeat(node, beat, message);
+      frag.append(node);
+    });
+    if (plan) {
+      const node = pool.get('plan') ?? createPlanBeat();
+      node.dataset.beat = 'plan';
+      const copy = node.querySelector('.trace-copy');
+      if (copy instanceof HTMLElement) {
+        setMarkdown(copy, plan, Boolean(message.streaming));
+      }
+      frag.append(node);
+    }
+    host.replaceChildren(frag);
+    syncElapsed(trace, message);
+    return;
+  }
+  beats.forEach((beat, index) => {
+    const node = children[index];
+    if (node) {
+      updateBeat(node, beat, message);
+    }
+  });
+  if (plan) {
+    const copy = children[beats.length]?.querySelector('.trace-copy');
+    if (copy instanceof HTMLElement) {
+      setMarkdown(copy, plan, Boolean(message.streaming));
+    }
+  }
+  syncElapsed(trace, message);
+}
+
+function beatKey(beat: TurnBeat, index: number): string {
+  if (beat.kind === 'tool') {
+    return `tool:${beat.id}`;
+  }
+  if (beat.kind === 'task') {
+    return `task:${index}:${beat.phase}:${beat.id}`;
+  }
+  return `think:${index}`;
+}
+
+function createBeat(beat: TurnBeat, message: ChatMessage): HTMLElement {
+  if (beat.kind === 'task') {
+    return createTaskBeat();
+  }
+  if (beat.kind === 'tool') {
+    const tool = message.tools.find((item) => item.id === beat.id);
+    return tool ? createToolBeat(tool) : createThinkBeat();
+  }
+  return createThinkBeat();
+}
+
+function createTaskBeat(): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'trace-item trace-task';
+  const mark = document.createElement('span');
+  mark.className = 'trace-mark';
+  mark.innerHTML =
+    '<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3.2 4.6h1.1M6.2 4.6h6.4M3.2 8h1.1M6.2 8h6.4M3.2 11.4h1.1M6.2 11.4h6.4"/></svg>';
+  const label = document.createElement('span');
+  label.className = 'trace-task-label';
+  row.append(mark, label);
+  return row;
+}
+
+function createThinkBeat(): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'trace-item trace-think';
+  const mark = document.createElement('span');
+  mark.className = 'trace-mark';
+  mark.innerHTML = iconClock();
+  const copy = document.createElement('div');
+  copy.className = 'trace-copy md thinking';
+  row.append(mark, copy);
+  return row;
+}
+
+function createPlanBeat(): HTMLElement {
+  const row = createThinkBeat();
+  row.classList.add('trace-plan');
+  return row;
+}
+
+function createToolBeat(tool: ChatMessage['tools'][number]): HTMLElement {
+  const row = document.createElement('div');
+  row.className = `trace-item trace-tool tool-row ${tool.status}`;
+  row.dataset.id = tool.id;
+  if (tool.kind) {
+    row.dataset.kind = tool.kind;
+  }
+  const mark = document.createElement('span');
+  mark.className = 'trace-mark';
+  paintToolMark(mark, tool);
+  const main = document.createElement('div');
+  main.className = 'trace-main';
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'trace-tool-head';
+  const name = document.createElement('span');
+  name.className = 'trace-tool-name';
+  const chevron = document.createElement('span');
+  chevron.className = 'trace-chevron';
+  chevron.innerHTML = iconChevron();
+  head.append(name, chevron);
+  head.addEventListener('click', () => {
+    const next = !row.classList.contains('open');
+    ui.termOpen.set(tool.id, next);
+    row.classList.toggle('open', next);
+    const body = row.querySelector('.trace-tool-body');
+    if (body instanceof HTMLElement) {
+      body.hidden = !next;
+      if (next) {
+        const live = ui.state.messages.flatMap((item) => item.tools).find((item) => item.id === tool.id);
+        if (live) {
+          fillToolBody(body, live);
+          row.dataset.sig = toolRowSig(live);
+        }
+      }
+    }
+  });
+  const body = document.createElement('div');
+  body.className = 'trace-tool-body';
+  main.append(head, body);
+  row.append(mark, main);
+  return row;
+}
+
+function updateBeat(node: HTMLElement, beat: TurnBeat, message: ChatMessage): void {
+  if (beat.kind === 'think') {
+    const copy = node.querySelector('.trace-copy');
+    if (copy instanceof HTMLElement) {
+      setMarkdown(copy, beat.text, Boolean(message.streaming));
+    }
+    return;
+  }
+  if (beat.kind === 'task') {
+    const label = node.querySelector('.trace-task-label');
+    if (label) {
+      const name = beat.phase === 'completed' ? tr('taskCompleted') : tr('taskStarted');
+      label.textContent = `${name} ${beat.text}`;
+    }
+    return;
+  }
+  const tool = message.tools.find((item) => item.id === beat.id);
+  if (!tool) {
+    return;
+  }
+  node.className = `trace-item trace-tool tool-row ${tool.status}${toolHasBody(tool) ? '' : ' bare'}`;
+  node.dataset.id = tool.id;
+  if (tool.kind) {
+    node.dataset.kind = tool.kind;
+  }
+  const mark = node.querySelector('.trace-mark');
+  if (mark instanceof HTMLElement) {
+    paintToolMark(mark, tool);
+  }
+  const name = node.querySelector('.trace-tool-name');
+  if (name) {
+    name.textContent = toolHead(tool);
+  }
+  const open = toolOpen(tool) && toolHasBody(tool);
+  node.classList.toggle('open', open);
+  const body = node.querySelector('.trace-tool-body');
+  if (!(body instanceof HTMLElement)) {
+    return;
+  }
+  body.hidden = !open;
+  const sig = toolRowSig(tool);
+  if (node.dataset.sig !== sig) {
+    node.dataset.sig = sig;
+    if (open) {
+      fillToolBody(body, tool);
+    }
+  } else if (open) {
+    paintTermElapsed(node, tool);
+  }
+}
+
+function paintToolMark(mark: HTMLElement, tool: ChatMessage['tools'][number]): void {
+  const key = `${tool.status}|${tool.kind ?? ''}`;
+  if (mark.dataset.sig === key) {
+    return;
+  }
+  mark.dataset.sig = key;
+  if (tool.status === 'completed') {
+    mark.innerHTML = iconCheck();
+    mark.title = tr('toolOk');
+    return;
+  }
+  if (tool.status === 'failed') {
+    mark.innerHTML = iconClose();
+    mark.title = tr('toolFailed');
+    return;
+  }
+  mark.title = tr('toolRunning');
+  const glyph = toolIcon(tool.kind);
+  if (glyph.startsWith('<svg')) {
+    mark.innerHTML = glyph;
+    return;
+  }
+  mark.textContent = glyph;
+}
+
+function toolOpen(tool: ChatMessage['tools'][number]): boolean {
+  const saved = ui.termOpen.get(tool.id);
+  if (saved !== undefined) {
+    return saved;
+  }
+  return tool.status === 'in_progress' || tool.status === 'pending';
+}
+
+function toolHasBody(tool: ChatMessage['tools'][number]): boolean {
+  return isTermTool(tool) || Boolean(tool.detail) || Boolean(tool.output) || Boolean(tool.command);
+}
+
+function toolHead(tool: ChatMessage['tools'][number]): string {
+  const kind = toolKindLabel(loc(), tool.kind);
+  if (isTermTool(tool)) {
+    return kind;
+  }
+  if (tool.detail) {
+    return `${kind} · ${fileName(tool.detail)}`;
+  }
+  return tool.title || kind;
+}
+
+function fillToolBody(body: HTMLElement, tool: ChatMessage['tools'][number]): void {
+  body.replaceChildren();
+  if (tool.detail && !isTermTool(tool)) {
+    const detail = document.createElement('button');
+    detail.className = 'tool-detail';
+    detail.type = 'button';
+    detail.textContent = tool.detail;
+    detail.addEventListener('click', () => post({ type: 'openFile', path: tool.detail! }));
+    body.append(detail);
+  }
+  if (isTermTool(tool)) {
+    body.append(termPreview(tool));
+  }
 }
 
 function toolRow(tool: ChatMessage['tools'][number]): HTMLElement {

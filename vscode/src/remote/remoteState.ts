@@ -1,3 +1,5 @@
+import { pairedLiveTail } from '../chat/messageMerge';
+
 /** One WS text frame Safari can parse without freezing the boot spinner. */
 export const REMOTE_STATE_SOFT = 96 * 1024;
 /** Target size of each follow-up message batch. */
@@ -19,11 +21,14 @@ export function packRemotePayload(
   if (row.type !== 'state' || !row.state || typeof row.state !== 'object') {
     return [JSON.stringify(payload)];
   }
+  const messages = Array.isArray(row.state.messages) ? row.state.messages : [];
+  if (messages.length >= 16) {
+    return mode === 'update' ? packStateUpdate(row.state, messages) : packState(row.state, messages);
+  }
   const raw = JSON.stringify(payload);
   if (byteLen(raw) <= REMOTE_STATE_SOFT) {
     return [raw];
   }
-  const messages = Array.isArray(row.state.messages) ? row.state.messages : [];
   if (messages.length === 0) {
     return [raw];
   }
@@ -49,19 +54,29 @@ export function packedEvents(payload: unknown): unknown[] {
 function packStateUpdate(state: Record<string, unknown>, messages: unknown[]): string[] {
   const tail: unknown[] = [];
   let bytes = 0;
+  let sawUser = false;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const n = byteLen(JSON.stringify(messages[i]));
-    if (tail.length && bytes + n > REMOTE_STATE_SOFT / 2) {
+    const msg = messages[i];
+    const n = byteLen(JSON.stringify(msg));
+    const over = tail.length > 0 && bytes + n > REMOTE_STATE_SOFT / 2;
+    if (over && sawUser) {
       break;
     }
-    tail.unshift(messages[i]);
+    tail.unshift(msg);
     bytes += n;
+    if (isUserMessage(msg)) {
+      sawUser = true;
+    }
   }
+  const out = pairedLiveTail(
+    messages as Array<{ role?: string }>,
+    Math.max(2, tail.length),
+  );
   return [
     JSON.stringify({
       type: 'state',
       merge: true,
-      state: { ...state, messages: tail, restoringSession: false },
+      state: { ...state, messages: out, restoringSession: false },
     }),
   ];
 }
@@ -87,6 +102,7 @@ function packState(state: Record<string, unknown>, messages: unknown[]): string[
           prepend: true,
           hydrate: id,
           done: i === 0,
+          sessionId: state.currentSessionId,
         }),
       );
     }
@@ -106,6 +122,7 @@ function packState(state: Record<string, unknown>, messages: unknown[]): string[
         reset: i === 0,
         hydrate: id,
         done: i === chunks.length - 1,
+        sessionId: state.currentSessionId,
       }),
     );
   }
@@ -149,6 +166,10 @@ function packDiff(row: { type?: string; payload?: { files?: unknown[] } }): stri
     frames.push(JSON.stringify({ type: 'diffMore', files: [files[i]] }));
   }
   return frames;
+}
+
+function isUserMessage(msg: unknown): boolean {
+  return Boolean(msg && typeof msg === 'object' && (msg as { role?: string }).role === 'user');
 }
 
 function byteLen(text: string): number {

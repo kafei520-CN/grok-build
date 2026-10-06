@@ -91,6 +91,8 @@ export class GrokAgent {
       env: {
         ...process.env,
         GROK_NO_AUTO_UPDATE: '1',
+        // 1.0.44 的标准档是 256k。锁住本次进程，远程目录不能把它降回 256k。
+        GROK_DEBUG_CONTEXT_WINDOW: process.env.GROK_DEBUG_CONTEXT_WINDOW?.trim() || '500000',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -260,12 +262,17 @@ export class GrokAgent {
     return result;
   }
 
-  async prompt(blocks: ContentBlock[], extraMeta?: Record<string, unknown>): Promise<unknown> {
-    if (!this.sessionId) {
+  async prompt(
+    blocks: ContentBlock[],
+    extraMeta?: Record<string, unknown>,
+    sessionId?: string,
+  ): Promise<unknown> {
+    const id = sessionId ?? this.sessionId;
+    if (!id) {
       throw new Error('No active session');
     }
     const params: Record<string, unknown> = {
-      sessionId: this.sessionId,
+      sessionId: id,
       prompt: blocks,
     };
     if (extraMeta && Object.keys(extraMeta).length > 0) {
@@ -745,6 +752,7 @@ export function parseSessionUpdate(params: unknown): {
         update['entries'] ??
         update['todos'] ??
         asObject(update['plan'])['entries'],
+      objective: asString(update['objective']),
     },
   };
 }

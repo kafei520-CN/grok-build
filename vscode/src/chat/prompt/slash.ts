@@ -135,6 +135,11 @@ export function parseSlash(text: string): { command: string; args: string } | un
   return { command: match[1].toLowerCase(), args: (match[2] ?? '').trim() };
 }
 
+/** True when the composer line would invoke a slash command or skill. */
+export function isSlashCommandInput(text: string): boolean {
+  return Boolean(parseSlash(text));
+}
+
 export function resolveAlias(name: string): string {
   return ALIASES[name] ?? name;
 }
@@ -320,6 +325,8 @@ export function modeLabel(id: string): string {
       return 'Plan';
     case 'ask':
       return 'Ask';
+    case 'goal':
+      return 'Goal';
     default:
       return 'Agent';
   }

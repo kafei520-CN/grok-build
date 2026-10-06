@@ -137,8 +137,9 @@ describe('theme', () => {
     );
     assert.equal(props.get('--glass-1-blur'), '0px');
     assert.equal(props.get('--glass-bg-pad'), '1');
+    assert.equal(props.get('--glass-plate-filter'), 'none');
     assert.equal(props.get('--glass-2-blur'), '38px');
-    assert.equal(props.get('--glass-7-blur'), '48px');
+    assert.equal(props.get('--glass-7-blur'), '68px');
   });
 
   it('uses host chrome when Ice has no background', () => {
