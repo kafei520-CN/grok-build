@@ -1,0 +1,4 @@
+<idea-plugin>
+  <!-- Loaded when Web Browser (JCEF) is present. Adds that plugin as a classloader parent
+       so JBCefApp is visible on IntelliJ 2026.2+, where JCEF is no longer in platform. -->
+</idea-plugin>

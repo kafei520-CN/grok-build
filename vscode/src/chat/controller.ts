@@ -721,12 +721,16 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   async send(text: string, opts?: { hidden?: boolean; queued?: QueuedPrompt }): Promise<void> {
+    const sessionOp = this.sessionOp;
     const trimmed = text.trim();
     const queuedMedia = opts?.queued?.attachments ?? [];
     if (!trimmed && this.attachments.length === 0 && queuedMedia.length === 0) {
       return;
     }
     await this.ensureAgent();
+    if (sessionOp !== this.sessionOp) {
+      return;
+    }
     if (!readGrokSettings().useTerminal && isSlashCommandInput(trimmed)) {
       plat().warn(tr('settingsTerminalOff'));
       return;
@@ -776,6 +780,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       return;
     }
     await this.prefireCompactIfNeeded();
+    if (sessionOp !== this.sessionOp || agent.sessionId !== sid) {
+      return;
+    }
     if (this.status !== 'ready') {
       return;
     }
@@ -785,6 +792,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       this.emit();
     }
     await this.applySelectedCustomModel(agent);
+    if (sessionOp !== this.sessionOp || agent.sessionId !== sid || this.currentSessionId !== sid) {
+      return;
+    }
     this.error = undefined;
     const run = ++this.runGen;
     const queued = opts?.queued;
@@ -793,6 +803,9 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       ? this.messages.find((item) => item.id === queued.id && item.role === 'user')
       : undefined;
     const blocks = await buildPromptBlocks(outgoing, media);
+    if (sessionOp !== this.sessionOp || agent.sessionId !== sid || this.currentSessionId !== sid) {
+      return;
+    }
     const now = new Date().toISOString();
     const packed = packUserMedia(media);
     const userMessage: ChatMessage = existing
@@ -873,7 +886,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.runGen += 1;
     abortClientRpcs(this, 'cancel');
     this.agent?.cancelTurn();
+    const queuedIds = new Set(this.queue.map((item) => item.id));
     this.queue = [];
+    if (queuedIds.size) {
+      this.messages = this.messages.filter((message) => !queuedIds.has(message.id));
+    }
     if (this.status === 'streaming') {
       markAssistantStopped(this.messages);
       this.endStreaming();
@@ -1320,7 +1337,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       modeId: parked.modeId,
       models: this.models,
       commands: this.commands,
-      meter: this.meter,
+      meter: new ContextMeter({
+        replaying: () => true,
+        fetchInfo: async () => undefined,
+        emit: () => {},
+      }),
       rememberFile: async () => {},
       capturePrevious: () => {},
       displayPath: (filePath: string) => this.displayPath(filePath),
@@ -1781,7 +1802,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
 
   async rewindTo(index: number): Promise<void> {
     await this.agent?.rewindTo(index);
-    this.messages = this.messages.slice(0, Math.max(0, index * 2));
+    this.messages = this.messages.slice(0, messagesBeforePrompt(this.messages, index));
     this.journal.trimStoredTurns();
     this.note(`Rewound to turn ${index}.`);
   }
@@ -1846,6 +1867,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const parked = this.parked.get(sessionId);
     if (owned === agent && agent.sessionId === sessionId && parked && parked.messages.length > 0) {
       this.restoreParked(sessionId);
+      this.journal.clear();
+      void this.journal.hydrateFromGit();
       this.compactGate = emptyCompactGate();
       this.hideSessionPreview = false;
       this.restoringSession = false;
@@ -1855,6 +1878,8 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     }
     if (parked && parked.messages.length > 0 && (!detached || owned === agent)) {
       this.restoreParked(sessionId);
+      this.journal.clear();
+      void this.journal.hydrateFromGit();
       this.compactGate = emptyCompactGate();
       agent.sessionId = sessionId;
       this.hideSessionPreview = false;
@@ -1888,7 +1913,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.streamCursor = emptyStreamCursor();
     this.emit();
     try {
-      const result = await agent.loadSession(sessionId, cwd, this.sessionMeta());
+      const result = await agent.loadSession(sessionId, cwd, this.sessionMeta(), () => op === this.sessionOp);
       if (op !== this.sessionOp) {
         return;
       }
@@ -2868,7 +2893,11 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (index < 0 || index >= this.queue.length) {
       return;
     }
+    const item = this.queue[index];
     this.queue = this.queue.filter((_, i) => i !== index);
+    if (item?.id) {
+      this.messages = this.messages.filter((message) => message.id !== item.id);
+    }
     this.emit();
   }
 
@@ -2963,15 +2992,25 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   private async fireCronJob(job: CronJob): Promise<void> {
-    this.cronJobs = this.cronJobs.map((row) => (row.id === job.id ? markJobRan(row) : row));
-    this.persistCronJobs();
-    this.emit();
+    if (this.status === 'streaming' && this.modeId === 'goal') {
+      return;
+    }
+    const queuedBefore = this.queue.length;
+    const wasReady = this.status === 'ready';
     try {
       plat().info(tr('cronFired', { title: job.title }));
       await this.send(job.prompt);
     } catch (error) {
       logWarn(`cron ${job.id}: ${error instanceof Error ? error.message : error}`);
+      return;
     }
+    const accepted = this.queue.length > queuedBefore || (wasReady && this.status === 'streaming');
+    if (!accepted) {
+      return;
+    }
+    this.cronJobs = this.cronJobs.map((row) => (row.id === job.id ? markJobRan(row) : row));
+    this.persistCronJobs();
+    this.emit();
   }
 
   async sendNow(index = 0): Promise<void> {
@@ -3279,7 +3318,19 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (readGrokSettings().useTerminal) {
       return {};
     }
-    return { disallowedTools: ['bash', 'execute', 'terminal', 'run_terminal_command'] };
+    return {
+      disallowedTools: [
+        'bash',
+        'execute',
+        'terminal',
+        'shell',
+        'run_terminal_command',
+        'run_terminal_cmd',
+        'Bash',
+        'Shell',
+        'PowerShell',
+      ],
+    };
   }
 
   private sessionMeta(): Record<string, unknown> {
@@ -3614,7 +3665,29 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 }
 
-/** Keep this assistant turn, or drop it when it is already the latest. */
+/** Messages to keep when `promptIndex` user prompts stay. Notes between turns stay with the earlier prompt. */
+export function messagesBeforePrompt(messages: Array<{ role: string }>, promptIndex: number): number {
+  if (promptIndex <= 0) {
+    return 0;
+  }
+  let seen = 0;
+  for (let i = 0; i < messages.length; i += 1) {
+    if (messages[i]?.role !== 'user') {
+      continue;
+    }
+    seen += 1;
+    if (seen === promptIndex) {
+      let end = i + 1;
+      while (end < messages.length && messages[end]?.role !== 'user') {
+        end += 1;
+      }
+      return end;
+    }
+  }
+  return messages.length;
+}
+
+/** Prompt index to keep. Counts user turns, so notes and compact cards do not shift it. */
 export function rewindIndexFor(
   messages: Array<{ id: string; role: string }>,
   messageId: string,
@@ -3623,18 +3696,23 @@ export function rewindIndexFor(
   if (idx < 0 || messages[idx]?.role !== 'assistant') {
     return undefined;
   }
-  const keep = (idx + 1) >> 1;
-  let last: { id: string; role: string } | undefined;
+  let usersBefore = 0;
+  for (let i = 0; i < idx; i += 1) {
+    if (messages[i]?.role === 'user') {
+      usersBefore += 1;
+    }
+  }
+  let lastAssistant = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i]?.role === 'assistant') {
-      last = messages[i];
+      lastAssistant = i;
       break;
     }
   }
-  if (last?.id === messageId) {
-    return Math.max(0, keep - 1);
+  if (lastAssistant === idx) {
+    return Math.max(0, usersBefore - 1);
   }
-  return keep;
+  return usersBefore;
 }
 
 function stepsStamp(steps: ChatMessage['steps']): string {

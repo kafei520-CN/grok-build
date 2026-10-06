@@ -205,7 +205,10 @@ function patchTranscript(): void {
     transcript.dataset.sid === (ui.state.currentSessionId ?? '') &&
     patchLastStreamingTurn(transcript)
   ) {
-    scrollTranscript();
+    // Pin before paint. A later frame snaps back after the browser's own scroll adjustment.
+    if (ui.stickToBottom) {
+      pinTranscript(transcript);
+    }
     syncWorkClock();
     return;
   }
@@ -262,6 +265,8 @@ function syncTranscript(transcript: HTMLElement): void {
     return;
   }
   if (align.kind === 'suffix') {
+    const mounted = turnNodes(transcript);
+    patchTurnRange(grouped, mounted, Math.max(0, grouped.length - mounted.length));
     scheduleHistoryPaint(transcript);
     return;
   }
@@ -355,7 +360,8 @@ function scheduleHistoryPaint(transcript: HTMLElement): void {
     if (!pending.length) {
       return false;
     }
-    const fromBottom = transcript.scrollHeight - transcript.scrollTop;
+    const prepending = Boolean(before?.classList.contains('turn'));
+    const fromBottom = prepending ? transcript.scrollHeight - transcript.scrollTop : 0;
     const frag = document.createDocumentFragment();
     for (const node of pending) {
       frag.append(node);
@@ -367,7 +373,11 @@ function scheduleHistoryPaint(transcript: HTMLElement): void {
     } else {
       transcript.append(frag);
     }
-    assignScrollTop(transcript, transcript.scrollHeight - fromBottom);
+    if (prepending) {
+      assignScrollTop(transcript, transcript.scrollHeight - fromBottom);
+    } else if (ui.stickToBottom) {
+      pinTranscript(transcript);
+    }
     return true;
   };
   const run = () => {
@@ -387,9 +397,15 @@ function scheduleHistoryPaint(transcript: HTMLElement): void {
       nodes.map((node) => node.dataset.turnId ?? ''),
     );
     if (next.kind !== 'suffix' && next.kind !== 'prefix') {
+      if (next.kind === 'equal') {
+        patchTurnRange(grouped, nodes, 0);
+      }
       const flushed = flushPending(nodes[0] ?? null);
       finish(flushed || next.kind === 'equal');
       return;
+    }
+    if (next.kind === 'suffix') {
+      patchTurnRange(grouped, nodes, Math.max(0, grouped.length - nodes.length));
     }
     const started = performance.now();
     let built = 0;
@@ -1026,7 +1042,10 @@ function watchTranscriptSize(node: HTMLElement): void {
       return;
     }
     seenHeight = h;
-    schedulePin();
+    if (!ui.stickToBottom || node.classList.contains('catching-up')) {
+      return;
+    }
+    pinTranscript(node);
   });
   contentObserver.observe(node);
   for (const child of node.children) {
@@ -1058,15 +1077,25 @@ function turnId(turn: Turn): string {
   return `${turn.user?.id ?? ''}:${turn.assistant?.id ?? ''}`;
 }
 
+function sigText(value: string | undefined): string {
+  const text = value ?? '';
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${text.length}:${hash >>> 0}`;
+}
+
 function turnSig(turn: Turn, split: boolean): string {
   const a = turn.assistant;
   const sum = totals(a?.edits ?? []);
   return [
     split ? '1' : '0',
     a?.streaming ? '1' : '0',
-    a?.text.length ?? 0,
-    a?.thinking?.length ?? 0,
-    a?.plan?.length ?? 0,
+    sigText(a?.text),
+    sigText(a?.thinking),
+    sigText(a?.plan),
     a?.tools.length ?? 0,
     a?.edits?.length ?? 0,
     sum.added,
@@ -1078,7 +1107,7 @@ function turnSig(turn: Turn, split: boolean): string {
     a?.error?.attempt ?? 0,
     ui.copiedId === a?.id ? 'c' : '',
     stepsKey(a ? visibleSteps(a) : undefined),
-    turn.user?.text.length ?? 0,
+    sigText(turn.user?.text),
     ui.editingUserId === turn.user?.id ? 'e' : '',
     ui.copiedId === turn.user?.id ? 'uc' : '',
   ].join(':');
@@ -1308,6 +1337,14 @@ function paintAssistantAnswer(body: HTMLElement, text: string, streaming: boolea
   cards.replaceChildren(...split.paths.map((path) => heroCard(path)));
 }
 
+function postHeroOpen(target: string): void {
+  if (/^https?:\/\//i.test(target)) {
+    post({ type: 'openUrl', url: target });
+    return;
+  }
+  post({ type: 'openFile', path: target });
+}
+
 function heroCard(path: string): HTMLElement {
   const card = document.createElement('div');
   card.className = 'hero-file';
@@ -1332,7 +1369,7 @@ function heroCard(path: string): HTMLElement {
   open.textContent = heroOpenLabel(ext);
   open.addEventListener('click', (event) => {
     event.stopPropagation();
-    post({ type: 'openFile', path });
+    postHeroOpen(path);
   });
   const menuBtn = document.createElement('button');
   menuBtn.type = 'button';
@@ -1358,7 +1395,7 @@ function heroCard(path: string): HTMLElement {
   const actions = document.createElement('div');
   actions.className = 'hero-file-actions';
   actions.append(open, menuBtn, menu);
-  card.addEventListener('click', () => post({ type: 'openFile', path }));
+  card.addEventListener('click', () => postHeroOpen(path));
   card.append(icon, copy, actions);
   return card;
 }

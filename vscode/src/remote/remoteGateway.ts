@@ -455,7 +455,7 @@ export class RemoteGateway {
         this.html(res, this.pairHtml(req));
         return;
       }
-      this.html(res, chatPage(token, safeCspHost(req.headers.host), zh(req), hostChromeFrom(this.handlers.snapshot())));
+      this.html(res, chatPage(safeCspHost(req.headers.host), zh(req), hostChromeFrom(this.handlers.snapshot())));
       return;
     }
     res.writeHead(404);
@@ -509,21 +509,12 @@ export class RemoteGateway {
     });
   }
 
-  private sessionToken(req: IncomingMessage, url?: URL): string | undefined {
+  private sessionToken(req: IncomingMessage, _url?: URL): string | undefined {
     const fromCookie = cookie(req, COOKIE);
     if (fromCookie && this.tokens.has(fromCookie)) {
       return fromCookie;
     }
-    let parsed = url;
-    if (!parsed) {
-      try {
-        parsed = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
-      } catch {
-        return undefined;
-      }
-    }
-    const q = parsed.searchParams.get('s') ?? '';
-    return q && this.tokens.has(q) ? q : undefined;
+    return undefined;
   }
 
   private authed(req: IncomingMessage): boolean {
@@ -714,7 +705,7 @@ function cookie(req: IncomingMessage, name: string): string | undefined {
 
 function sendPairRedirect(res: ServerResponse, token: string): void {
   res.writeHead(302, {
-    Location: `/?s=${token}`,
+    Location: '/',
     'Set-Cookie': `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`,
   });
   res.end();
@@ -761,12 +752,7 @@ document.querySelector('form').addEventListener('submit', function(ev) {
   fetch('/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: input.value }), credentials: 'same-origin' })
     .then(function(res) {
       if (res.ok || res.redirected || res.status === 302 || res.status === 0 || res.type === 'opaqueredirect') {
-        var next = '/';
-        try {
-          var u = new URL(res.url || '/', location.href);
-          if (u.searchParams.get('s')) next = u.pathname + u.search;
-        } catch (e) {}
-        location.replace(next);
+        location.replace('/');
         return;
       }
       return res.text().then(function(text) {
@@ -820,12 +806,11 @@ function hostChromeStyle(chrome?: { background?: string; foreground?: string }):
 }
 
 function chatPage(
-  token: string,
   host: string,
   chinese: boolean,
   chrome?: { background?: string; foreground?: string },
 ): string {
-  const wsPath = `/ws?s=${encodeURIComponent(token)}`;
+  const wsPath = '/ws';
   const csp =
     `default-src 'none'; img-src data: blob: https: http:; media-src blob: http: https:; ` +
     `style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src 'self'; ` +

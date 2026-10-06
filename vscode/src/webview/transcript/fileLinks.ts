@@ -127,7 +127,7 @@ export function parseExplicitCodeRef(raw: string): CodeRef | undefined {
 }
 
 function parseQuotedFile(body: string): CodeRef | undefined {
-  let text = body.trim();
+  let text = stripPathWrap(body);
   if (!text || text.length > 320 || /^(https?:|mailto:|data:)/i.test(text)) {
     return undefined;
   }
@@ -262,8 +262,12 @@ function stripPathWrap(raw: string): string {
   ) {
     text = text.slice(1, -1).trim();
   }
-  if (text.startsWith('file:')) {
-    text = decodeURIComponent(text.replace(/^file:\/\//, '').replace(/^\/([A-Za-z]:)/, '$1'));
+  if (text.toLowerCase().startsWith('file:')) {
+    try {
+      text = decodeURIComponent(text.replace(/^file:\/\//i, '').replace(/^\/([A-Za-z]:)/, '$1'));
+    } catch {
+      return '';
+    }
   }
   return text;
 }

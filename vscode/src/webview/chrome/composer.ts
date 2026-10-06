@@ -219,7 +219,7 @@ function bindComposerInput(input: HTMLTextAreaElement): void {
     const sendKey = ui.state.multiline
       ? event.key === 'Enter' && (event.shiftKey || event.altKey)
       : event.key === 'Enter' && !event.shiftKey;
-    if (sendKey) {
+    if (sendKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault();
       sendFrom(input);
     }

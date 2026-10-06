@@ -352,6 +352,7 @@ export class GrokAgent {
     sessionId: string,
     cwd: string,
     extraMeta?: Record<string, unknown>,
+    still?: () => boolean,
   ): Promise<SessionNewResult> {
     const result = (await this.rpc.request('session/load', {
       sessionId,
@@ -359,7 +360,9 @@ export class GrokAgent {
       mcpServers: [],
       _meta: extraMeta,
     })) as SessionNewResult;
-    this.sessionId = result.sessionId ?? sessionId;
+    if (!still || still()) {
+      this.sessionId = result.sessionId ?? sessionId;
+    }
     return result;
   }
 

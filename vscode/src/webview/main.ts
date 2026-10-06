@@ -80,6 +80,12 @@ function onHostMessage(data: HostMsg | null | undefined): void {
       ui.chosenModelId = undefined;
       ui.chosenEffort = undefined;
       ui.stickToBottom = true;
+      ui.editingUserId = undefined;
+      ui.editDraft = '';
+      ui.editsExpanded.clear();
+      ui.workOpen.clear();
+      ui.stepsOpen.clear();
+      ui.termOpen.clear();
     }
     if (
       ui.chosenModelId &&
@@ -227,7 +233,6 @@ function scheduleTailPaint(): void {
     tailPaint = 0;
     patchBody(root);
     patchComposer();
-    scrollTranscript();
   });
 }
 

@@ -54,6 +54,8 @@ describe('permissions', () => {
     assert.equal(askModeBlocksMutation('ask', 'execute'), true);
     assert.equal(askModeBlocksMutation('ask', 'read'), false);
     assert.equal(askModeBlocksMutation('default', 'edit'), false);
+    assert.equal(askModeBlocksMutation('ask', 'other', 'search_replace'), true);
+    assert.equal(askModeBlocksMutation('ask', 'other', 'run_terminal_cmd'), true);
   });
 
   it('denies terminal tools when the switch is off', () => {

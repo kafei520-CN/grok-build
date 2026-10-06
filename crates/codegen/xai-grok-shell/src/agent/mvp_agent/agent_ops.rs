@@ -4413,6 +4413,15 @@ impl MvpAgent {
             let cfg = self.cfg.borrow();
             let overrides = &cfg.cli_agent_overrides;
             overrides.apply_to_definition(&mut agent_definition);
+            for name in disallowed_tools_from_meta(session_meta) {
+                if !agent_definition
+                    .disallowed_tools
+                    .iter()
+                    .any(|existing| existing == &name)
+                {
+                    agent_definition.disallowed_tools.push(name);
+                }
+            }
             if overrides.has_definition_overrides() {
                 tracing::debug!(
                     agent = %agent_definition.name,
@@ -5047,6 +5056,34 @@ pub(crate) struct LocalWorkspaceReapGuard {
     session_id: acp::SessionId,
     armed: bool,
 }
+fn disallowed_tools_from_meta(meta: Option<&acp::Meta>) -> Vec<String> {
+    let Some(meta) = meta else {
+        return Vec::new();
+    };
+    let Some(value) = meta.get("disallowedTools") else {
+        return Vec::new();
+    };
+    if let Some(list) = value.as_array() {
+        return list
+            .iter()
+            .filter_map(|item| item.as_str())
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(str::to_string)
+            .collect();
+    }
+    value
+        .as_str()
+        .map(|text| {
+            text.split(',')
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(all(feature = "local-workspace", unix))]
 impl LocalWorkspaceReapGuard {
     pub(crate) fn disarm(&mut self) {

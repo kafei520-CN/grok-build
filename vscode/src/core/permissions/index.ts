@@ -18,9 +18,15 @@ export function isAskSessionMode(modeId?: string): boolean {
   return modeId === 'ask';
 }
 
-export function isEditToolKind(kind?: string): boolean {
+const EDIT_NAMES = ['search_replace', 'hashline_edit', 'apply_patch', 'multiedit'];
+
+export function isEditToolKind(kind?: string, title?: string): boolean {
   const value = (kind ?? '').toLowerCase();
-  return value === 'edit' || value === 'write' || value === 'delete' || value === 'move';
+  if (value === 'edit' || value === 'write' || value === 'delete' || value === 'move') {
+    return true;
+  }
+  const text = (title ?? '').toLowerCase();
+  return EDIT_NAMES.some((name) => text.includes(name));
 }
 
 export function isTerminalToolKind(kind?: string, title?: string): boolean {
@@ -39,7 +45,7 @@ export function isTerminalToolKind(kind?: string, title?: string): boolean {
 
 /** File edits and shell — the mutations Ask mode must not run. */
 export function isMutatingToolKind(kind?: string, title?: string): boolean {
-  return isEditToolKind(kind) || isTerminalToolKind(kind, title);
+  return isEditToolKind(kind, title) || isTerminalToolKind(kind, title);
 }
 
 export function terminalToolsEnabled(settings: { useTerminal?: boolean }): boolean {
@@ -54,8 +60,8 @@ export function shouldDenyTerminal(
   return !terminalToolsEnabled(settings) && isTerminalToolKind(toolKind, title);
 }
 
-export function askModeBlocksMutation(modeId: string | undefined, toolKind?: string): boolean {
-  return isAskSessionMode(modeId) && isMutatingToolKind(toolKind);
+export function askModeBlocksMutation(modeId: string | undefined, toolKind?: string, title?: string): boolean {
+  return isAskSessionMode(modeId) && isMutatingToolKind(toolKind, title);
 }
 
 export function askModeGateOptions(): PermissionOption[] {
@@ -99,7 +105,7 @@ export function shouldAutoApprove(
   modeId?: string,
   title?: string,
 ): boolean {
-  if (askModeBlocksMutation(modeId, toolKind)) {
+  if (askModeBlocksMutation(modeId, toolKind, title)) {
     return false;
   }
   if (shouldDenyTerminal(settings, toolKind, title)) {
