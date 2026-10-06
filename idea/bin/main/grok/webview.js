@@ -925,6 +925,7 @@
     sessionsRenamed: "Renamed to {name}.",
     forkFailed: "Could not fork this session.",
     compacting: "Compacting context\u2026",
+    compactLive: "Compacting our conversation so we can keep chatting\u2026",
     compactAutoLive: "Auto-compacting context",
     compactDone: "Compacted conversation history.",
     compactAutoDone: "Context was full; compacted older history and kept recent turns.",
@@ -1575,6 +1576,7 @@
     sessionsRenamed: "\u5DF2\u91CD\u547D\u540D\u4E3A {name}\u3002",
     forkFailed: "\u65E0\u6CD5\u5206\u53C9\u6B64\u4F1A\u8BDD\u3002",
     compacting: "\u6B63\u5728\u538B\u7F29\u4E0A\u4E0B\u6587\u2026",
+    compactLive: "\u6B63\u5728\u538B\u7F29\u5BF9\u8BDD\uFF0C\u4EE5\u4FBF\u7EE7\u7EED\u804A\u5929\u2026",
     compactAutoLive: "\u6B63\u5728\u81EA\u52A8\u538B\u7F29\u4E0A\u4E0B\u6587",
     compactDone: "\u5DF2\u538B\u7F29\u5BF9\u8BDD\u5386\u53F2\u3002",
     compactAutoDone: "\u4E0A\u4E0B\u6587\u5C06\u6EE1\uFF0C\u5DF2\u538B\u7F29\u8F83\u65E9\u5386\u53F2\u5E76\u4FDD\u7559\u6700\u8FD1\u51E0\u8F6E\u3002",
@@ -1985,6 +1987,8 @@
     dashDraft: "",
     dashTarget: void 0,
     agentsTab: "agents",
+    editingUserId: void 0,
+    editDraft: "",
     editsExpanded: /* @__PURE__ */ new Set(),
     copiedId: void 0,
     copiedTimer: void 0,
@@ -21647,6 +21651,8 @@
       return;
     }
     if (align.kind === "suffix") {
+      const mounted = turnNodes(transcript);
+      patchTurnRange(grouped, mounted, Math.max(0, grouped.length - mounted.length));
       scheduleHistoryPaint(transcript);
       return;
     }
@@ -21767,9 +21773,15 @@
         nodes.map((node) => node.dataset.turnId ?? "")
       );
       if (next.kind !== "suffix" && next.kind !== "prefix") {
+        if (next.kind === "equal") {
+          patchTurnRange(grouped, nodes, 0);
+        }
         const flushed = flushPending(nodes[0] ?? null);
         finish(flushed || next.kind === "equal");
         return;
+      }
+      if (next.kind === "suffix") {
+        patchTurnRange(grouped, nodes, Math.max(0, grouped.length - nodes.length));
       }
       const started = performance.now();
       let built = 0;
@@ -21861,6 +21873,7 @@
       node.replaceWith(turnEl(turn, false));
       return;
     }
+    node.classList.toggle("compact-live", isCompactOnly(assistant));
     if (hasWork(assistant)) {
       let trace = col.querySelector(":scope > .trace");
       if (!trace) {
@@ -22376,6 +22389,9 @@
   function groupTurns(messages) {
     const turns = [];
     for (const message of messages) {
+      if (message.role === "assistant" && isCompactOnly(message) && !message.streaming) {
+        continue;
+      }
       if (message.role === "user") {
         turns.push({ user: message });
       } else {
@@ -22392,6 +22408,9 @@
   function turnEl(turn, split) {
     const el = document.createElement("section");
     el.className = "turn";
+    if (turn.assistant && isCompactOnly(turn.assistant)) {
+      el.classList.add("compact-live");
+    }
     el.dataset.turnId = turnId(turn);
     el.dataset.sig = turnSig(turn, split);
     if (turn.user) {
@@ -22729,7 +22748,12 @@
     el.className = "msg assistant";
     if (hasWork(message)) {
       const trace = traceBlock(message);
-      el.append(message.streaming ? trace : finishedWork(message, trace));
+      if (isCompactOnly(message)) {
+        trace.classList.add("quiet");
+        el.append(trace);
+      } else {
+        el.append(message.streaming ? trace : finishedWork(message, trace));
+      }
     }
     if (message.text) {
       const body = document.createElement("div");
@@ -23064,10 +23088,10 @@ ${stepsKey(steps)}`;
         paintTermElapsed(node, tool);
       }
     }
-    const label = document.querySelector(".trace-live-foot .trace-live-time");
-    if (label) {
-      const time = durationText(live2);
-      label.textContent = time ? tr("elapsedLive", { time }) : tr("thinkingNow");
+    for (const node of document.querySelectorAll(".trace.live")) {
+      if (node instanceof HTMLElement && node.dataset.mid === live2.id) {
+        syncElapsed(node, live2);
+      }
     }
   }
   function workLabel(message) {
@@ -23136,8 +23160,48 @@ ${stepsKey(steps)}`;
     mark.innerHTML = grokBootMark();
     const time = document.createElement("span");
     time.className = "trace-live-time";
-    foot.append(mark, time);
+    const compact = document.createElement("div");
+    compact.className = "trace-compact";
+    compact.hidden = true;
+    const copy2 = document.createElement("div");
+    copy2.className = "trace-compact-copy";
+    const meter = document.createElement("div");
+    meter.className = "trace-compact-meter";
+    const track = document.createElement("div");
+    track.className = "trace-compact-track";
+    const fill = document.createElement("div");
+    fill.className = "trace-compact-fill";
+    track.append(fill);
+    const pct = document.createElement("span");
+    pct.className = "trace-compact-pct";
+    meter.append(track, pct);
+    compact.append(copy2, meter);
+    foot.append(mark, time, compact);
     return foot;
+  }
+  function compactTool(message) {
+    return message.tools.find((tool) => tool.kind === "compact");
+  }
+  function isCompactBeat(beat, message) {
+    if (beat.kind !== "tool") {
+      return false;
+    }
+    return message.tools.find((tool) => tool.id === beat.id)?.kind === "compact";
+  }
+  function isCompactOnly(message) {
+    if (!compactTool(message)) {
+      return false;
+    }
+    if (message.text.trim() || message.thinking?.trim() || message.plan?.trim()) {
+      return false;
+    }
+    return message.tools.every((tool) => tool.kind === "compact");
+  }
+  function compactPercent(tool, message) {
+    const start = Date.parse(tool.startedAt ?? message.createdAt ?? "");
+    const elapsed = Number.isNaN(start) ? 0 : Math.max(0, Date.now() - start);
+    const eased = 1 - Math.exp(-elapsed / 14e3);
+    return Math.max(8, Math.min(92, Math.round(8 + 84 * eased)));
   }
   function placeLiveFoot(trace, show) {
     const col = trace.closest(".msg.assistant");
@@ -23166,7 +23230,34 @@ ${stepsKey(steps)}`;
     }
     foot.hidden = false;
     const label = foot.querySelector(".trace-live-time");
-    if (label) {
+    const compact = foot.querySelector(".trace-compact");
+    const tool = compactTool(message);
+    const compacting = tool?.status === "in_progress" || tool?.status === "pending";
+    if (compacting && tool && compact instanceof HTMLElement) {
+      if (label instanceof HTMLElement) {
+        label.hidden = true;
+      }
+      compact.hidden = false;
+      const copy2 = compact.querySelector(".trace-compact-copy");
+      if (copy2) {
+        copy2.textContent = tr("compactLive");
+      }
+      const percent = compactPercent(tool, message);
+      const fill = compact.querySelector(".trace-compact-fill");
+      if (fill instanceof HTMLElement) {
+        fill.style.width = `${percent}%`;
+      }
+      const pct = compact.querySelector(".trace-compact-pct");
+      if (pct) {
+        pct.textContent = `${percent}%`;
+      }
+      return;
+    }
+    if (compact instanceof HTMLElement) {
+      compact.hidden = true;
+    }
+    if (label instanceof HTMLElement) {
+      label.hidden = false;
       label.textContent = time ? tr("elapsedLive", { time }) : tr("thinkingNow");
     }
   }
@@ -23175,7 +23266,7 @@ ${stepsKey(steps)}`;
     if (!(host instanceof HTMLElement)) {
       return;
     }
-    const beats = traceBeats(message);
+    const beats = traceBeats(message).filter((beat) => !isCompactBeat(beat, message));
     const plan = message.plan?.trim() ?? "";
     const keys = beats.map((beat, index) => beatKey(beat, index));
     if (plan) {
@@ -30624,6 +30715,12 @@ ${stepsKey(steps)}`;
         ui.chosenModelId = void 0;
         ui.chosenEffort = void 0;
         ui.stickToBottom = true;
+        ui.editingUserId = void 0;
+        ui.editDraft = "";
+        ui.editsExpanded.clear();
+        ui.workOpen.clear();
+        ui.stepsOpen.clear();
+        ui.termOpen.clear();
       }
       if (ui.chosenModelId && incoming.models?.available.some((model) => model.id === ui.chosenModelId)) {
         incoming.models = {

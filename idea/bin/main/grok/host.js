@@ -4044,16 +4044,20 @@ var RpcError = class extends Error {
     this.name = "RpcError";
   }
 };
-var MAX_RPC_BUFFER = 4e6;
+var MAX_RPC_BUFFER = 64 * 1024 * 1024;
 var JsonRpcConnection = class extends import_node_events.EventEmitter {
   nextId = 1;
   buffer = "";
+  /** Drop bytes until the next newline after one line passes `maxBuffer`. */
+  skipping = false;
   pending = /* @__PURE__ */ new Map();
   stdin;
+  maxBuffer;
   closed = false;
-  constructor(stdin) {
+  constructor(stdin, maxBuffer = MAX_RPC_BUFFER) {
     super();
     this.stdin = stdin;
+    this.maxBuffer = maxBuffer;
   }
   get isClosed() {
     return this.closed;
@@ -4062,15 +4066,27 @@ var JsonRpcConnection = class extends import_node_events.EventEmitter {
     if (this.closed) {
       return;
     }
-    this.buffer += chunk.toString("utf8");
+    let text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (this.skipping) {
+      const nl = text.indexOf("\n");
+      if (nl < 0) {
+        return;
+      }
+      this.skipping = false;
+      text = text.slice(nl + 1);
+    }
+    if (text) {
+      this.buffer += text;
+    }
     while (true) {
       const idx = this.buffer.indexOf("\n");
       if (idx < 0) {
         break;
       }
-      if (idx > MAX_RPC_BUFFER) {
-        this.overflow("ACP stdout line overflow");
-        return;
+      if (idx > this.maxBuffer) {
+        this.buffer = this.buffer.slice(idx + 1);
+        this.emit("log", "skipped an oversized ACP stdout line");
+        continue;
       }
       const line = this.buffer.slice(0, idx).trim();
       this.buffer = this.buffer.slice(idx + 1);
@@ -4081,8 +4097,10 @@ var JsonRpcConnection = class extends import_node_events.EventEmitter {
         return;
       }
     }
-    if (this.buffer.length > MAX_RPC_BUFFER) {
-      this.overflow("ACP stdout overflow");
+    if (this.buffer.length > this.maxBuffer) {
+      this.buffer = "";
+      this.skipping = true;
+      this.emit("log", "skipped an oversized ACP stdout line");
     }
   }
   request(method, params, timeoutMs) {
@@ -4131,11 +4149,6 @@ var JsonRpcConnection = class extends import_node_events.EventEmitter {
       pending2.reject(error ?? new Error("ACP connection closed"));
       this.pending.delete(id);
     }
-  }
-  overflow(reason) {
-    const error = new Error(reason);
-    this.emit("overflow", error);
-    this.close(error);
   }
   write(payload) {
     if (this.closed) {
@@ -4589,13 +4602,6 @@ var GrokAgent = class _GrokAgent {
       onLost?.(error);
     };
     rpc.on("log", (message) => logWarn(message));
-    rpc.on("overflow", (error) => {
-      logError("ACP stdout overflow", error);
-      lost(error);
-      if (!child.killed) {
-        child.kill();
-      }
-    });
     child.stdout.on("data", (chunk) => {
       setImmediate(() => rpc.feed(chunk));
     });
@@ -6950,6 +6956,7 @@ var EN = {
   sessionsRenamed: "Renamed to {name}.",
   forkFailed: "Could not fork this session.",
   compacting: "Compacting context\u2026",
+  compactLive: "Compacting our conversation so we can keep chatting\u2026",
   compactAutoLive: "Auto-compacting context",
   compactDone: "Compacted conversation history.",
   compactAutoDone: "Context was full; compacted older history and kept recent turns.",
@@ -7600,6 +7607,7 @@ var ZH = {
   sessionsRenamed: "\u5DF2\u91CD\u547D\u540D\u4E3A {name}\u3002",
   forkFailed: "\u65E0\u6CD5\u5206\u53C9\u6B64\u4F1A\u8BDD\u3002",
   compacting: "\u6B63\u5728\u538B\u7F29\u4E0A\u4E0B\u6587\u2026",
+  compactLive: "\u6B63\u5728\u538B\u7F29\u5BF9\u8BDD\uFF0C\u4EE5\u4FBF\u7EE7\u7EED\u804A\u5929\u2026",
   compactAutoLive: "\u6B63\u5728\u81EA\u52A8\u538B\u7F29\u4E0A\u4E0B\u6587",
   compactDone: "\u5DF2\u538B\u7F29\u5BF9\u8BDD\u5386\u53F2\u3002",
   compactAutoDone: "\u4E0A\u4E0B\u6587\u5C06\u6EE1\uFF0C\u5DF2\u538B\u7F29\u8F83\u65E9\u5386\u53F2\u5E76\u4FDD\u7559\u6700\u8FD1\u51E0\u8F6E\u3002",
@@ -8037,10 +8045,17 @@ var EditJournal = class {
   turns = [];
   loadedFor;
   hydrateJob;
+  loadGen = 0;
+  loadJob;
+  loadJobFor;
+  flushChain = Promise.resolve();
   clear() {
     this.snapshots.clear();
     this.turns = [];
     this.loadedFor = void 0;
+    this.loadGen += 1;
+    this.loadJob = void 0;
+    this.loadJobFor = void 0;
   }
   resolvePath(filePath) {
     if (!filePath || filePath.split(/[\\/]/).includes("..")) {
@@ -8488,15 +8503,48 @@ var EditJournal = class {
     if (this.loadedFor === sessionId) {
       return;
     }
-    this.loadedFor = sessionId;
-    this.turns = await readStoredTurns(sessionId);
-  }
-  async flushTurns() {
-    const sessionId = this.host.sessionId();
-    if (!sessionId) {
+    if (this.loadJob && this.loadJobFor === sessionId) {
+      await this.loadJob;
       return;
     }
-    await writeStoredTurns(sessionId, this.turns);
+    const gen = this.loadGen;
+    const job = (async () => {
+      const turns = await readStoredTurns(sessionId);
+      if (gen !== this.loadGen || this.host.sessionId() !== sessionId) {
+        return;
+      }
+      this.turns = turns;
+      this.loadedFor = sessionId;
+    })();
+    this.loadJob = job;
+    this.loadJobFor = sessionId;
+    try {
+      await job;
+    } finally {
+      if (this.loadJob === job) {
+        this.loadJob = void 0;
+        this.loadJobFor = void 0;
+      }
+    }
+  }
+  flushTurns() {
+    const sessionId = this.host.sessionId();
+    if (!sessionId) {
+      return Promise.resolve();
+    }
+    const gen = this.loadGen;
+    const turns = this.turns;
+    const write = this.flushChain.then(async () => {
+      if (gen !== this.loadGen || this.host.sessionId() !== sessionId) {
+        return;
+      }
+      await writeStoredTurns(sessionId, turns);
+    });
+    this.flushChain = write.then(
+      () => void 0,
+      () => void 0
+    );
+    return write;
   }
   async restoreFile(absPath, previous) {
     const applied = await plat().applyText?.(absPath, previous);
@@ -13404,6 +13452,9 @@ async function importAgentFiles(paths) {
   return imported;
 }
 async function toggleAgent(filePath) {
+  if (!await listedAgentFile(filePath)) {
+    return;
+  }
   if (filePath.endsWith(DISABLED)) {
     await moveFile(filePath, filePath.slice(0, -DISABLED.length));
     return;
@@ -13411,7 +13462,15 @@ async function toggleAgent(filePath) {
   await moveFile(filePath, `${filePath}${DISABLED}`);
 }
 async function deleteAgent(filePath) {
+  if (!await listedAgentFile(filePath)) {
+    return;
+  }
   await plat().deleteFile(filePath, true);
+}
+async function listedAgentFile(filePath) {
+  const os6 = plat().os();
+  const rows = await listAgents();
+  return rows.some((row) => row.filePath && row.scope !== "builtin" && sameFsPath(row.filePath, filePath, os6));
 }
 async function collectAgents(dir, scope) {
   const names = await plat().readDir(dir);
@@ -13574,6 +13633,9 @@ async function importPersonaFiles(paths) {
   return imported;
 }
 async function togglePersona(filePath) {
+  if (!await listedPersonaFile(filePath)) {
+    return;
+  }
   if (filePath.endsWith(DISABLED2)) {
     await moveFile2(filePath, filePath.slice(0, -DISABLED2.length));
     return;
@@ -13581,7 +13643,15 @@ async function togglePersona(filePath) {
   await moveFile2(filePath, `${filePath}${DISABLED2}`);
 }
 async function deletePersona(filePath) {
+  if (!await listedPersonaFile(filePath)) {
+    return;
+  }
   await plat().deleteFile(filePath, true);
+}
+async function listedPersonaFile(filePath) {
+  const os6 = plat().os();
+  const rows = await listPersonas();
+  return rows.some((row) => sameFsPath(row.filePath, filePath, os6));
 }
 async function collectPersonas(dir, scope) {
   const names = await plat().readDir(dir);
@@ -13908,7 +13978,7 @@ async function importSkillFolders(paths) {
   return imported;
 }
 async function toggleSkill(dirPath) {
-  if (isBundledSkillDir(dirPath)) {
+  if (isBundledSkillDir(dirPath) || !await listedSkillDir(dirPath)) {
     return;
   }
   const on = path16.join(dirPath, SKILL_FILE);
@@ -13921,10 +13991,15 @@ async function toggleSkill(dirPath) {
   await fs3.rename(off, on);
 }
 async function deleteSkill(dirPath) {
-  if (isBundledSkillDir(dirPath)) {
+  if (isBundledSkillDir(dirPath) || !await listedSkillDir(dirPath)) {
     return;
   }
   await fs3.rm(dirPath, { recursive: true, force: true });
+}
+async function listedSkillDir(dirPath) {
+  const os6 = plat().os();
+  const rows = await listSkills();
+  return rows.some((row) => row.scope !== "bundled" && sameFsPath(row.dirPath, dirPath, os6));
 }
 function isBundledSkillDir(dirPath) {
   return pathInside(bundledSkillsDir(), dirPath, plat().os());
@@ -14069,6 +14144,20 @@ async function extractZip(zipPath, dest) {
   }
   await fs3.mkdir(dest, { recursive: true });
   await execFileAsync2("tar", ["-xf", zipPath, "-C", dest], { windowsHide: true });
+  await assertNoSymlinks(dest);
+}
+async function assertNoSymlinks(root) {
+  const names = await fs3.readdir(root);
+  for (const name of names) {
+    const full = path16.join(root, name);
+    const stat2 = await fs3.lstat(full);
+    if (stat2.isSymbolicLink()) {
+      throw new Error(`unsafe skill zip link: ${name}`);
+    }
+    if (stat2.isDirectory()) {
+      await assertNoSymlinks(full);
+    }
+  }
 }
 async function fileExists(filePath) {
   try {
@@ -15865,7 +15954,7 @@ var RemoteGateway = class {
         this.html(res, this.pairHtml(req));
         return;
       }
-      this.html(res, chatPage(token, safeCspHost(req.headers.host), zh(req), hostChromeFrom(this.handlers.snapshot())));
+      this.html(res, chatPage(safeCspHost(req.headers.host), zh(req), hostChromeFrom(this.handlers.snapshot())));
       return;
     }
     res.writeHead(404);
@@ -15917,21 +16006,12 @@ var RemoteGateway = class {
       sendPairRedirect(res, token);
     });
   }
-  sessionToken(req, url) {
+  sessionToken(req, _url) {
     const fromCookie = cookie(req, COOKIE);
     if (fromCookie && this.tokens.has(fromCookie)) {
       return fromCookie;
     }
-    let parsed = url;
-    if (!parsed) {
-      try {
-        parsed = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
-      } catch {
-        return void 0;
-      }
-    }
-    const q = parsed.searchParams.get("s") ?? "";
-    return q && this.tokens.has(q) ? q : void 0;
+    return void 0;
   }
   authed(req) {
     return Boolean(this.sessionToken(req));
@@ -16116,7 +16196,7 @@ function cookie(req, name) {
 }
 function sendPairRedirect(res, token) {
   res.writeHead(302, {
-    Location: `/?s=${token}`,
+    Location: "/",
     "Set-Cookie": `${COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=86400`
   });
   res.end();
@@ -16145,12 +16225,7 @@ document.querySelector('form').addEventListener('submit', function(ev) {
   fetch('/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: input.value }), credentials: 'same-origin' })
     .then(function(res) {
       if (res.ok || res.redirected || res.status === 302 || res.status === 0 || res.type === 'opaqueredirect') {
-        var next = '/';
-        try {
-          var u = new URL(res.url || '/', location.href);
-          if (u.searchParams.get('s')) next = u.pathname + u.search;
-        } catch (e) {}
-        location.replace(next);
+        location.replace('/');
         return;
       }
       return res.text().then(function(text) {
@@ -16194,8 +16269,8 @@ function hostChromeStyle(chrome) {
   const fg = hex(chrome?.foreground, "#e8e8e8");
   return `<style id="grok-host-chrome">:root{--vscode-sideBar-background:${bg};--vscode-foreground:${fg};--bg:${bg};--fg:${fg};}</style>`;
 }
-function chatPage(token, host, chinese, chrome) {
-  const wsPath = `/ws?s=${encodeURIComponent(token)}`;
+function chatPage(host, chinese, chrome) {
+  const wsPath = "/ws";
   const csp = `default-src 'none'; img-src data: blob: https: http:; media-src blob: http: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src 'self'; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' http://${host} https://${host} ws://${host} wss://${host} ws: wss: http: https:`;
   const lang = chinese ? "zh-CN" : "en";
   const stalled = JSON.stringify(
@@ -16479,6 +16554,48 @@ function resolveWorkspacePath(root, relOrAbs) {
   if (rel.startsWith("..") || path20.isAbsolute(rel)) {
     return void 0;
   }
+  let current2 = base;
+  for (const segment of rel.split(path20.sep).filter(Boolean)) {
+    current2 = path20.join(current2, segment);
+    try {
+      if (fs7.lstatSync(current2).isSymbolicLink()) {
+        return void 0;
+      }
+    } catch (error) {
+      const code = error.code;
+      if (code === "ENOENT") {
+        break;
+      }
+      return void 0;
+    }
+  }
+  let realBase;
+  try {
+    realBase = fs7.realpathSync(base);
+  } catch {
+    return void 0;
+  }
+  let probe = normalized;
+  let realProbe;
+  while (!realProbe) {
+    try {
+      realProbe = fs7.realpathSync(probe);
+    } catch (error) {
+      const code = error.code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") {
+        return void 0;
+      }
+      const parent = path20.dirname(probe);
+      if (parent === probe) {
+        return void 0;
+      }
+      probe = parent;
+    }
+  }
+  const realRel = path20.relative(realBase, realProbe);
+  if (realRel.startsWith("..") || path20.isAbsolute(realRel)) {
+    return void 0;
+  }
   return normalized;
 }
 function smallEditLimit(_before, after) {
@@ -16703,13 +16820,23 @@ async function saveWorkspaceFile(bus, relOrAbs, hash, text) {
   if (bus.busyFile?.(resolved) || bus.busyFile?.(relOrAbs)) {
     return;
   }
+  let currentText;
   try {
     const raw = await plat().readFile(resolved);
     const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
     if (bytes.includes(0)) {
       return;
     }
-  } catch {
+    currentText = Buffer.from(bytes).toString("utf8");
+  } catch (error) {
+    const code = error.code;
+    if (code !== "ENOENT" && code !== "FileNotFound") {
+      return;
+    }
+  }
+  if (currentText === void 0 && hash !== "" || currentText !== void 0 && fileHash(currentText) !== hash) {
+    bus.broadcast({ type: "workspaceSaveResult", path: resolved, ok: false, conflict: true });
+    return;
   }
   if (smallEditLimit("", text) !== "ok") {
     return;
@@ -17032,7 +17159,7 @@ var ReverseTunnel = class {
     child.stderr?.on("data", (chunk) => {
       stderr = `${stderr}${chunk.toString("utf8")}`.slice(-4e3);
       if (this.strict === "accept-new" && BAD_STRICT.test(stderr)) {
-        this.strict = "no";
+        this.error = "hostkey";
       }
       const msg = classifySshError(stderr);
       if (msg) {

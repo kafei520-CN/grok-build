@@ -500,6 +500,7 @@ function patchStreamingTurn(node: HTMLElement, turn: Turn): void {
     node.replaceWith(turnEl(turn, false));
     return;
   }
+  node.classList.toggle('compact-live', isCompactOnly(assistant));
   if (hasWork(assistant)) {
     let trace = col.querySelector(':scope > .trace') as HTMLElement | null;
     if (!trace) {
@@ -1116,6 +1117,9 @@ function turnSig(turn: Turn, split: boolean): string {
 function groupTurns(messages: ChatMessage[]): Turn[] {
   const turns: Turn[] = [];
   for (const message of messages) {
+    if (message.role === 'assistant' && isCompactOnly(message) && !message.streaming) {
+      continue;
+    }
     if (message.role === 'user') {
       turns.push({ user: message });
     } else {
@@ -1133,6 +1137,9 @@ function groupTurns(messages: ChatMessage[]): Turn[] {
 function turnEl(turn: Turn, split: boolean): HTMLElement {
   const el = document.createElement('section');
   el.className = 'turn';
+  if (turn.assistant && isCompactOnly(turn.assistant)) {
+    el.classList.add('compact-live');
+  }
   el.dataset.turnId = turnId(turn);
   el.dataset.sig = turnSig(turn, split);
   if (turn.user) {
@@ -1495,7 +1502,12 @@ function assistantColumn(message: ChatMessage): HTMLElement {
   el.className = 'msg assistant';
   if (hasWork(message)) {
     const trace = traceBlock(message);
-    el.append(message.streaming ? trace : finishedWork(message, trace));
+    if (isCompactOnly(message)) {
+      trace.classList.add('quiet');
+      el.append(trace);
+    } else {
+      el.append(message.streaming ? trace : finishedWork(message, trace));
+    }
   }
   if (message.text) {
     const body = document.createElement('div');
@@ -1900,10 +1912,10 @@ function paintWorkLabels(): void {
       paintTermElapsed(node, tool);
     }
   }
-  const label = document.querySelector('.trace-live-foot .trace-live-time');
-  if (label) {
-    const time = durationText(live);
-    label.textContent = time ? tr('elapsedLive', { time }) : tr('thinkingNow');
+  for (const node of document.querySelectorAll('.trace.live')) {
+    if (node instanceof HTMLElement && node.dataset.mid === live.id) {
+      syncElapsed(node, live);
+    }
   }
 }
 
@@ -1983,8 +1995,53 @@ function liveFoot(): HTMLElement {
   mark.innerHTML = grokBootMark();
   const time = document.createElement('span');
   time.className = 'trace-live-time';
-  foot.append(mark, time);
+  const compact = document.createElement('div');
+  compact.className = 'trace-compact';
+  compact.hidden = true;
+  const copy = document.createElement('div');
+  copy.className = 'trace-compact-copy';
+  const meter = document.createElement('div');
+  meter.className = 'trace-compact-meter';
+  const track = document.createElement('div');
+  track.className = 'trace-compact-track';
+  const fill = document.createElement('div');
+  fill.className = 'trace-compact-fill';
+  track.append(fill);
+  const pct = document.createElement('span');
+  pct.className = 'trace-compact-pct';
+  meter.append(track, pct);
+  compact.append(copy, meter);
+  foot.append(mark, time, compact);
   return foot;
+}
+
+function compactTool(message: ChatMessage): ChatMessage['tools'][number] | undefined {
+  return message.tools.find((tool) => tool.kind === 'compact');
+}
+
+function isCompactBeat(beat: TurnBeat, message: ChatMessage): boolean {
+  if (beat.kind !== 'tool') {
+    return false;
+  }
+  return message.tools.find((tool) => tool.id === beat.id)?.kind === 'compact';
+}
+
+function isCompactOnly(message: ChatMessage): boolean {
+  if (!compactTool(message)) {
+    return false;
+  }
+  if (message.text.trim() || message.thinking?.trim() || message.plan?.trim()) {
+    return false;
+  }
+  return message.tools.every((tool) => tool.kind === 'compact');
+}
+
+/** Climbs toward 92% while the compact call is still open. */
+function compactPercent(tool: ChatMessage['tools'][number], message: ChatMessage): number {
+  const start = Date.parse(tool.startedAt ?? message.createdAt ?? '');
+  const elapsed = Number.isNaN(start) ? 0 : Math.max(0, Date.now() - start);
+  const eased = 1 - Math.exp(-elapsed / 14_000);
+  return Math.max(8, Math.min(92, Math.round(8 + 84 * eased)));
 }
 
 function placeLiveFoot(trace: HTMLElement, show: boolean): HTMLElement | null {
@@ -2015,7 +2072,34 @@ function syncElapsed(trace: HTMLElement, message: ChatMessage): void {
   }
   foot.hidden = false;
   const label = foot.querySelector('.trace-live-time');
-  if (label) {
+  const compact = foot.querySelector('.trace-compact');
+  const tool = compactTool(message);
+  const compacting = tool?.status === 'in_progress' || tool?.status === 'pending';
+  if (compacting && tool && compact instanceof HTMLElement) {
+    if (label instanceof HTMLElement) {
+      label.hidden = true;
+    }
+    compact.hidden = false;
+    const copy = compact.querySelector('.trace-compact-copy');
+    if (copy) {
+      copy.textContent = tr('compactLive');
+    }
+    const percent = compactPercent(tool, message);
+    const fill = compact.querySelector('.trace-compact-fill');
+    if (fill instanceof HTMLElement) {
+      fill.style.width = `${percent}%`;
+    }
+    const pct = compact.querySelector('.trace-compact-pct');
+    if (pct) {
+      pct.textContent = `${percent}%`;
+    }
+    return;
+  }
+  if (compact instanceof HTMLElement) {
+    compact.hidden = true;
+  }
+  if (label instanceof HTMLElement) {
+    label.hidden = false;
     label.textContent = time ? tr('elapsedLive', { time }) : tr('thinkingNow');
   }
 }
@@ -2025,7 +2109,7 @@ function patchTrace(trace: HTMLElement, message: ChatMessage): void {
   if (!(host instanceof HTMLElement)) {
     return;
   }
-  const beats = traceBeats(message);
+  const beats = traceBeats(message).filter((beat) => !isCompactBeat(beat, message));
   const plan = message.plan?.trim() ?? '';
   const keys = beats.map((beat, index) => beatKey(beat, index));
   if (plan) {

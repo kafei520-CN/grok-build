@@ -113,13 +113,6 @@ export class GrokAgent {
     };
 
     rpc.on('log', (message: string) => logWarn(message));
-    rpc.on('overflow', (error: Error) => {
-      logError('ACP stdout overflow', error);
-      lost(error);
-      if (!child.killed) {
-        child.kill();
-      }
-    });
     child.stdout.on('data', (chunk: Buffer) => {
       setImmediate(() => rpc.feed(chunk));
     });

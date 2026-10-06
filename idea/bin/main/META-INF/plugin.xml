@@ -13,6 +13,8 @@
 </ul>
 ]]></description>
   <change-notes><![CDATA[OpenGrok Plugins 0.2.90: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.2.98 — Compacting shows a live progress bar instead of a plain tool row.</p>
+<p>0.2.97 — Restoring a large session no longer fails with ACP stdout overflow. Skill, agent, and persona deletes stay on listed paths. A stale workspace save is rejected. The remote session token stays in the cookie.</p>
 <p>0.2.96 — Streaming no longer yanks the transcript down on every line. Switching sessions keeps that chat's edit history. Ask mode and the terminal switch block new shells. Settings save no longer deletes the file if the replace fails.</p>
 <p>0.2.90 — Switching sessions mid-run loads the full history. User bubbles are not dropped by a live tail.</p>
 <p>0.2.89 — Sidebar title icon is the Grok mark on a transparent mask, not a solid white square.</p>
