@@ -11,6 +11,7 @@ import {
   fileSearchGlob,
   shouldSearchFiles,
 } from '../runtime/fileSearch';
+import { locateChip } from '../openTarget';
 import { sameFsPath } from '../grokDirs';
 import type { GrokSettings } from '../types';
 import { spawnProcessTerminal } from '../../agent/acpTerminal';
@@ -23,6 +24,12 @@ let channel: vscode.OutputChannel | undefined;
 
 export function bindChatWebview(webview: vscode.Webview): void {
   chatWebview = webview;
+}
+
+function lineRange(doc: vscode.TextDocument, line: number): vscode.Range {
+  const zero = Math.min(Math.max(line - 1, 0), Math.max(doc.lineCount - 1, 0));
+  const pos = new vscode.Position(zero, 0);
+  return new vscode.Range(pos, pos);
 }
 
 function logChannel(): vscode.OutputChannel {
@@ -156,8 +163,31 @@ export function createVscodePlatform(context: vscode.ExtensionContext): Platform
     async openExternal(url) {
       await vscode.env.openExternal(vscode.Uri.parse(url));
     },
-    async openFile(filePath, preview = true) {
-      await vscode.window.showTextDocument(vscode.Uri.file(filePath), { preview });
+    async openFile(filePath, preview = true, at) {
+      const folders = (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath);
+      const located = locateChip({ path: filePath, line: at?.line }, folders);
+      const target = located?.path || filePath;
+      if (!target.trim()) {
+        return;
+      }
+      const uri = vscode.Uri.file(target);
+      let stat: vscode.FileStat | undefined;
+      try {
+        stat = await vscode.workspace.fs.stat(uri);
+      } catch {
+        stat = undefined;
+      }
+      if (stat && stat.type & vscode.FileType.Directory) {
+        await vscode.commands.executeCommand('revealInExplorer', uri);
+        return;
+      }
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const line = located?.line ?? at?.line;
+      const selection = line && line > 0 ? lineRange(doc, line) : undefined;
+      const editor = await vscode.window.showTextDocument(doc, { preview, selection });
+      if (selection) {
+        editor.revealRange(selection, vscode.TextEditorRevealType.InCenter);
+      }
     },
     async revealFile(filePath) {
       await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));

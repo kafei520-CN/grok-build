@@ -71,7 +71,8 @@ export interface Platform {
   openFolders(opts?: { title?: string }): Promise<string[] | undefined>;
   readDir(dir: string): Promise<string[]>;
   openExternal(url: string): Promise<void>;
-  openFile(path: string, preview?: boolean): Promise<void>;
+  /** Open a file. `at.line` is 1-based, matching file chips. */
+  openFile(path: string, preview?: boolean, at?: { line?: number }): Promise<void>;
   revealFile?(path: string): Promise<void>;
   clipboardWrite(text: string): Promise<void>;
   findFiles(query: string): Promise<Array<{ path: string; label: string }>>;

@@ -10,6 +10,7 @@ import {
   shouldSearchFiles,
 } from '../runtime/fileSearch';
 import { spawnProcessTerminal } from '../../agent/acpTerminal';
+import { locateChip } from '../openTarget';
 import type { FileInfo, Platform, SelectionInfo } from './index';
 import { DEFAULT_SETTINGS, type GrokSettings } from '../types';
 
@@ -165,8 +166,18 @@ export class NodePlatform implements Platform {
     await this.opts.request('openExternal', { url });
   }
 
-  async openFile(filePath: string, preview = true): Promise<void> {
-    await this.opts.request('openFile', { path: filePath, preview });
+  async openFile(filePath: string, preview = true, at?: { line?: number }): Promise<void> {
+    const located = locateChip({ path: filePath, line: at?.line }, this.workspaceFolders());
+    const target = located?.path || filePath;
+    const line = located?.line ?? at?.line;
+    if (!target.trim()) {
+      return;
+    }
+    await this.opts.request('openFile', {
+      path: target,
+      preview,
+      ...(line && line > 0 ? { line } : {}),
+    });
   }
 
   async clipboardWrite(text: string): Promise<void> {

@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, it } from 'node:test';
+import { bindPlatform, type Platform } from '../core/platform';
 import type { GrokController } from './controller';
 import { dispatchUi } from './dispatch';
 
@@ -143,5 +147,44 @@ describe('dispatchUi', () => {
     await dispatchUi(controller, { type: 'setRemotePublicUrl', url: 'http://vps:8787' });
     await dispatchUi(controller, { type: 'setRemoteTunnel', host: '1.2.3.4', user: 'root' });
     assert.deepEqual(seen, ['url:http://vps:8787', 'tunnel:1.2.3.4']);
+  });
+
+  it('opens a relative file chip at the cited line', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-open-'));
+    try {
+      const file = path.join(root, 'src', 'foo.ts');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, 'export function updateTarget() {}\n');
+      const opened: Array<{ path: string; line?: number }> = [];
+      const warnings: string[] = [];
+      bindPlatform({
+        cwd: () => root,
+        workspaceFolders: () => [root],
+        language: () => 'en',
+        getConfig: (_key, fallback) => fallback,
+        warn(message: string) {
+          warnings.push(message);
+        },
+        openFile: async (filePath: string, _preview?: boolean, at?: { line?: number }) => {
+          opened.push({ path: filePath, line: at?.line });
+        },
+      } as Platform);
+      const controller = {
+        previewFileOnRemote: async () => {},
+      } as unknown as GrokController;
+      await dispatchUi(controller, {
+        type: 'openFile',
+        path: 'src/foo.ts',
+        line: 3,
+        symbol: 'updateTarget',
+      });
+      assert.equal(path.normalize(opened[0]?.path ?? ''), path.normalize(file));
+      assert.equal(opened[0]?.line, 3);
+      await dispatchUi(controller, { type: 'openFile', path: 'missing.ts', symbol: 'nope' });
+      assert.equal(opened.length, 1);
+      assert.equal(warnings.length, 1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

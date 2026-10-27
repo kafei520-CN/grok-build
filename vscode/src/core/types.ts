@@ -756,7 +756,7 @@ export type WebviewToHost =
   | { type: 'answerAsk'; choiceId?: string; choiceIds?: string[]; notes?: string }
   | { type: 'cancelAsk' }
   | { type: 'removeAttachment'; id: string }
-  | { type: 'openFile'; path: string }
+  | { type: 'openFile'; path: string; line?: number; symbol?: string }
   | { type: 'revealFile'; path: string }
   | { type: 'openUrl'; url: string }
   | { type: 'setModel'; modelId: string }

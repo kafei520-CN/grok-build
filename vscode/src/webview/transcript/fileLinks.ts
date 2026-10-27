@@ -96,6 +96,11 @@ export function parseCodeRef(raw: string): CodeRef | undefined {
     line = Number(lined[1]);
     text = text.slice(0, lined.index).trim();
   }
+  const suffix = takeLineSuffix(text);
+  if (suffix) {
+    line = line ?? suffix.line;
+    text = suffix.path;
+  }
   if (!text || /\s/.test(text)) {
     return undefined;
   }
@@ -136,6 +141,11 @@ function parseQuotedFile(body: string): CodeRef | undefined {
   if (lined && lined.index !== undefined) {
     line = Number(lined[1]);
     text = text.slice(0, lined.index).trim();
+  }
+  const suffix = takeLineSuffix(text);
+  if (suffix) {
+    line = line ?? suffix.line;
+    text = suffix.path;
   }
   if (!text) {
     return undefined;
@@ -198,19 +208,65 @@ export function fileLinkHtml(pathOrRef: string | CodeRef, label?: string): strin
   const cls = ref.kind === 'symbol' ? 'md-file md-sym' : ref.kind === 'folder' ? 'md-file md-dir' : 'md-file';
   const pathAttr = ref.path ? ` data-path="${escapeHtml(ref.path)}"` : '';
   const lineAttr = ref.line ? ` data-line="${ref.line}"` : '';
+  const symbolAttr = ref.kind === 'symbol' ? ` data-symbol="${escapeHtml(ref.name)}"` : '';
   const title = [ref.path ?? ref.name, ref.line ? `line ${ref.line}` : ''].filter(Boolean).join(' · ');
   const lineHtml = ref.line ? `<span class="md-file-line">(line ${ref.line})</span>` : '';
-  return `<button type="button" class="${cls}"${pathAttr}${lineAttr} title="${escapeHtml(title)}">${icon}<span class="md-file-name">${escapeHtml(name)}</span>${lineHtml}</button>`;
+  return `<button type="button" class="${cls}"${pathAttr}${lineAttr}${symbolAttr} title="${escapeHtml(title)}">${icon}<span class="md-file-name">${escapeHtml(name)}</span>${lineHtml}</button>`;
+}
+
+/** Click payload for a rendered file or line chip. Line is 1-based. */
+export function chipOpenFields(
+  path: string | undefined,
+  lineRaw: string | undefined,
+  symbol: string | undefined,
+): { path: string; line?: number; symbol?: string } | undefined {
+  const trimmed = path?.trim() ?? '';
+  const name = symbol?.trim() || undefined;
+  const line = /^\d+$/.test(lineRaw ?? '') ? Number(lineRaw) : undefined;
+  if (!trimmed && !name) {
+    return undefined;
+  }
+  return {
+    path: trimmed,
+    ...(line && line > 0 ? { line } : {}),
+    ...(name ? { symbol: name } : {}),
+  };
 }
 
 export function linkInlineFilePaths(text: string, stash: (html: string) => string): string {
+  const files = markedFilePaths(text);
+  let fileIndex = 0;
+  let lastFile: string | undefined;
   return text.replace(MARKED_RE, (full, prefix: string, kind: string, body: string) => {
     const ref = kind.toLowerCase() === 'line' ? parseQuotedLine(body) : parseQuotedFile(body);
     if (!ref) {
       return full;
     }
+    if (ref.kind === 'file' && ref.path) {
+      lastFile = ref.path;
+      fileIndex += 1;
+    }
+    if (ref.kind === 'symbol' && !ref.path) {
+      ref.path = lastFile ?? files[fileIndex] ?? files[0];
+    }
     return `${prefix}${stash(fileLinkHtml(ref))}`;
   });
+}
+
+function markedFilePaths(text: string): string[] {
+  const paths: string[] = [];
+  MARKED_RE.lastIndex = 0;
+  for (const match of text.matchAll(MARKED_RE)) {
+    if (match[2]?.toLowerCase() !== 'file') {
+      continue;
+    }
+    const ref = parseQuotedFile(match[3] ?? '');
+    if (ref?.kind === 'file' && ref.path) {
+      paths.push(ref.path);
+    }
+  }
+  MARKED_RE.lastIndex = 0;
+  return paths;
 }
 
 function looksLikeFolderToken(text: string): boolean {
@@ -249,6 +305,18 @@ function looksLikeFileToken(text: string): boolean {
     return true;
   }
   return !/[\\/]/.test(text) && hasFileExt(text) && FILE_EXTS.has(extOf(text));
+}
+
+function takeLineSuffix(text: string): { path: string; line: number } | undefined {
+  const hash = text.match(/#L(\d+)$/i);
+  if (hash?.index !== undefined && hash.index > 0) {
+    return { path: text.slice(0, hash.index), line: Number(hash[1]) };
+  }
+  const colon = text.match(/:(\d+)(?::\d+)?$/);
+  if (colon?.index !== undefined && colon.index > 1) {
+    return { path: text.slice(0, colon.index), line: Number(colon[1]) };
+  }
+  return undefined;
 }
 
 function stripPathWrap(raw: string): string {

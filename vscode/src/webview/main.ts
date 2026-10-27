@@ -10,6 +10,7 @@ import { removeSlot, replaceSlot } from './dom';
 import { closeSettingsPicker, patchSettings, settingsBackMessage } from './settings';
 import { bindFileDrop, syncDropHint } from './chrome/drop';
 import { bindQuoteMenu } from './chrome/quoteMenu';
+import { chipOpenFields } from './transcript/fileLinks';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
 import { chromeKeepers, overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './chrome/wallpaper';
 import { playNotify } from './chrome/notify';
@@ -345,10 +346,15 @@ function boot(): void {
     }
   });
   document.addEventListener('click', (event) => {
-    const filePath = filePathFromEvent(event);
-    if (filePath) {
+    const chip = fileChipFromEvent(event);
+    if (chip) {
       event.preventDefault();
-      post({ type: 'openFile', path: filePath });
+      post({
+        type: 'openFile',
+        path: chip.path,
+        ...(chip.line ? { line: chip.line } : {}),
+        ...(chip.symbol ? { symbol: chip.symbol } : {}),
+      });
       return;
     }
     const href = hrefFromEvent(event);
@@ -374,7 +380,9 @@ function boot(): void {
   render();
 }
 
-function filePathFromEvent(event: MouseEvent): string | undefined {
+function fileChipFromEvent(
+  event: MouseEvent,
+): { path: string; line?: number; symbol?: string } | undefined {
   const target = event.target;
   if (!(target instanceof Element)) {
     return undefined;
@@ -383,8 +391,7 @@ function filePathFromEvent(event: MouseEvent): string | undefined {
   if (!(link instanceof HTMLElement)) {
     return undefined;
   }
-  const path = link.dataset.path?.trim();
-  return path || undefined;
+  return chipOpenFields(link.dataset.path, link.dataset.line, link.dataset.symbol);
 }
 
 function hrefFromEvent(event: MouseEvent): string | undefined {

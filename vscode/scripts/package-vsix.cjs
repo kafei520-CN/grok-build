@@ -7,7 +7,9 @@ const pkg = require('../package.json');
 const outDir = path.resolve(vscodeRoot, '..', 'packages', 'vscode');
 fs.mkdirSync(outDir, { recursive: true });
 const out = path.join(outDir, `grok-for-vs-code-${pkg.version}.vsix`);
-const result = spawnSync('npx', ['--yes', '@vscode/vsce', 'package', '--out', out], {
+// shell:true on Windows splits an unquoted path at the space in "OpenGrok Project".
+const outArg = process.platform === 'win32' ? `"${out}"` : out;
+const result = spawnSync('npx', ['--yes', '@vscode/vsce', 'package', '--out', outArg], {
   cwd: vscodeRoot,
   stdio: 'inherit',
   shell: true,

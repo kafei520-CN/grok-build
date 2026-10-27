@@ -8,9 +8,11 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.intellij.ide.BrowserUtil
+import com.intellij.ide.projectView.ProjectView
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.module.ModuleManager
 
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.fileChooser.FileChooser
@@ -22,6 +24,7 @@ import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.fileEditor.impl.NonProjectFileWritingAccessProvider
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -76,7 +79,7 @@ class HostRpc(
                     sidecar.reply(id, true)
                 }
                 "openFile" -> {
-                    openPath(str(params, "path"))
+                    openPath(str(params, "path"), int(params, "line"))
                     sidecar.reply(id, true)
                 }
                 "clipboardWrite" -> {
@@ -248,12 +251,50 @@ class HostRpc(
         return files.map { it.path }
     }
 
-    private fun openPath(path: String) {
+    private fun openPath(path: String, line: Int = 0) {
         if (path.isBlank()) {
             return
         }
-        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(path)) ?: return
-        OpenFileDescriptor(project, vf).navigate(true)
+        val io = resolveIo(path) ?: return
+        val vf = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(io) ?: return
+        if (vf.isDirectory) {
+            ApplicationManager.getApplication().invokeLater {
+                ProjectView.getInstance(project).select(null, vf, true)
+            }
+            return
+        }
+        // Chip lines are 1-based. OpenFileDescriptor wants a 0-based line.
+        val descriptor = if (line > 0) {
+            OpenFileDescriptor(project, vf, line - 1, 0)
+        } else {
+            OpenFileDescriptor(project, vf)
+        }
+        descriptor.navigate(true)
+    }
+
+    private fun resolveIo(path: String): File? {
+        val direct = File(path)
+        if (direct.isAbsolute && direct.exists()) {
+            return direct
+        }
+        return ApplicationManager.getApplication().runReadAction<File?> {
+            val base = project.basePath
+            if (!base.isNullOrBlank()) {
+                val relative = File(base, path)
+                if (relative.exists()) {
+                    return@runReadAction relative
+                }
+            }
+            for (module in ModuleManager.getInstance(project).modules) {
+                for (root in ModuleRootManager.getInstance(module).contentRoots) {
+                    val candidate = File(root.path, path)
+                    if (candidate.exists()) {
+                        return@runReadAction candidate
+                    }
+                }
+            }
+            if (direct.isAbsolute) direct else null
+        }
     }
 
     private fun readOpenText(path: String): String? {
@@ -338,5 +379,18 @@ class HostRpc(
     private fun str(params: JsonObject, key: String, fallback: String = ""): String {
         val el = params.get(key) ?: return fallback
         return if (el.isJsonNull) fallback else el.asString
+    }
+
+    private fun int(params: JsonObject, key: String): Int {
+        val el = params.get(key) ?: return 0
+        if (!el.isJsonPrimitive || el.isJsonNull) {
+            return 0
+        }
+        val prim = el.asJsonPrimitive
+        return when {
+            prim.isNumber -> prim.asInt
+            prim.isString -> prim.asString.toIntOrNull() ?: 0
+            else -> 0
+        }
     }
 }

@@ -39,4 +39,24 @@ describe('inline file links', () => {
     assert.equal(linkInlineFilePaths('see @plugin/src/foo.ts please', stash), 'see @plugin/src/foo.ts please');
     assert.equal(linkInlineFilePaths('see @File:"1/5" please', stash), 'see @File:"1/5" please');
   });
+
+  it('keeps the line on a file chip and pairs a line chip with that file', () => {
+    const slots: string[] = [];
+    const stash = (html: string) => {
+      slots.push(html);
+      return `\u0000${slots.length - 1}\u0000`;
+    };
+    linkInlineFilePaths('@File:"plugin/src/foo.ts (line 9)"\n@Line:"updateTarget(line 12)"', stash);
+    assert.match(slots[0] ?? '', /data-path="plugin\/src\/foo.ts"/);
+    assert.match(slots[0] ?? '', /data-line="9"/);
+    assert.match(slots[1] ?? '', /data-path="plugin\/src\/foo.ts"/);
+    assert.match(slots[1] ?? '', /data-line="12"/);
+    assert.match(slots[1] ?? '', /data-symbol="updateTarget"/);
+    slots.length = 0;
+    linkInlineFilePaths('@Line:"updateTarget(line 4)" in @File:"plugin/src/foo.ts:4"', stash);
+    assert.match(slots[0] ?? '', /data-path="plugin\/src\/foo.ts"/);
+    assert.match(slots[0] ?? '', /data-line="4"/);
+    assert.match(slots[1] ?? '', /data-line="4"/);
+    assert.doesNotMatch(slots[1] ?? '', /foo\.ts:4/);
+  });
 });

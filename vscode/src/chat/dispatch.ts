@@ -1,3 +1,5 @@
+import { tr } from '../core/i18n/locale';
+import { locateChip } from '../core/openTarget';
 import { plat } from '../core/platform';
 import type { GrokController } from './controller';
 import type { WebviewToHost } from '../core/types';
@@ -109,14 +111,29 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'removeAttachment':
       controller.removeAttachment(message.id);
       return;
-    case 'openFile':
-      await controller.previewFileOnRemote(message.path);
+    case 'openFile': {
+      const roots = plat().workspaceFolders();
+      const target = locateChip(
+        { path: message.path, line: message.line, symbol: message.symbol },
+        roots.length ? roots : [plat().cwd()],
+      );
+      if (!target) {
+        const name = message.symbol?.trim() || message.path.trim();
+        if (name) {
+          plat().warn(tr('openMissing', { name }));
+        }
+        return;
+      }
+      if (target.kind === 'file') {
+        await controller.previewFileOnRemote(target.path);
+      }
       try {
-        await plat().openFile(message.path, true);
+        await plat().openFile(target.path, true, target.line ? { line: target.line } : undefined);
       } catch {
         /* Browser overlay already has the file; the IDE may not. */
       }
       return;
+    }
     case 'revealFile':
       if (plat().revealFile) {
         await plat().revealFile(message.path);
