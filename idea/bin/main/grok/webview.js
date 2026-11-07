@@ -663,7 +663,6 @@
     themeSurfaceFlat: "Default",
     themeSurfaceGlass: "Liquid glass",
     themeSurfaceSolid: "Solid float",
-    themeSurfaceEndfield: "Endfield",
     themeGlassOpacity: "Panel opacity",
     themeGlassBlur: "Background blur",
     themeChromeBlur: "Component blur",
@@ -676,7 +675,6 @@
     themePresetSunset: "Sunset",
     themePresetRose: "Rose",
     themePresetEmber: "Ember",
-    themePresetEndfield: "Endfield",
     settingsAgent: "Agent",
     settingsPermission: "Tool permission",
     settingsPermissionAsk: "Ask",
@@ -1320,7 +1318,6 @@
     themeSurfaceFlat: "\u9ED8\u8BA4",
     themeSurfaceGlass: "\u6DB2\u6001\u73BB\u7483",
     themeSurfaceSolid: "\u7EAF\u8272\u60AC\u6D6E",
-    themeSurfaceEndfield: "\u7EC8\u672B\u5730",
     themeGlassOpacity: "\u80CC\u666F\u677F\u900F\u660E\u5EA6",
     themeGlassBlur: "\u80CC\u666F\u6A21\u7CCA\u5EA6",
     themeChromeBlur: "\u7EC4\u4EF6\u6A21\u7CCA\u5EA6",
@@ -1333,7 +1330,6 @@
     themePresetSunset: "\u65E5\u843D",
     themePresetRose: "\u73AB\u7470",
     themePresetEmber: "\u7425\u73C0",
-    themePresetEndfield: "\u7EC8\u672B\u5730",
     settingsAgent: "Agent",
     settingsPermission: "\u5DE5\u5177\u6743\u9650",
     settingsPermissionAsk: "\u8BE2\u95EE",
@@ -19641,16 +19637,52 @@
     if (isNumericPath(norm)) {
       return void 0;
     }
-    if (hasFileExt(text5) || /^[A-Za-z]:[\\/]/.test(text5) || /[/\\]/.test(text5) || /^\.\.?[\\/]/.test(text5)) {
-      if (!hasFileExt(text5) && /[/\\]/.test(text5)) {
-        const folder = text5.replace(/[/\\]+$/, "").replace(/\\/g, "/");
-        return { kind: "folder", name: fileName(folder), path: `${folder}/` };
+    return quotedFileRef(text5, line);
+  }
+  var BARE_FILES = /* @__PURE__ */ new Set([
+    "makefile",
+    "dockerfile",
+    "containerfile",
+    "jenkinsfile",
+    "gemfile",
+    "rakefile",
+    "procfile",
+    "license",
+    "licence",
+    "readme",
+    "changelog",
+    "authors",
+    "contributing",
+    "copying",
+    "notice"
+  ]);
+  function quotedFileRef(text5, line) {
+    const trimmed = text5.replace(/[/\\]+$/, "");
+    const trailing = trimmed.length !== text5.length;
+    if (!trailing && isChipFile(trimmed || text5)) {
+      return { kind: "file", name: fileName(trimmed || text5), path: text5, line };
+    }
+    if (/[/\\]/.test(text5)) {
+      const folder = (trimmed || text5).replace(/\\/g, "/");
+      if (!folder || isNumericPath(folder)) {
+        return void 0;
       }
-      if (hasFileExt(text5) || /^[A-Za-z]:[\\/]/.test(text5)) {
-        return { kind: "file", name: fileName(text5), path: text5, line };
-      }
+      return { kind: "folder", name: fileName(folder), path: `${folder}/` };
     }
     return void 0;
+  }
+  function isChipFile(text5) {
+    const base = text5.replace(/[/\\]+$/, "").replace(/\\/g, "/").split("/").pop() ?? "";
+    if (!base || base === "." || base === "..") {
+      return false;
+    }
+    if (base.startsWith(".") && base.length > 1 && !base.endsWith(".")) {
+      return true;
+    }
+    if (hasFileExt(text5) || /^[a-z0-9]{1,12}$/i.test(extOf(text5))) {
+      return true;
+    }
+    return BARE_FILES.has(base.toLowerCase());
   }
   function parseQuotedLine(body) {
     const lined = body.trim().match(/^(.+?)\s*\(\s*line\s+(\d+)\s*\)$/i);

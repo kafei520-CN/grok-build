@@ -13,6 +13,7 @@
 </ul>
 ]]></description>
   <change-notes><![CDATA[OpenGrok Plugins 0.2.90: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.3.2 — File chips render dotfiles and extensionless names such as .gitignore and Makefile.</p>
 <p>0.3.1 — The send button is a circle and uses an up arrow.</p>
 <p>0.3.0 — Tool rows always show a tool name. Search no longer appears as only the pattern.</p>
 <p>0.2.99 — File and line chips open the workspace file and jump to the cited line.</p>
