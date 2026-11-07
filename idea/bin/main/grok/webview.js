@@ -1056,6 +1056,7 @@
     reviewEmpty: "No file changes to review",
     reviewDiff: "{name}: before \u2194 current",
     reviewMissing: "No before-image for {name}; opened the current file",
+    openMissing: "Could not open {name}",
     remoteFileTooLarge: "This file is too large to open in the browser.",
     remoteFileBinary: "Binary file. It opened in the IDE if one is attached.",
     remoteFileMissing: "Could not read that file.",
@@ -1707,6 +1708,7 @@
     reviewEmpty: "\u6CA1\u6709\u53EF\u5BA1\u67E5\u7684\u6587\u4EF6\u66F4\u6539",
     reviewDiff: "{name}\uFF1A\u66F4\u6539\u524D \u2194 \u5F53\u524D",
     reviewMissing: "{name} \u6CA1\u6709\u66F4\u6539\u524D\u5FEB\u7167\uFF0C\u5DF2\u6253\u5F00\u5F53\u524D\u6587\u4EF6",
+    openMissing: "\u6253\u4E0D\u5F00 {name}",
     remoteFileTooLarge: "\u6587\u4EF6\u592A\u5927\uFF0C\u65E0\u6CD5\u5728\u6D4F\u89C8\u5668\u91CC\u6253\u5F00\u3002",
     remoteFileBinary: "\u8FD9\u662F\u4E8C\u8FDB\u5236\u6587\u4EF6\u3002\u82E5\u672C\u673A IDE \u5F00\u7740\uFF0C\u5DF2\u5728 IDE \u91CC\u6253\u5F00\u3002",
     remoteFileMissing: "\u8BFB\u4E0D\u4E86\u8FD9\u4E2A\u6587\u4EF6\u3002",
@@ -19555,6 +19557,11 @@
       line = Number(lined[1]);
       text5 = text5.slice(0, lined.index).trim();
     }
+    const suffix = takeLineSuffix(text5);
+    if (suffix) {
+      line = line ?? suffix.line;
+      text5 = suffix.path;
+    }
     if (!text5 || /\s/.test(text5)) {
       return void 0;
     }
@@ -19587,6 +19594,11 @@
     if (lined && lined.index !== void 0) {
       line = Number(lined[1]);
       text5 = text5.slice(0, lined.index).trim();
+    }
+    const suffix = takeLineSuffix(text5);
+    if (suffix) {
+      line = line ?? suffix.line;
+      text5 = suffix.path;
     }
     if (!text5) {
       return void 0;
@@ -19639,18 +19651,57 @@
     const cls = ref.kind === "symbol" ? "md-file md-sym" : ref.kind === "folder" ? "md-file md-dir" : "md-file";
     const pathAttr = ref.path ? ` data-path="${escapeHtml(ref.path)}"` : "";
     const lineAttr = ref.line ? ` data-line="${ref.line}"` : "";
+    const symbolAttr = ref.kind === "symbol" ? ` data-symbol="${escapeHtml(ref.name)}"` : "";
     const title = [ref.path ?? ref.name, ref.line ? `line ${ref.line}` : ""].filter(Boolean).join(" \xB7 ");
     const lineHtml = ref.line ? `<span class="md-file-line">(line ${ref.line})</span>` : "";
-    return `<button type="button" class="${cls}"${pathAttr}${lineAttr} title="${escapeHtml(title)}">${icon}<span class="md-file-name">${escapeHtml(name)}</span>${lineHtml}</button>`;
+    return `<button type="button" class="${cls}"${pathAttr}${lineAttr}${symbolAttr} title="${escapeHtml(title)}">${icon}<span class="md-file-name">${escapeHtml(name)}</span>${lineHtml}</button>`;
+  }
+  function chipOpenFields(path2, lineRaw, symbol) {
+    const trimmed = path2?.trim() ?? "";
+    const name = symbol?.trim() || void 0;
+    const line = /^\d+$/.test(lineRaw ?? "") ? Number(lineRaw) : void 0;
+    if (!trimmed && !name) {
+      return void 0;
+    }
+    return {
+      path: trimmed,
+      ...line && line > 0 ? { line } : {},
+      ...name ? { symbol: name } : {}
+    };
   }
   function linkInlineFilePaths(text5, stash) {
+    const files = markedFilePaths(text5);
+    let fileIndex = 0;
+    let lastFile;
     return text5.replace(MARKED_RE, (full, prefix, kind, body) => {
       const ref = kind.toLowerCase() === "line" ? parseQuotedLine(body) : parseQuotedFile(body);
       if (!ref) {
         return full;
       }
+      if (ref.kind === "file" && ref.path) {
+        lastFile = ref.path;
+        fileIndex += 1;
+      }
+      if (ref.kind === "symbol" && !ref.path) {
+        ref.path = lastFile ?? files[fileIndex] ?? files[0];
+      }
       return `${prefix}${stash(fileLinkHtml(ref))}`;
     });
+  }
+  function markedFilePaths(text5) {
+    const paths = [];
+    MARKED_RE.lastIndex = 0;
+    for (const match of text5.matchAll(MARKED_RE)) {
+      if (match[2]?.toLowerCase() !== "file") {
+        continue;
+      }
+      const ref = parseQuotedFile(match[3] ?? "");
+      if (ref?.kind === "file" && ref.path) {
+        paths.push(ref.path);
+      }
+    }
+    MARKED_RE.lastIndex = 0;
+    return paths;
   }
   function looksLikeFolderToken(text5) {
     const trimmed = text5.replace(/[/\\]+$/, "");
@@ -19681,6 +19732,17 @@
       return true;
     }
     return !/[\\/]/.test(text5) && hasFileExt(text5) && FILE_EXTS.has(extOf(text5));
+  }
+  function takeLineSuffix(text5) {
+    const hash = text5.match(/#L(\d+)$/i);
+    if (hash?.index !== void 0 && hash.index > 0) {
+      return { path: text5.slice(0, hash.index), line: Number(hash[1]) };
+    }
+    const colon = text5.match(/:(\d+)(?::\d+)?$/);
+    if (colon?.index !== void 0 && colon.index > 1) {
+      return { path: text5.slice(0, colon.index), line: Number(colon[1]) };
+    }
+    return void 0;
   }
   function stripPathWrap(raw) {
     let text5 = raw.trim();
@@ -30968,10 +31030,15 @@ ${stepsKey(steps)}`;
       }
     });
     document.addEventListener("click", (event) => {
-      const filePath = filePathFromEvent(event);
-      if (filePath) {
+      const chip = fileChipFromEvent(event);
+      if (chip) {
         event.preventDefault();
-        post({ type: "openFile", path: filePath });
+        post({
+          type: "openFile",
+          path: chip.path,
+          ...chip.line ? { line: chip.line } : {},
+          ...chip.symbol ? { symbol: chip.symbol } : {}
+        });
         return;
       }
       const href = hrefFromEvent(event);
@@ -30993,7 +31060,7 @@ ${stepsKey(steps)}`;
     bindFileDrop();
     render4();
   }
-  function filePathFromEvent(event) {
+  function fileChipFromEvent(event) {
     const target = event.target;
     if (!(target instanceof Element)) {
       return void 0;
@@ -31002,8 +31069,7 @@ ${stepsKey(steps)}`;
     if (!(link instanceof HTMLElement)) {
       return void 0;
     }
-    const path2 = link.dataset.path?.trim();
-    return path2 || void 0;
+    return chipOpenFields(link.dataset.path, link.dataset.line, link.dataset.symbol);
   }
   function hrefFromEvent(event) {
     const target = event.target;
