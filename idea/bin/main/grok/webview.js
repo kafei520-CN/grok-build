@@ -1135,6 +1135,11 @@
     toolSearch: "Search",
     toolDelete: "Delete",
     toolCompact: "Compact",
+    toolList: "List",
+    toolFetch: "Fetch",
+    toolSkill: "Skill",
+    toolMemory: "Memory",
+    toolImage: "Image",
     toolGeneric: "Tool",
     termRun: "Run output",
     termIdle: "Waiting for output",
@@ -1787,6 +1792,11 @@
     toolSearch: "\u641C\u7D22",
     toolDelete: "\u5220\u9664",
     toolCompact: "\u538B\u7F29",
+    toolList: "\u5217\u51FA",
+    toolFetch: "\u83B7\u53D6",
+    toolSkill: "\u6280\u80FD",
+    toolMemory: "\u8BB0\u5FC6",
+    toolImage: "\u56FE\u50CF",
     toolGeneric: "\u5DE5\u5177",
     termRun: "\u8FD0\u884C\u60C5\u51B5",
     termIdle: "\u7B49\u5F85\u8F93\u51FA",
@@ -1946,7 +1956,7 @@
     return parts.join(" \xB7 ");
   }
   function toolKindLabel(locale, kind) {
-    switch (kind) {
+    switch ((kind ?? "").toLowerCase()) {
       case "read":
         return t(locale, "toolRead");
       case "edit":
@@ -1957,11 +1967,32 @@
       case "terminal":
         return t(locale, "toolTerminal");
       case "search":
+      case "grep":
+      case "web_search":
+      case "websearch":
         return t(locale, "toolSearch");
       case "delete":
         return t(locale, "toolDelete");
       case "compact":
         return t(locale, "toolCompact");
+      case "list":
+      case "list_dir":
+      case "listdir":
+        return t(locale, "toolList");
+      case "fetch":
+      case "web_fetch":
+      case "webfetch":
+        return t(locale, "toolFetch");
+      case "skill":
+        return t(locale, "toolSkill");
+      case "memory":
+      case "memory_search":
+      case "memory_get":
+        return t(locale, "toolMemory");
+      case "image":
+      case "image_gen":
+      case "imagine":
+        return t(locale, "toolImage");
       default:
         return t(locale, "toolGeneric");
     }
@@ -2489,6 +2520,9 @@
   }
   function iconPlay() {
     return '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M5.2 3.4 12.4 8 5.2 12.6z"/></svg>';
+  }
+  function iconSend() {
+    return '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V3.6M4.2 7.4 8 3.6l3.8 3.8"/></svg>';
   }
   function iconSendNow() {
     return '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M2.4 3.2 8.2 8 2.4 12.8z"/><path d="M8.6 3.2 14.4 8 8.6 12.8z"/></svg>';
@@ -21237,6 +21271,115 @@
     return opts.streaming ? "dots" : "arrow";
   }
 
+  // src/webview/transcript/toolLabel.ts
+  var HINT_MAX = 72;
+  function toolRowLabel(tool, locale) {
+    const kindKey = displayKind(tool.kind, tool.title);
+    const kind = toolKindLabel(locale, kindKey);
+    if (isNameOnly(kindKey)) {
+      return kind;
+    }
+    const hint = rowHint(tool, kind);
+    return hint ? `${kind} \xB7 ${hint}` : kind;
+  }
+  function displayKind(kind, title) {
+    const normalized = normalizeKind(kind);
+    if (normalized && normalized !== "other" && normalized !== "unknown") {
+      return normalized;
+    }
+    return kindFromTitle(title) ?? normalized;
+  }
+  function normalizeKind(kind) {
+    const text5 = (kind ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if (!text5) {
+      return void 0;
+    }
+    switch (text5) {
+      case "grep":
+      case "websearch":
+      case "web_search":
+        return "search";
+      case "read_file":
+      case "readfile":
+        return "read";
+      case "bash":
+      case "shell":
+      case "run_terminal_command":
+        return "execute";
+      case "listdir":
+      case "list_dir":
+      case "ls":
+        return "list";
+      case "webfetch":
+      case "web_fetch":
+        return "fetch";
+      case "image_gen":
+      case "imagine":
+        return "image";
+      default:
+        return text5;
+    }
+  }
+  function kindFromTitle(title) {
+    const text5 = (title ?? "").trim().toLowerCase();
+    if (!text5) {
+      return void 0;
+    }
+    if (/^(imagine|image-to-video|reference-to-video)\b/.test(text5)) {
+      return "image";
+    }
+    if (text5.startsWith("skill:") || text5.startsWith("skill ")) {
+      return "skill";
+    }
+    if (text5.startsWith("memory ")) {
+      return "memory";
+    }
+    if (text5.startsWith("web search") || text5.startsWith("grep")) {
+      return "search";
+    }
+    if (text5.startsWith("fetch:") || text5.startsWith("fetch ")) {
+      return "fetch";
+    }
+    if (text5.startsWith("list ") || text5.startsWith("list_dir")) {
+      return "list";
+    }
+    return void 0;
+  }
+  function isNameOnly(kind) {
+    const key = (kind ?? "").toLowerCase();
+    return key === "execute" || key === "terminal" || key === "compact";
+  }
+  function rowHint(tool, kindLabel) {
+    if (tool.detail?.trim()) {
+      return clip(fileName3(tool.detail));
+    }
+    const title = (tool.title ?? "").trim();
+    if (!title || title === kindLabel) {
+      return "";
+    }
+    const stripped = title.replace(
+      /^(?:read|edit|write|search|grep|web search|fetch|skill|memory search|memory read|imagine(?:-edit)?|image-to-video|reference-to-video|list)\b[:\s`"]*/i,
+      ""
+    ).replace(/^`+|`+$/g, "").trim();
+    const hint = stripped || title;
+    if (hint === kindLabel) {
+      return "";
+    }
+    return clip(hint);
+  }
+  function fileName3(path2) {
+    const norm = path2.replace(/\\/g, "/").replace(/\/+$/, "");
+    const i = norm.lastIndexOf("/");
+    return i >= 0 ? norm.slice(i + 1) : path2;
+  }
+  function clip(value) {
+    const text5 = value.trim();
+    if (text5.length <= HINT_MAX) {
+      return text5;
+    }
+    return `${text5.slice(0, HINT_MAX - 1)}\u2026`;
+  }
+
   // src/core/permissions/index.ts
   var SWITCH_TO_AGENT_ID = "switch_to_agent";
   var STAY_IN_ASK_ID = "stay_in_ask";
@@ -23547,14 +23690,7 @@ ${stepsKey(steps)}`;
     return isTermTool(tool) || Boolean(tool.detail) || Boolean(tool.output) || Boolean(tool.command);
   }
   function toolHead(tool) {
-    const kind = toolKindLabel(loc(), tool.kind);
-    if (isTermTool(tool)) {
-      return kind;
-    }
-    if (tool.detail) {
-      return `${kind} \xB7 ${fileName2(tool.detail)}`;
-    }
-    return tool.title || kind;
+    return toolRowLabel(tool, loc());
   }
   function fillToolBody(body, tool) {
     body.replaceChildren();
@@ -24655,7 +24791,7 @@ ${stepsKey(steps)}`;
       send.innerHTML = iconStop();
       send.addEventListener("click", () => post({ type: "cancel" }));
     } else {
-      send.innerHTML = iconStar("14");
+      send.innerHTML = iconSend();
       send.addEventListener("click", () => sendFrom(input2));
     }
     releaseByClass("picker-menu");

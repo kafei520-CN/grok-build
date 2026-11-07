@@ -10,7 +10,7 @@ import { scrollTranscript } from '../transcript';
 import { iconButton } from '../dom';
 import { pickRemoteFiles, sendBrowserFiles } from './drop';
 import { bindHoverPin, findPinned, pinFloating, releaseByClass } from './popover';
-import { iconChevron, iconClose, iconDown, iconExpand, iconPause, iconPlay, iconPlus, iconSendNow, iconStar, iconStop, iconTarget, iconTrash } from '../icons';
+import { iconChevron, iconClose, iconDown, iconExpand, iconPause, iconPlay, iconPlus, iconSend, iconSendNow, iconStar, iconStop, iconTarget, iconTrash } from '../icons';
 import { formatGoalChip, goalElapsedMs, truncateGoal } from '../../chat/goal';
 import { escapeHtml } from '../transcript/markdown';
 import { fileLinkHtml } from '../transcript/fileLinks';
@@ -244,7 +244,7 @@ function fillComposerBar(bar: HTMLElement, input: HTMLTextAreaElement): void {
     send.innerHTML = iconStop();
     send.addEventListener('click', () => post({ type: 'cancel' }));
   } else {
-    send.innerHTML = iconStar('14');
+    send.innerHTML = iconSend();
     send.addEventListener('click', () => sendFrom(input));
   }
   releaseByClass('picker-menu');

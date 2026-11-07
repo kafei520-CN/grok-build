@@ -156,7 +156,6 @@ export const EN = {
   themeSurfaceFlat: 'Default',
   themeSurfaceGlass: 'Liquid glass',
   themeSurfaceSolid: 'Solid float',
-  themeSurfaceEndfield: 'Endfield',
   themeGlassOpacity: 'Panel opacity',
   themeGlassBlur: 'Background blur',
   themeChromeBlur: 'Component blur',
@@ -170,7 +169,6 @@ export const EN = {
   themePresetSunset: 'Sunset',
   themePresetRose: 'Rose',
   themePresetEmber: 'Ember',
-  themePresetEndfield: 'Endfield',
   settingsAgent: 'Agent',
   settingsPermission: 'Tool permission',
   settingsPermissionAsk: 'Ask',
@@ -636,6 +634,11 @@ export const EN = {
   toolSearch: 'Search',
   toolDelete: 'Delete',
   toolCompact: 'Compact',
+  toolList: 'List',
+  toolFetch: 'Fetch',
+  toolSkill: 'Skill',
+  toolMemory: 'Memory',
+  toolImage: 'Image',
   toolGeneric: 'Tool',
   termRun: 'Run output',
   termIdle: 'Waiting for output',
@@ -821,7 +824,6 @@ export const ZH: Record<StringKey, string> = {
   themeSurfaceFlat: '默认',
   themeSurfaceGlass: '液态玻璃',
   themeSurfaceSolid: '纯色悬浮',
-  themeSurfaceEndfield: '终末地',
   themeGlassOpacity: '背景板透明度',
   themeGlassBlur: '背景模糊度',
   themeChromeBlur: '组件模糊度',
@@ -834,7 +836,6 @@ export const ZH: Record<StringKey, string> = {
   themePresetSunset: '日落',
   themePresetRose: '玫瑰',
   themePresetEmber: '琥珀',
-  themePresetEndfield: '终末地',
   settingsAgent: 'Agent',
   settingsPermission: '工具权限',
   settingsPermissionAsk: '询问',
@@ -1296,6 +1297,11 @@ export const ZH: Record<StringKey, string> = {
   toolSearch: '搜索',
   toolDelete: '删除',
   toolCompact: '压缩',
+  toolList: '列出',
+  toolFetch: '获取',
+  toolSkill: '技能',
+  toolMemory: '记忆',
+  toolImage: '图像',
   toolGeneric: '工具',
   termRun: '运行情况',
   termIdle: '等待输出',
@@ -1482,7 +1488,7 @@ export function turnSourceText(
 }
 
 export function toolKindLabel(locale: UiLocale, kind?: string): string {
-  switch (kind) {
+  switch ((kind ?? '').toLowerCase()) {
     case 'read':
       return t(locale, 'toolRead');
     case 'edit':
@@ -1493,11 +1499,32 @@ export function toolKindLabel(locale: UiLocale, kind?: string): string {
     case 'terminal':
       return t(locale, 'toolTerminal');
     case 'search':
+    case 'grep':
+    case 'web_search':
+    case 'websearch':
       return t(locale, 'toolSearch');
     case 'delete':
       return t(locale, 'toolDelete');
     case 'compact':
       return t(locale, 'toolCompact');
+    case 'list':
+    case 'list_dir':
+    case 'listdir':
+      return t(locale, 'toolList');
+    case 'fetch':
+    case 'web_fetch':
+    case 'webfetch':
+      return t(locale, 'toolFetch');
+    case 'skill':
+      return t(locale, 'toolSkill');
+    case 'memory':
+    case 'memory_search':
+    case 'memory_get':
+      return t(locale, 'toolMemory');
+    case 'image':
+    case 'image_gen':
+    case 'imagine':
+      return t(locale, 'toolImage');
     default:
       return t(locale, 'toolGeneric');
   }

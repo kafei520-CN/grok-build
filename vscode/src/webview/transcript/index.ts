@@ -1,5 +1,6 @@
 import { totals } from '../../edits/edits';
 import { formatDuration, toolKindLabel, turnSourceText } from '../../core/i18n';
+import { toolRowLabel } from './toolLabel';
 import { permissionButtonClass, permissionLabelKey } from '../../core/permissions';
 import { permissionActions, permissionNeedsCancel, permissionTarget } from '../../core/permissions/permissionView';
 import { renderTermHtml } from '../../terminal/termAnsi';
@@ -2341,14 +2342,7 @@ function toolHasBody(tool: ChatMessage['tools'][number]): boolean {
 }
 
 function toolHead(tool: ChatMessage['tools'][number]): string {
-  const kind = toolKindLabel(loc(), tool.kind);
-  if (isTermTool(tool)) {
-    return kind;
-  }
-  if (tool.detail) {
-    return `${kind} · ${fileName(tool.detail)}`;
-  }
-  return tool.title || kind;
+  return toolRowLabel(tool, loc());
 }
 
 function fillToolBody(body: HTMLElement, tool: ChatMessage['tools'][number]): void {
@@ -2507,8 +2501,6 @@ function termElapsedText(tool: ChatMessage['tools'][number]): string {
 }
 
 function fillToolTitle(title: HTMLElement, tool: ChatMessage['tools'][number]): void {
-  const kind = toolKindLabel(loc(), tool.kind);
-  const hint = isTermTool(tool) ? '' : tool.detail ? fileName(tool.detail) : tool.title;
   const icon = document.createElement('span');
   icon.className = 'tool-icon';
   if (tool.kind) {
@@ -2522,7 +2514,7 @@ function fillToolTitle(title: HTMLElement, tool: ChatMessage['tools'][number]): 
   }
   const copy = document.createElement('span');
   copy.className = 'tool-copy';
-  copy.textContent = `${kind}${hint ? ` · ${hint}` : ''}`;
+  copy.textContent = toolRowLabel(tool, loc());
   title.replaceChildren(icon, copy);
 }
 

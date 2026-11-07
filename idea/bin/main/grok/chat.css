@@ -3290,7 +3290,7 @@ textarea:focus-visible {
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: 10px;
+  border-radius: 50%;
   background: var(--fg);
   color: var(--bg);
   cursor: pointer;

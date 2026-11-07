@@ -50,6 +50,10 @@ export function iconPlay(): string {
   return '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M5.2 3.4 12.4 8 5.2 12.6z"/></svg>';
 }
 
+export function iconSend(): string {
+  return '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 12.5V3.6M4.2 7.4 8 3.6l3.8 3.8"/></svg>';
+}
+
 export function iconSendNow(): string {
   return '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M2.4 3.2 8.2 8 2.4 12.8z"/><path d="M8.6 3.2 14.4 8 8.6 12.8z"/></svg>';
 }
