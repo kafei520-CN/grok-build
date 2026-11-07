@@ -429,10 +429,7 @@ export function bootStar(): HTMLElement {
   el.className = 'boot';
   el.setAttribute('role', 'status');
   el.setAttribute('aria-label', tr('startingTitle'));
-  const mark = document.createElement('div');
-  mark.className = 'mark pulse';
-  mark.innerHTML = iconStar();
-  el.append(mark);
+  el.innerHTML = grokBootMark();
   return el;
 }
 

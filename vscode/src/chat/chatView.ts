@@ -60,12 +60,18 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
           void this.onMessage(message);
         }),
         webviewView.onDidChangeVisibility(() => this.onVisibility()),
+        vscode.workspace.onDidChangeConfiguration((event) => {
+          if (event.affectsConfiguration('workbench.sideBar.location')) {
+            this.postRailSide();
+          }
+        }),
         { dispose: () => clearInterval(watch) },
       );
     }
     webview.html = this.renderHtml(webview);
     this.lastAlive = Date.now();
     this.postState(this.controller.snapshot());
+    this.postRailSide();
   }
 
   private async onMessage(message: WebviewToHost): Promise<void> {
@@ -80,6 +86,7 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
       return;
     }
     void this.view.webview.postMessage({ type: 'wake' });
+    this.postRailSide();
   }
 
   private watchdog(): void {
@@ -102,7 +109,17 @@ export class GrokChatViewProvider implements vscode.WebviewViewProvider, vscode.
     view.webview.html = this.renderHtml(view.webview);
     this.lastAlive = Date.now();
     this.postState(this.controller.snapshot());
+    this.postRailSide();
     this.reviving = false;
+  }
+
+  /** Scrollbar sits against the editor: left sidebar keeps it on the right. */
+  private postRailSide(): void {
+    const place = vscode.workspace.getConfiguration('workbench').get<string>('sideBar.location');
+    void this.view?.webview.postMessage({
+      type: 'railSide',
+      side: place === 'right' ? 'start' : 'end',
+    });
   }
 
   private postState(state: ChatState): void {

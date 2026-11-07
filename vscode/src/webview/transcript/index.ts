@@ -1,6 +1,7 @@
 import { totals } from '../../edits/edits';
 import { formatDuration, toolKindLabel, turnSourceText } from '../../core/i18n';
 import { toolRowLabel } from './toolLabel';
+import { setUserReveal, syncUserRail } from './userRailView';
 import { permissionButtonClass, permissionLabelKey } from '../../core/permissions';
 import { permissionActions, permissionNeedsCancel, permissionTarget } from '../../core/permissions/permissionView';
 import { renderTermHtml } from '../../terminal/termAnsi';
@@ -90,6 +91,7 @@ export function patchBody(parent: HTMLElement): void {
     }
     bindTranscriptScroll();
     pinChatIfNeeded();
+    syncUserRail();
     return;
   }
   if (body.dataset.kind !== kind) {
@@ -99,6 +101,7 @@ export function patchBody(parent: HTMLElement): void {
     body.replaceWith(next);
     bindTranscriptScroll();
     pinChatIfNeeded();
+    syncUserRail();
     return;
   }
   if (kind === 'chat') {
@@ -211,12 +214,14 @@ function patchTranscript(): void {
       pinTranscript(transcript);
     }
     syncWorkClock();
+    syncUserRail();
     return;
   }
   syncTranscript(transcript);
   dockPrompts(transcript);
   scrollTranscript();
   syncWorkClock();
+  syncUserRail();
 }
 
 let historyPaintGen = 0;
@@ -278,6 +283,28 @@ function syncTranscript(transcript: HTMLElement): void {
   if (start > 0) {
     scheduleHistoryPaint(transcript);
   }
+}
+
+setUserReveal((id) => {
+  const transcript = document.getElementById('transcript');
+  if (transcript) {
+    ensureUserPainted(transcript, id);
+  }
+});
+
+function ensureUserPainted(transcript: HTMLElement, userId: string): void {
+  const escape = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(userId) : userId.replace(/"/g, '\\"');
+  if (transcript.querySelector(`[data-user-id="${escape}"]`)) {
+    return;
+  }
+  const grouped = groupTurns(ui.state.messages);
+  const index = grouped.findIndex((turn) => turn.user?.id === userId);
+  if (index < 0) {
+    return;
+  }
+  cancelHistoryPaint();
+  clearTurns(transcript);
+  paintTurnRange(transcript, grouped, index, grouped.length);
 }
 
 function clearTurns(transcript: HTMLElement): void {
@@ -353,6 +380,7 @@ function scheduleHistoryPaint(transcript: HTMLElement): void {
   const pending: HTMLElement[] = [];
   const finish = (flushed: boolean) => {
     transcript.classList.remove('catching-up');
+    syncUserRail();
     if (flushed && ui.stickToBottom) {
       pinTranscript(transcript);
     }
@@ -1001,6 +1029,7 @@ function bindTranscriptScroll(el?: HTMLElement | null): void {
   node.addEventListener(
     'scroll',
     () => {
+      syncUserRail();
       if (scrollState.pinLock) {
         return;
       }
@@ -1180,6 +1209,7 @@ function syncUserBubble(node: HTMLElement, user: ChatMessage | undefined): void 
 function userBubble(message: ChatMessage): HTMLElement {
   const el = document.createElement('article');
   el.className = 'msg user';
+  el.dataset.userId = message.id;
   const bubble = document.createElement('div');
   bubble.className = 'bubble';
   const editing = ui.editingUserId === message.id;

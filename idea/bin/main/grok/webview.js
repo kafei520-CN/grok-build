@@ -21044,10 +21044,7 @@
     el.className = "boot";
     el.setAttribute("role", "status");
     el.setAttribute("aria-label", tr("startingTitle"));
-    const mark = document.createElement("div");
-    mark.className = "mark pulse";
-    mark.innerHTML = iconStar();
-    el.append(mark);
+    el.innerHTML = grokBootMark();
     return el;
   }
   function errorCard() {
@@ -21412,6 +21409,378 @@
     return `${text5.slice(0, HINT_MAX - 1)}\u2026`;
   }
 
+  // src/webview/transcript/userRail.ts
+  var LABEL_MAX = 28;
+  function userRailMarks(messages) {
+    const marks = [];
+    for (const message of messages) {
+      if (message.role !== "user") {
+        continue;
+      }
+      const label = railLabel(message);
+      if (!label) {
+        continue;
+      }
+      marks.push({ id: message.id, label });
+    }
+    return marks;
+  }
+  function railLabel(message) {
+    const text5 = (message.text ?? "").replace(/\s+/g, " ").trim();
+    if (text5) {
+      return clip2(text5);
+    }
+    const file = message.files?.[0];
+    const name = file?.label?.trim() || file?.path?.split(/[/\\]/).pop()?.trim() || "";
+    return clip2(name);
+  }
+  function railSegment(count, active, previousStart, size = 10) {
+    const total = Math.max(0, count);
+    if (total === 0) {
+      return { start: 0, end: 0 };
+    }
+    const page = Math.max(1, size);
+    if (total <= page) {
+      return { start: 0, end: total };
+    }
+    const current2 = Math.min(Math.max(active, 0), total - 1);
+    const step = Math.max(1, Math.floor(page / 2));
+    const lastStart = total - page;
+    let start = Number.isFinite(previousStart) ? Math.max(0, Math.floor(previousStart)) : 0;
+    if (start > lastStart) {
+      start = lastStart;
+    }
+    while (current2 >= start + page && start < lastStart) {
+      start = Math.min(lastStart, start + step);
+    }
+    while (current2 < start && start > 0) {
+      start = Math.max(0, start - step);
+    }
+    if (start > lastStart) {
+      start = lastStart;
+    }
+    return { start, end: start + page };
+  }
+  function evenTickCenter(index, count, height) {
+    if (count <= 1 || height <= 0) {
+      return 0;
+    }
+    const slot = Math.min(Math.max(index, 0), count - 1);
+    return slot / (count - 1) * height;
+  }
+  function paintedMarkSpan(tops) {
+    let from = -1;
+    let to = 0;
+    for (let i = 0; i < tops.length; i += 1) {
+      if (tops[i] < 0) {
+        continue;
+      }
+      if (from < 0) {
+        from = i;
+      }
+      to = i + 1;
+    }
+    if (from < 0) {
+      return { from: 0, to: tops.length };
+    }
+    return { from, to };
+  }
+  function scrollReach(maxScroll, padding, overlap) {
+    const extra = Math.max(0, padding - Math.max(0, overlap));
+    return Math.max(0, maxScroll - extra);
+  }
+  function activeRailIndex(count, scrollTop, maxScroll = Number.POSITIVE_INFINITY, from = 0, to = count) {
+    if (count <= 0 || to <= from) {
+      return -1;
+    }
+    const end = Math.min(count, to) - 1;
+    const start = Math.max(0, Math.min(from, end));
+    if (start === end) {
+      return start;
+    }
+    const reach = Number.isFinite(maxScroll) ? Math.max(0, maxScroll) : 0;
+    if (scrollTop <= 1 || reach <= 1) {
+      return start;
+    }
+    if (scrollTop >= reach - 1) {
+      return end;
+    }
+    const t2 = scrollTop / reach;
+    return start + Math.round(t2 * (end - start));
+  }
+  function railEdge(host, measured) {
+    if (host === "start" || host === "end") {
+      return host;
+    }
+    return measured === "start" ? "start" : "end";
+  }
+  function clip2(value) {
+    if (value.length <= LABEL_MAX) {
+      return value;
+    }
+    return `${value.slice(0, LABEL_MAX - 1)}\u2026`;
+  }
+
+  // src/webview/transcript/userRailView.ts
+  var hostEdge;
+  var popHeld = false;
+  var closePopTimer = 0;
+  var revealUser = () => {
+  };
+  function setUserReveal(reveal) {
+    revealUser = reveal;
+  }
+  function setRailHostEdge(side) {
+    hostEdge = side === "start" || side === "end" ? side : void 0;
+    syncUserRail();
+  }
+  function syncUserRail() {
+    const body = document.getElementById("grok-body");
+    const transcript = document.getElementById("transcript");
+    if (!body || !transcript) {
+      document.getElementById("user-rail")?.remove();
+      return;
+    }
+    if (ui.state.restoringSession || transcript.classList.contains("catching-up")) {
+      document.getElementById("user-rail")?.remove();
+      return;
+    }
+    const marks = userRailMarks(ui.state.messages);
+    if (marks.length < 2) {
+      document.getElementById("user-rail")?.remove();
+      return;
+    }
+    const rail = ensureRail(body);
+    const tops = marks.map((mark) => userTop(transcript, mark.id));
+    const span = paintedMarkSpan(tops);
+    const reach = scrollReach(
+      Math.max(0, transcript.scrollHeight - transcript.clientHeight),
+      Number.parseFloat(transcript.style.paddingBottom) || 0,
+      composerOverlap(transcript)
+    );
+    const active = Math.max(0, activeRailIndex(marks.length, transcript.scrollTop, reach, span.from, span.to));
+    const previous = rail.dataset.segmentStart === void 0 ? void 0 : Number(rail.dataset.segmentStart);
+    const segment = railSegment(marks.length, active, previous);
+    rail.dataset.segmentStart = String(segment.start);
+    const shown = marks.slice(segment.start, segment.end).map((mark, index) => ({ mark, index }));
+    const rowSig = marks.map((mark) => `${mark.id}	${mark.label}`).join("\n");
+    const tickSig = `${segment.start}:${shown.map((item) => item.mark.id).join(",")}`;
+    const changed = rail.dataset.rows !== rowSig || rail.dataset.ticks !== tickSig;
+    if (changed || !rail.dataset.side || hostEdge) {
+      rail.dataset.side = railEdge(hostEdge, "unknown");
+    }
+    if (rail.dataset.rows !== rowSig) {
+      rail.dataset.rows = rowSig;
+      paintRows(rail, marks);
+    }
+    if (rail.dataset.ticks !== tickSig) {
+      rail.dataset.ticks = tickSig;
+      paintTicks(rail, shown);
+    }
+    sizeRows(rail);
+    markActive(rail, marks[active]?.id);
+    placeTicks(rail);
+  }
+  function ensureRail(body) {
+    let rail = document.getElementById("user-rail");
+    if (rail && rail.parentElement === body) {
+      return rail;
+    }
+    rail?.remove();
+    rail = document.createElement("div");
+    rail.id = "user-rail";
+    rail.className = "user-rail";
+    rail.addEventListener("pointerenter", () => holdPop());
+    rail.addEventListener("pointerleave", (event) => {
+      if (event.relatedTarget instanceof Node && rail.contains(event.relatedTarget)) {
+        return;
+      }
+      scheduleClosePop(rail);
+    });
+    rail.addEventListener(
+      "wheel",
+      (event) => {
+        const pop = rail?.querySelector(".user-rail-pop");
+        if (pop && event.target instanceof Node && pop.contains(event.target)) {
+          return;
+        }
+        const transcript = document.getElementById("transcript");
+        if (!transcript) {
+          return;
+        }
+        transcript.scrollTop += event.deltaY;
+      },
+      { passive: true }
+    );
+    body.append(rail);
+    return rail;
+  }
+  function paintRows(rail, marks) {
+    let pop = rail.querySelector(".user-rail-pop");
+    if (!pop) {
+      pop = document.createElement("div");
+      pop.className = "user-rail-pop";
+      pop.addEventListener("pointerenter", () => holdPop());
+      pop.addEventListener(
+        "wheel",
+        (event) => {
+          popHeld = true;
+          event.stopPropagation();
+        },
+        { passive: true }
+      );
+      rail.append(pop);
+    }
+    delete pop.dataset.rowH;
+    pop.replaceChildren();
+    for (const mark of marks) {
+      const row2 = document.createElement("button");
+      row2.type = "button";
+      row2.className = "user-rail-row";
+      row2.dataset.id = mark.id;
+      const text5 = document.createElement("span");
+      text5.textContent = mark.label;
+      const dash = document.createElement("i");
+      row2.append(text5, dash);
+      row2.addEventListener("click", () => jumpTo(mark.id));
+      pop.append(row2);
+    }
+  }
+  function paintTicks(rail, items) {
+    rail.querySelectorAll(".user-rail-tick").forEach((node) => node.remove());
+    const pop = rail.querySelector(".user-rail-pop");
+    for (const item of items) {
+      const mark = item.mark;
+      const tick = document.createElement("button");
+      tick.type = "button";
+      tick.className = "user-rail-tick";
+      tick.dataset.id = mark.id;
+      tick.dataset.index = String(item.index);
+      tick.title = mark.label;
+      const bar = document.createElement("i");
+      tick.append(bar);
+      tick.addEventListener("pointerenter", () => {
+        holdPop();
+        openPop(rail);
+      });
+      tick.addEventListener("click", () => jumpTo(mark.id));
+      if (pop) {
+        rail.insertBefore(tick, pop);
+      } else {
+        rail.append(tick);
+      }
+    }
+  }
+  function holdPop() {
+    window.clearTimeout(closePopTimer);
+    closePopTimer = 0;
+  }
+  function scheduleClosePop(rail) {
+    window.clearTimeout(closePopTimer);
+    closePopTimer = window.setTimeout(() => {
+      closePopTimer = 0;
+      popHeld = false;
+      rail.classList.remove("open");
+    }, 360);
+  }
+  function openPop(rail) {
+    const wasOpen = rail.classList.contains("open");
+    rail.classList.add("open");
+    if (wasOpen) {
+      return;
+    }
+    popHeld = false;
+    revealActiveRow(rail, rail.querySelector(".user-rail-row.on")?.dataset.id);
+  }
+  function sizeRows(rail) {
+    const pop = rail.querySelector(".user-rail-pop");
+    if (!pop) {
+      return;
+    }
+    const rows = pop.querySelectorAll(".user-rail-row");
+    const slots = Math.min(10, rows.length);
+    const rowH = slots > 0 ? rail.clientHeight / slots : 0;
+    const stamp = String(Math.round(rowH * 10) / 10);
+    if (pop.dataset.rowH === stamp) {
+      return;
+    }
+    pop.dataset.rowH = stamp;
+    rows.forEach((row2) => {
+      row2.style.flex = `0 0 ${rowH}px`;
+      row2.style.height = `${rowH}px`;
+    });
+  }
+  function placeTicks(rail) {
+    const ticks = rail.querySelectorAll(".user-rail-tick");
+    const height = rail.clientHeight;
+    ticks.forEach((tick, index2) => {
+      tick.hidden = false;
+      tick.style.top = `${evenTickCenter(index2, ticks.length, height)}px`;
+    });
+    const active = rail.querySelector(".user-rail-tick.on");
+    const index = active ? Math.max(0, [...ticks].indexOf(active)) : 0;
+    const knob = ensureKnob(rail);
+    knob.style.top = `${evenTickCenter(index, ticks.length, height)}px`;
+  }
+  function ensureKnob(rail) {
+    let knob = rail.querySelector(".user-rail-knob");
+    if (knob) {
+      return knob;
+    }
+    knob = document.createElement("i");
+    knob.className = "user-rail-knob";
+    rail.append(knob);
+    return knob;
+  }
+  function markActive(rail, activeId) {
+    rail.querySelectorAll(".user-rail-tick, .user-rail-row").forEach((node) => {
+      node.classList.toggle("on", Boolean(activeId) && node.dataset.id === activeId);
+    });
+  }
+  function revealActiveRow(rail, id) {
+    const pop = rail.querySelector(".user-rail-pop");
+    const row2 = id ? pop?.querySelector(`[data-id="${cssEscape(id)}"]`) : null;
+    if (!pop || !row2) {
+      return;
+    }
+    pop.scrollTop = Math.max(0, row2.offsetTop - (pop.clientHeight - row2.offsetHeight) / 2);
+  }
+  function jumpTo(id) {
+    const transcript = document.getElementById("transcript");
+    if (!transcript) {
+      return;
+    }
+    ui.stickToBottom = false;
+    revealUser(id);
+    const top = userTop(transcript, id);
+    if (top < 0) {
+      return;
+    }
+    transcript.scrollTop = Math.max(0, top - 8);
+    document.getElementById("user-rail")?.classList.remove("open");
+  }
+  function composerOverlap(transcript) {
+    const composer = document.getElementById("composer-card") ?? document.getElementById("composer-wrap");
+    if (!composer) {
+      return 0;
+    }
+    const view = transcript.getBoundingClientRect();
+    const box = composer.getBoundingClientRect();
+    return Math.max(0, view.bottom - box.top);
+  }
+  function userTop(transcript, id) {
+    const node = transcript.querySelector(`[data-user-id="${cssEscape(id)}"]`);
+    if (!node) {
+      return -1;
+    }
+    const host = transcript.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    return box.top - host.top + transcript.scrollTop;
+  }
+  function cssEscape(value) {
+    return typeof CSS !== "undefined" && CSS.escape ? CSS.escape(value) : value.replace(/"/g, '\\"');
+  }
+
   // src/core/permissions/index.ts
   var SWITCH_TO_AGENT_ID = "switch_to_agent";
   var STAY_IN_ASK_ID = "stay_in_ask";
@@ -21726,6 +22095,7 @@
       }
       bindTranscriptScroll();
       pinChatIfNeeded();
+      syncUserRail();
       return;
     }
     if (body.dataset.kind !== kind) {
@@ -21735,6 +22105,7 @@
       body.replaceWith(next);
       bindTranscriptScroll();
       pinChatIfNeeded();
+      syncUserRail();
       return;
     }
     if (kind === "chat") {
@@ -21836,12 +22207,14 @@
         pinTranscript(transcript);
       }
       syncWorkClock();
+      syncUserRail();
       return;
     }
     syncTranscript(transcript);
     dockPrompts(transcript);
     scrollTranscript();
     syncWorkClock();
+    syncUserRail();
   }
   var historyPaintGen = 0;
   var historyPaintRaf = 0;
@@ -21900,6 +22273,26 @@
     if (start > 0) {
       scheduleHistoryPaint(transcript);
     }
+  }
+  setUserReveal((id) => {
+    const transcript = document.getElementById("transcript");
+    if (transcript) {
+      ensureUserPainted(transcript, id);
+    }
+  });
+  function ensureUserPainted(transcript, userId) {
+    const escape3 = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(userId) : userId.replace(/"/g, '\\"');
+    if (transcript.querySelector(`[data-user-id="${escape3}"]`)) {
+      return;
+    }
+    const grouped = groupTurns(ui.state.messages);
+    const index = grouped.findIndex((turn) => turn.user?.id === userId);
+    if (index < 0) {
+      return;
+    }
+    cancelHistoryPaint();
+    clearTurns(transcript);
+    paintTurnRange(transcript, grouped, index, grouped.length);
   }
   function clearTurns(transcript) {
     for (const node of turnNodes(transcript)) {
@@ -21965,6 +22358,7 @@
     const pending = [];
     const finish = (flushed) => {
       transcript.classList.remove("catching-up");
+      syncUserRail();
       if (flushed && ui.stickToBottom) {
         pinTranscript(transcript);
       }
@@ -22515,6 +22909,7 @@
     node.addEventListener(
       "scroll",
       () => {
+        syncUserRail();
         if (scrollState.pinLock) {
           return;
         }
@@ -22684,6 +23079,7 @@
   function userBubble(message) {
     const el = document.createElement("article");
     el.className = "msg user";
+    el.dataset.userId = message.id;
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const editing = ui.editingUserId === message.id;
@@ -30917,6 +31313,10 @@ ${stepsKey(steps)}`;
     }
     if (data.type === "wake") {
       post({ type: "alive" });
+      return;
+    }
+    if (data.type === "railSide") {
+      setRailHostEdge(data.side);
       return;
     }
     if (data.type === "state" && data.state) {

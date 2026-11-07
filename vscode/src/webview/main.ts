@@ -11,6 +11,7 @@ import { closeSettingsPicker, patchSettings, settingsBackMessage } from './setti
 import { bindFileDrop, syncDropHint } from './chrome/drop';
 import { bindQuoteMenu } from './chrome/quoteMenu';
 import { chipOpenFields } from './transcript/fileLinks';
+import { setRailHostEdge } from './transcript/userRailView';
 import { patchBody, scrollTranscript, syncWorkClock } from './transcript';
 import { chromeKeepers, overlayKind, syncSurface, syncThemeFontFace, syncWallpaper } from './chrome/wallpaper';
 import { playNotify } from './chrome/notify';
@@ -42,6 +43,7 @@ type HostMsg = {
   done?: boolean;
   sessionId?: string;
   items?: EditStatsItem[];
+  side?: string;
 } & Partial<StreamTail>;
 
 let hydrateGen = 0;
@@ -53,6 +55,10 @@ function onHostMessage(data: HostMsg | null | undefined): void {
   }
   if (data.type === 'wake') {
     post({ type: 'alive' });
+    return;
+  }
+  if (data.type === 'railSide') {
+    setRailHostEdge(data.side);
     return;
   }
   if (data.type === 'state' && data.state) {
