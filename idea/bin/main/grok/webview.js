@@ -963,9 +963,14 @@
     stop: "Stop",
     send: "Send",
     fileSearchHint: "Type to search workspace files",
+    skillMenuEmpty: "No skills yet",
+    skillMenuNone: "No matching skill",
+    skillScopeProject: "Project",
+    skillScopeGlobal: "Global",
+    skillScopeBundled: "Built-in",
     placeholderLogin: "Sign in to start",
     placeholderQueue: "Queue a follow-up\u2026",
-    placeholderAsk: "Ask Grok to build, or type /",
+    placeholderAsk: "Ask Grok to build, or type / or #",
     cliTitle: "Install the Grok CLI",
     cliBody: "This extension talks to the local grok binary over ACP. Install it once, then sign in from here.",
     cliInstall: "Install in terminal",
@@ -1618,9 +1623,14 @@
     stop: "\u505C\u6B62",
     send: "\u53D1\u9001",
     fileSearchHint: "\u8F93\u5165\u4EE5\u641C\u7D22\u5DE5\u4F5C\u533A\u6587\u4EF6",
+    skillMenuEmpty: "\u8FD8\u6CA1\u6709 skill",
+    skillMenuNone: "\u6CA1\u6709\u5339\u914D\u7684 skill",
+    skillScopeProject: "\u9879\u76EE",
+    skillScopeGlobal: "\u5168\u5C40",
+    skillScopeBundled: "\u5185\u7F6E",
     placeholderLogin: "\u767B\u5F55\u540E\u5F00\u59CB",
     placeholderQueue: "\u6392\u961F\u4E0B\u4E00\u6761\u2026",
-    placeholderAsk: "\u8BA9 Grok \u5F00\u59CB\u6784\u5EFA\uFF0C\u6216\u8F93\u5165 /",
+    placeholderAsk: "\u8BA9 Grok \u5F00\u59CB\u6784\u5EFA\uFF0C\u6216\u8F93\u5165 / \u6216 #",
     cliTitle: "\u5B89\u88C5 Grok CLI",
     cliBody: "\u6B64\u6269\u5C55\u901A\u8FC7 ACP \u8FDE\u63A5\u672C\u673A grok \u547D\u4EE4\u3002\u5B89\u88C5\u4E00\u6B21\u540E\u5373\u53EF\u5728\u6B64\u767B\u5F55\u3002",
     cliInstall: "\u5728\u7EC8\u7AEF\u4E2D\u5B89\u88C5",
@@ -21261,6 +21271,47 @@
     { name: "doctor", description: "Check session health" }
   ];
 
+  // src/chat/prompt/skillRef.ts
+  var TOKEN = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,62}[a-z0-9]$|^[a-z0-9]$/;
+  function skillToken(skill) {
+    return normalizeToken(skill.name) ?? normalizeToken(skill.dirPath.split(/[/\\]/).pop() ?? "");
+  }
+  function filterSkills(skills, query) {
+    const q2 = query.replace(/^#/, "").trim().toLowerCase();
+    const seen = /* @__PURE__ */ new Set();
+    const hits = [];
+    for (const skill of skills) {
+      if (!skill.enabled) {
+        continue;
+      }
+      const token = skillToken(skill);
+      if (!token || seen.has(token)) {
+        continue;
+      }
+      if (q2 && !token.includes(q2) && !skill.name.toLowerCase().includes(q2) && !(skill.description ?? "").toLowerCase().includes(q2)) {
+        continue;
+      }
+      seen.add(token);
+      hits.push({ ...skill, token });
+    }
+    hits.sort((a2, b2) => a2.token.localeCompare(b2.token));
+    return hits.slice(0, 40);
+  }
+  function insertSkillToken(draft2, token) {
+    if (/#[^\s]*$/.test(draft2)) {
+      return draft2.replace(/#[^\s]*$/, `#${token} `);
+    }
+    const gap = draft2.length === 0 || /\s$/.test(draft2) ? "" : " ";
+    return `${draft2}${gap}#${token} `;
+  }
+  function normalizeToken(raw) {
+    const token = raw.trim().toLowerCase();
+    if (!TOKEN.test(token) || token.includes("--") || token.startsWith("-") || token.endsWith("-")) {
+      return void 0;
+    }
+    return token;
+  }
+
   // src/webview/chrome/scroll.ts
   var USER_SCROLL_HOLD_MS = 480;
   var BOTTOM_SLACK_PX = 56;
@@ -21417,11 +21468,7 @@
       if (message.role !== "user") {
         continue;
       }
-      const label = railLabel(message);
-      if (!label) {
-        continue;
-      }
-      marks.push({ id: message.id, label });
+      marks.push({ id: message.id, label: railLabel(message) || "\u2026" });
     }
     return marks;
   }
@@ -21461,6 +21508,10 @@
     }
     return { start, end: start + page };
   }
+  function scrollReach(maxScroll, padding, overlap) {
+    const extra = Math.max(0, padding - Math.max(0, overlap));
+    return Math.max(0, maxScroll - extra);
+  }
   function evenTickCenter(index, count, height) {
     if (count <= 1 || height <= 0) {
       return 0;
@@ -21468,45 +21519,29 @@
     const slot = Math.min(Math.max(index, 0), count - 1);
     return slot / (count - 1) * height;
   }
-  function paintedMarkSpan(tops) {
-    let from = -1;
-    let to = 0;
-    for (let i = 0; i < tops.length; i += 1) {
-      if (tops[i] < 0) {
-        continue;
-      }
-      if (from < 0) {
-        from = i;
-      }
-      to = i + 1;
-    }
-    if (from < 0) {
-      return { from: 0, to: tops.length };
-    }
-    return { from, to };
-  }
-  function scrollReach(maxScroll, padding, overlap) {
-    const extra = Math.max(0, padding - Math.max(0, overlap));
-    return Math.max(0, maxScroll - extra);
-  }
-  function activeRailIndex(count, scrollTop, maxScroll = Number.POSITIVE_INFINITY, from = 0, to = count) {
-    if (count <= 0 || to <= from) {
+  function activeRailIndex(tops, scrollTop, maxScroll = Number.POSITIVE_INFINITY) {
+    const painted = tops.map((top, index) => ({ index, top })).filter((item) => item.top >= 0);
+    if (!painted.length) {
       return -1;
     }
-    const end = Math.min(count, to) - 1;
-    const start = Math.max(0, Math.min(from, end));
-    if (start === end) {
-      return start;
+    const first = painted[0];
+    const last = painted[painted.length - 1];
+    if (painted.length === 1 || scrollTop <= 1) {
+      return first.index;
     }
     const reach = Number.isFinite(maxScroll) ? Math.max(0, maxScroll) : 0;
-    if (scrollTop <= 1 || reach <= 1) {
-      return start;
+    if (reach > 1 && scrollTop >= reach - 1) {
+      return last.index;
     }
-    if (scrollTop >= reach - 1) {
-      return end;
+    let current2 = first.index;
+    for (const item of painted) {
+      if (item.top <= scrollTop) {
+        current2 = item.index;
+      } else {
+        break;
+      }
     }
-    const t2 = scrollTop / reach;
-    return start + Math.round(t2 * (end - start));
+    return current2;
   }
   function railEdge(host, measured) {
     if (host === "start" || host === "end") {
@@ -21552,15 +21587,14 @@
     }
     const rail = ensureRail(body);
     const tops = marks.map((mark) => userTop(transcript, mark.id));
-    const span = paintedMarkSpan(tops);
     const reach = scrollReach(
       Math.max(0, transcript.scrollHeight - transcript.clientHeight),
       Number.parseFloat(transcript.style.paddingBottom) || 0,
       composerOverlap(transcript)
     );
-    const active = Math.max(0, activeRailIndex(marks.length, transcript.scrollTop, reach, span.from, span.to));
+    const active = activeRailIndex(tops, transcript.scrollTop, reach);
     const previous = rail.dataset.segmentStart === void 0 ? void 0 : Number(rail.dataset.segmentStart);
-    const segment = railSegment(marks.length, active, previous);
+    const segment = railSegment(marks.length, Math.max(0, active), previous);
     rail.dataset.segmentStart = String(segment.start);
     const shown = marks.slice(segment.start, segment.end).map((mark, index) => ({ mark, index }));
     const rowSig = marks.map((mark) => `${mark.id}	${mark.label}`).join("\n");
@@ -21578,7 +21612,7 @@
       paintTicks(rail, shown);
     }
     sizeRows(rail);
-    markActive(rail, marks[active]?.id);
+    markActive(rail, active >= 0 ? marks[active]?.id : void 0);
     placeTicks(rail);
   }
   function ensureRail(body) {
@@ -21711,15 +21745,16 @@
     });
   }
   function placeTicks(rail) {
-    const ticks = rail.querySelectorAll(".user-rail-tick");
+    const ticks = [...rail.querySelectorAll(".user-rail-tick")];
     const height = rail.clientHeight;
     ticks.forEach((tick, index2) => {
       tick.hidden = false;
       tick.style.top = `${evenTickCenter(index2, ticks.length, height)}px`;
     });
     const active = rail.querySelector(".user-rail-tick.on");
-    const index = active ? Math.max(0, [...ticks].indexOf(active)) : 0;
+    const index = active ? Math.max(0, ticks.indexOf(active)) : 0;
     const knob = ensureKnob(rail);
+    knob.hidden = false;
     knob.style.top = `${evenTickCenter(index, ticks.length, height)}px`;
   }
   function ensureKnob(rail) {
@@ -23197,8 +23232,7 @@
     render();
   }
   function canEditUser(message) {
-    const lastUser = [...ui.state.messages].reverse().find((item) => item.role === "user");
-    return lastUser?.id === message.id;
+    return message.role === "user" && Boolean(message.text.trim());
   }
   function submitUserEdit(message) {
     const text5 = ui.editDraft.trim();
@@ -25041,6 +25075,9 @@ ${stepsKey(steps)}`;
   var menuKey = "";
   var pendingEffortModel;
   var fileSearchTimer;
+  var skillRefreshTimer;
+  var skillIndex = 0;
+  var skillQuery = "";
   function patchComposer() {
     if (!document.getElementById("composer-wrap")) {
       mountComposer(document.getElementById("app") ?? document.body);
@@ -25072,7 +25109,8 @@ ${stepsKey(steps)}`;
       ui.menu = void 0;
     }
     const menuSlot = document.getElementById("composer-menu-slot");
-    const nextMenuKey = `${ui.menu ?? ""}:${ui.draft}:${(ui.state.fileHits ?? []).length}:${slashCommandsEnabled() ? "1" : "0"}`;
+    const skillKey = (ui.state.skills ?? []).map((row2) => `${row2.name}:${row2.enabled ? 1 : 0}`).join(",");
+    const nextMenuKey = `${ui.menu ?? ""}:${ui.draft}:${(ui.state.fileHits ?? []).length}:${slashCommandsEnabled() ? "1" : "0"}:${skillKey}:${skillIndex}`;
     if (menuSlot && nextMenuKey !== menuKey) {
       menuKey = nextMenuKey;
       menuSlot.replaceChildren();
@@ -25081,6 +25119,10 @@ ${stepsKey(steps)}`;
         pinFloating(slashMenu(), input2, { prefer: "above", align: "start" });
       } else if (!isBooting() && !ui.state.settingsOpen && ui.menu === "files") {
         pinFloating(fileMenu(), input2, { prefer: "above", align: "start" });
+      } else if (!isBooting() && !ui.state.settingsOpen && ui.menu === "skills") {
+        const menu = skillMenu();
+        pinFloating(menu, input2, { prefer: "above", align: "start" });
+        revealMenuItem(menu);
       }
     }
     const card = document.getElementById("composer-card");
@@ -25164,8 +25206,20 @@ ${stepsKey(steps)}`;
         }
         fileSearchTimer = setTimeout(() => post({ type: "searchFiles", query }), 160);
         render();
+      } else if (last.startsWith("#")) {
+        const query = last.slice(1);
+        if (query !== skillQuery) {
+          skillQuery = query;
+          skillIndex = 0;
+        }
+        ui.menu = "skills";
+        ui.picker = void 0;
+        requestSkills();
+        render();
       } else if (ui.menu) {
         ui.menu = void 0;
+        skillQuery = "";
+        skillIndex = 0;
         render();
       }
     });
@@ -25193,6 +25247,20 @@ ${stepsKey(steps)}`;
           render();
         }
         return;
+      }
+      if (ui.menu === "skills" && !event.isComposing && event.keyCode !== 229) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          moveSkill(event.key === "ArrowDown" ? 1 : -1);
+          return;
+        }
+        if (event.key === "Enter" && !event.shiftKey && !event.altKey || event.key === "Tab") {
+          if (skillHits().length) {
+            event.preventDefault();
+            acceptSkill();
+            return;
+          }
+        }
       }
       const sendKey = ui.state.multiline ? event.key === "Enter" && (event.shiftKey || event.altKey) : event.key === "Enter" && !event.shiftKey;
       if (sendKey && !event.isComposing && event.keyCode !== 229) {
@@ -25602,6 +25670,95 @@ ${stepsKey(steps)}`;
       el.append(item);
     }
     return el;
+  }
+  function requestSkills() {
+    if (skillRefreshTimer) {
+      return;
+    }
+    skillRefreshTimer = setTimeout(() => {
+      skillRefreshTimer = void 0;
+      post({ type: "refreshSkills" });
+    }, 160);
+  }
+  function skillHits() {
+    const last = (ui.draft.split(/\s+/).pop() ?? "").replace(/^#/, "");
+    return filterSkills(ui.state.skills ?? [], last);
+  }
+  function moveSkill(delta) {
+    const hits = skillHits();
+    if (!hits.length) {
+      return;
+    }
+    skillIndex = (skillIndex + delta + hits.length) % hits.length;
+    render();
+  }
+  function acceptSkill(token) {
+    const picked = token ?? skillHits()[skillIndex]?.token;
+    if (!picked) {
+      return;
+    }
+    ui.draft = insertSkillToken(ui.draft, picked);
+    ui.menu = void 0;
+    skillIndex = 0;
+    skillQuery = "";
+    ui.wantFocus = true;
+    render();
+  }
+  function skillMenu() {
+    const hits = skillHits();
+    if (skillIndex >= hits.length) {
+      skillIndex = 0;
+    }
+    const el = document.createElement("div");
+    el.className = "menu skill-menu";
+    el.addEventListener("click", (event) => event.stopPropagation());
+    el.addEventListener(
+      "wheel",
+      (event) => {
+        event.stopPropagation();
+      },
+      { passive: true }
+    );
+    if (!hits.length) {
+      const empty = document.createElement("div");
+      empty.className = "menu-item";
+      empty.textContent = (ui.state.skills ?? []).some((row2) => row2.enabled) ? tr("skillMenuNone") : tr("skillMenuEmpty");
+      el.append(empty);
+      return el;
+    }
+    hits.forEach((skill, index) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = index === skillIndex ? "menu-item on" : "menu-item";
+      item.setAttribute("aria-selected", index === skillIndex ? "true" : "false");
+      const detail = skill.description || skillScopeLabel(skill.scope);
+      item.innerHTML = `<code>#${escapeHtml2(skill.token)}</code> <span>${escapeHtml2(detail)}</span>`;
+      item.addEventListener("click", () => acceptSkill(skill.token));
+      el.append(item);
+    });
+    return el;
+  }
+  function skillScopeLabel(scope) {
+    if (scope === "project") {
+      return tr("skillScopeProject");
+    }
+    if (scope === "bundled") {
+      return tr("skillScopeBundled");
+    }
+    return tr("skillScopeGlobal");
+  }
+  function revealMenuItem(menu) {
+    const on = menu.querySelector(".menu-item.on");
+    if (!(on instanceof HTMLElement)) {
+      return;
+    }
+    const top = on.offsetTop;
+    const bottom = top + on.offsetHeight;
+    if (top < menu.scrollTop) {
+      menu.scrollTop = top;
+    } else if (bottom > menu.scrollTop + menu.clientHeight) {
+      menu.scrollTop = bottom - menu.clientHeight;
+    }
   }
   function fileMenu() {
     const el = document.createElement("div");

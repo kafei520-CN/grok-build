@@ -13,6 +13,8 @@
 </ul>
 ]]></description>
   <change-notes><![CDATA[OpenGrok Plugins 0.2.90: compatibility range 2025.2–2026.3 (since-build 252, until-build 263.*).
+<p>0.3.5 — The user-message ticks sit on the scrollbar edge. The hover card stays to the left of the ticks.</p>
+<p>0.3.4 — The user-message card and tick marks leave a gap from the scrollbar. Typing # cites an enabled skill.</p>
 <p>0.3.3 — A user-message rail sits beside the scrollbar. The top tick is the start of the chat and the bottom tick is the end. Clicking a tick in a long chat jumps to that turn.</p>
 <p>0.3.2 — File chips render dotfiles and extensionless names such as .gitignore and Makefile.</p>
 <p>0.3.1 — The send button is a circle and uses an up arrow.</p>

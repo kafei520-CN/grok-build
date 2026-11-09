@@ -87,6 +87,8 @@ import {
   promptModeMeta,
   type HostAction,
 } from './prompt/slash';
+import { skillPromptText } from './prompt/skillRef';
+import { listSkills } from '../hosts/skills/skillsHost';
 import { imageMcpServersMeta } from '../core/runtime/imageTool';
 import { isOfficialGrokAccount, parseBilling, type BillingQuota } from '../billing/billing';
 import { bindPlatform, plat, type Platform } from '../core/platform';
@@ -223,6 +225,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   apiEditId?: string;
   rules: RuleItem[] = [];
   skills: SkillItem[] = [];
+  private skillRefresh?: Promise<void>;
   apis: ApiEndpoint[] = [];
   mcps: McpItem[] = [];
   agents: AgentDefItem[] = [];
@@ -296,6 +299,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   private streamPosted = false;
   private viewStamp = '';
   private viewSession = '';
+  private viewMessageCount = 0;
   private lastInboundAt = 0;
   private searchTimer?: ReturnType<typeof setTimeout>;
   private searchSeq = 0;
@@ -790,6 +794,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     if (this.modeId === 'goal' && !opts?.hidden && !trimmed.startsWith('/goal')) {
       outgoing = this.prepareGoalPrompt(trimmed);
       this.emit();
+    }
+    if (!opts?.hidden && outgoing.includes('#')) {
+      await this.refreshSkillCatalog();
+      if (sessionOp !== this.sessionOp || agent.sessionId !== sid) {
+        return;
+      }
+      outgoing = skillPromptText(outgoing, this.skills);
     }
     await this.applySelectedCustomModel(agent);
     if (sessionOp !== this.sessionOp || agent.sessionId !== sid || this.currentSessionId !== sid) {
@@ -1983,6 +1994,42 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.note('Copied last reply.');
   }
 
+  refreshSkillCatalog(): Promise<void> {
+    if (this.skillRefresh) {
+      return this.skillRefresh;
+    }
+    const run = this.loadSkillCatalog().finally(() => {
+      if (this.skillRefresh === run) {
+        this.skillRefresh = undefined;
+      }
+    });
+    this.skillRefresh = run;
+    return run;
+  }
+
+  private async loadSkillCatalog(): Promise<void> {
+    try {
+      const rows = await listSkills();
+      const prev = this.skills;
+      const same =
+        prev.length === rows.length &&
+        prev.every(
+          (row, index) =>
+            row.id === rows[index]?.id &&
+            row.enabled === rows[index]?.enabled &&
+            row.name === rows[index]?.name &&
+            row.description === rows[index]?.description,
+        );
+      if (same) {
+        return;
+      }
+      this.skills = rows;
+      this.emit();
+    } catch (error) {
+      logWarn(`skills list: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
   async searchFiles(query: string): Promise<void> {
     const seq = ++this.searchSeq;
     if (this.searchTimer) {
@@ -2016,24 +2063,23 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
       return;
     }
     const later = this.messages.slice(userIdx + 1);
-    if (later.some((item) => item.role === 'user')) {
-      return;
-    }
-    const assistant = later.find((item) => item.role === 'assistant');
-    const userCount = this.messages.filter((item) => item.role === 'user').length;
-    const rewindTo = Math.max(0, userCount - 1);
+    const promptIndex = this.messages.slice(0, userIdx).filter((item) => item.role === 'user').length;
     if (this.status === 'streaming') {
       this.cancelTurn();
     }
-    if (assistant?.edits?.length) {
-      await this.journal.revert(assistant.id, { silent: true });
+    for (const item of later) {
+      if (item.role === 'assistant' && item.edits?.length) {
+        await this.journal.revert(item.id, { silent: true });
+      }
     }
     try {
-      await this.agent?.rewindTo(rewindTo);
+      await this.agent?.rewindTo(promptIndex, { force: true });
     } catch (error) {
-      logWarn(`rewind before edit: ${error instanceof Error ? error.message : error}`);
+      this.fail(tr('rewindAction'), error);
+      return;
     }
     this.messages = this.messages.slice(0, userIdx);
+    this.journal.trimStoredTurns();
     this.emit();
     await this.send(trimmed);
   }
@@ -2735,10 +2781,13 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     const stamp = this.transcriptStamp();
     const replay = stamp !== this.viewStamp;
     const sessionKey = this.currentSessionId ?? '';
-    const replace = replay && (sessionKey !== this.viewSession || this.messages.length === 0);
+    const shrunk = this.messages.length < this.viewMessageCount;
+    const replace =
+      shrunk || (replay && (sessionKey !== this.viewSession || this.messages.length === 0));
     this.viewStamp = stamp;
     this.viewSession = sessionKey;
-    this.publishSnapshot(!replay ? 'none' : replace ? 'all' : 'tail');
+    this.viewMessageCount = this.messages.length;
+    this.publishSnapshot(!replay && !shrunk ? 'none' : replace ? 'all' : 'tail');
   }
 
   private transcriptStamp(): string {
@@ -3044,6 +3093,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
   }
 
   private async startInner(): Promise<void> {
+    void this.refreshSkillCatalog();
     const epoch = this.agentGen;
     this.error = undefined;
     if (this.messages.length === 0) {
@@ -3235,6 +3285,7 @@ export class GrokController implements SlashRuntime, SettingsHost, ReverseHost {
     this.publishSnapshot('all');
     this.viewStamp = this.transcriptStamp();
     this.viewSession = this.currentSessionId ?? '';
+    this.viewMessageCount = this.messages.length;
     if (this.status === 'streaming') {
       this.streamPosted = true;
     }

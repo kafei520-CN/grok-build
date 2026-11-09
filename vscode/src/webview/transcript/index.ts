@@ -1333,8 +1333,7 @@ function copyMessage(message: ChatMessage): void {
 }
 
 function canEditUser(message: ChatMessage): boolean {
-  const lastUser = [...ui.state.messages].reverse().find((item) => item.role === 'user');
-  return lastUser?.id === message.id;
+  return message.role === 'user' && Boolean(message.text.trim());
 }
 
 function submitUserEdit(message: ChatMessage): void {

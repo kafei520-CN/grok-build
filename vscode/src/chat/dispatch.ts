@@ -196,6 +196,9 @@ export async function dispatchUi(controller: GrokController, message: WebviewToH
     case 'searchFiles':
       await controller.searchFiles(message.query);
       return;
+    case 'refreshSkills':
+      void controller.refreshSkillCatalog();
+      return;
     case 'pickFile':
       controller.pickFile(message.path);
       return;

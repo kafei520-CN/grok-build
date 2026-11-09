@@ -4971,13 +4971,14 @@ var GrokAgent = class _GrokAgent {
       };
     });
   }
-  async rewindTo(index) {
+  async rewindTo(index, opts) {
     if (!this.sessionId) {
       return;
     }
     await this.extMethod(EXT.rewindExecute, {
       sessionId: this.sessionId,
-      targetPromptIndex: index
+      targetPromptIndex: index,
+      ...opts?.force ? { force: true } : {}
     });
   }
   async commandsList() {
@@ -6994,9 +6995,14 @@ var EN = {
   stop: "Stop",
   send: "Send",
   fileSearchHint: "Type to search workspace files",
+  skillMenuEmpty: "No skills yet",
+  skillMenuNone: "No matching skill",
+  skillScopeProject: "Project",
+  skillScopeGlobal: "Global",
+  skillScopeBundled: "Built-in",
   placeholderLogin: "Sign in to start",
   placeholderQueue: "Queue a follow-up\u2026",
-  placeholderAsk: "Ask Grok to build, or type /",
+  placeholderAsk: "Ask Grok to build, or type / or #",
   cliTitle: "Install the Grok CLI",
   cliBody: "This extension talks to the local grok binary over ACP. Install it once, then sign in from here.",
   cliInstall: "Install in terminal",
@@ -7649,9 +7655,14 @@ var ZH = {
   stop: "\u505C\u6B62",
   send: "\u53D1\u9001",
   fileSearchHint: "\u8F93\u5165\u4EE5\u641C\u7D22\u5DE5\u4F5C\u533A\u6587\u4EF6",
+  skillMenuEmpty: "\u8FD8\u6CA1\u6709 skill",
+  skillMenuNone: "\u6CA1\u6709\u5339\u914D\u7684 skill",
+  skillScopeProject: "\u9879\u76EE",
+  skillScopeGlobal: "\u5168\u5C40",
+  skillScopeBundled: "\u5185\u7F6E",
   placeholderLogin: "\u767B\u5F55\u540E\u5F00\u59CB",
   placeholderQueue: "\u6392\u961F\u4E0B\u4E00\u6761\u2026",
-  placeholderAsk: "\u8BA9 Grok \u5F00\u59CB\u6784\u5EFA\uFF0C\u6216\u8F93\u5165 /",
+  placeholderAsk: "\u8BA9 Grok \u5F00\u59CB\u6784\u5EFA\uFF0C\u6216\u8F93\u5165 / \u6216 #",
   cliTitle: "\u5B89\u88C5 Grok CLI",
   cliBody: "\u6B64\u6269\u5C55\u901A\u8FC7 ACP \u8FDE\u63A5\u672C\u673A grok \u547D\u4EE4\u3002\u5B89\u88C5\u4E00\u6B21\u540E\u5373\u53EF\u5728\u6B64\u767B\u5F55\u3002",
   cliInstall: "\u5728\u7EC8\u7AEF\u4E2D\u5B89\u88C5",
@@ -11930,6 +11941,423 @@ function imagesFromContent(content) {
   }));
 }
 
+// src/chat/prompt/skillRef.ts
+var TOKEN = /^[a-z0-9](?:[a-z0-9]|-(?!-)){0,62}[a-z0-9]$|^[a-z0-9]$/;
+function skillToken(skill) {
+  return normalizeToken(skill.name) ?? normalizeToken(skill.dirPath.split(/[/\\]/).pop() ?? "");
+}
+function skillPromptText(text, skills) {
+  const tokens = enabledTokens(skills);
+  if (!tokens.length || !text.includes("#")) {
+    return text;
+  }
+  const cites = findCites(text, tokens);
+  if (!cites.length) {
+    return text;
+  }
+  const rewritten = rewriteInPlace(text, tokens);
+  if (startsWithSkill(rewritten, tokens) || text.trimStart().startsWith("/")) {
+    return rewritten;
+  }
+  const lead = [...new Set(cites)].map((token) => `/${token}`).join(" ");
+  return `${lead}
+${text}`;
+}
+function enabledTokens(skills) {
+  return [
+    ...new Set(
+      skills.filter((skill) => skill.enabled).map(skillToken).filter((token) => Boolean(token))
+    )
+  ].sort((a, b) => b.length - a.length);
+}
+function findCites(text, tokens) {
+  const cites = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const hit = citeAt(text, i, tokens);
+    if (!hit) {
+      continue;
+    }
+    cites.push(hit);
+    i += hit.length;
+  }
+  return cites;
+}
+function rewriteInPlace(text, tokens) {
+  let out = "";
+  for (let i = 0; i < text.length; i += 1) {
+    const hit = citeAt(text, i, tokens);
+    if (hit) {
+      out += `/${hit}`;
+      i += hit.length;
+      continue;
+    }
+    out += text[i];
+  }
+  return out;
+}
+function citeAt(text, index, tokens) {
+  const boundary = index === 0 || /\s/.test(text[index - 1] ?? "");
+  if (text[index] !== "#" || !boundary) {
+    return void 0;
+  }
+  const rest = text.slice(index + 1);
+  return tokens.find((token) => tokenAt(rest, token));
+}
+function startsWithSkill(text, tokens) {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("/")) {
+    return false;
+  }
+  const word = (trimmed.slice(1).split(/\s/, 1)[0] ?? "").toLowerCase();
+  return tokens.includes(word);
+}
+function normalizeToken(raw) {
+  const token = raw.trim().toLowerCase();
+  if (!TOKEN.test(token) || token.includes("--") || token.startsWith("-") || token.endsWith("-")) {
+    return void 0;
+  }
+  return token;
+}
+function tokenAt(rest, token) {
+  if (rest.length < token.length || rest.slice(0, token.length).toLowerCase() !== token) {
+    return false;
+  }
+  const next = rest[token.length];
+  return next === void 0 || /\s/.test(next);
+}
+
+// src/hosts/skills/skillsHost.ts
+var import_node_child_process5 = require("node:child_process");
+var fs3 = __toESM(require("node:fs/promises"));
+var os2 = __toESM(require("node:os"));
+var path11 = __toESM(require("node:path"));
+var import_node_util2 = require("node:util");
+
+// src/core/grokDirs.ts
+var path10 = __toESM(require("node:path"));
+function sameFsPath(a, b, os6) {
+  const left = path10.normalize(path10.resolve(a));
+  const right = path10.normalize(path10.resolve(b));
+  return os6 === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+function pathInside(root, filePath, os6) {
+  const base = path10.normalize(path10.resolve(root));
+  const target = path10.normalize(path10.resolve(filePath));
+  const left = os6 === "win32" ? base.toLowerCase() : base;
+  const right = os6 === "win32" ? target.toLowerCase() : target;
+  if (left === right) {
+    return true;
+  }
+  const rel = path10.relative(left, right);
+  return rel !== "" && !rel.startsWith("..") && !path10.isAbsolute(rel);
+}
+function pathInsideAny(roots, filePath, os6) {
+  return roots.some((root) => pathInside(root, filePath, os6));
+}
+function resolveProjectGrokDir(workspaceFolders, homeDir, kind, os6) {
+  const folder = workspaceFolders[0];
+  if (!folder) {
+    return void 0;
+  }
+  const dir = path10.join(folder, ".grok", kind);
+  if (sameFsPath(dir, path10.join(homeDir, ".grok", kind), os6)) {
+    return void 0;
+  }
+  return dir;
+}
+function projectGrokDir(kind) {
+  return resolveProjectGrokDir(
+    plat().workspaceFolders(),
+    plat().homeDir(),
+    kind,
+    plat().os()
+  );
+}
+
+// src/hosts/skills/skillsHost.ts
+var execFileAsync2 = (0, import_node_util2.promisify)(import_node_child_process5.execFile);
+var SKILL_FILE = "SKILL.md";
+var SKILL_OFF = "SKILL.md.disabled";
+function parseSkillMeta(markdown) {
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) {
+    return {};
+  }
+  const block = match[1];
+  const name = block.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  const description = block.match(/^description:\s*(.+)$/m)?.[1]?.trim();
+  return { name: stripQuotes(name), description: stripQuotes(description) };
+}
+function safeSkillDirName(raw) {
+  const cleaned = raw.replace(/[<>:"/\\|?*\u0000]/g, "-").trim().replace(/\s+/g, "-");
+  const name = cleaned.slice(0, 80);
+  if (!name || name === "." || name === "..") {
+    return "skill";
+  }
+  return name;
+}
+function globalSkillsDir() {
+  return path11.join(plat().homeDir(), ".grok", "skills");
+}
+function bundledSkillsDir() {
+  return path11.join(plat().homeDir(), ".grok", "bundled", "skills");
+}
+function projectSkillsDir() {
+  return projectGrokDir("skills");
+}
+async function listSkills() {
+  const globalDir = globalSkillsDir();
+  const bundledDir = bundledSkillsDir();
+  const projectDir = projectSkillsDir();
+  const rows = [];
+  const seen = /* @__PURE__ */ new Set();
+  const take = (incoming) => {
+    for (const row of incoming) {
+      const name = row.name.trim().toLowerCase();
+      const key = normalizeDir(row.dirPath);
+      if (seen.has(name) || seen.has(key)) {
+        continue;
+      }
+      seen.add(name);
+      seen.add(key);
+      rows.push(row);
+    }
+  };
+  if (projectDir && !sameFsPath(projectDir, globalDir, plat().os())) {
+    take(await collectSkills(projectDir, "project"));
+  }
+  take(await collectSkills(globalDir, "global"));
+  if (!sameFsPath(bundledDir, globalDir, plat().os())) {
+    take(await collectSkills(bundledDir, "bundled"));
+  }
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+async function importSkillZips(paths) {
+  let imported = 0;
+  for (const filePath of paths) {
+    if (!/\.zip$/i.test(filePath)) {
+      continue;
+    }
+    const tmp = await fs3.mkdtemp(path11.join(os2.tmpdir(), "grok-skill-"));
+    try {
+      await extractZip(filePath, tmp);
+      imported += await importSkillRoots(await findSkillRoots(tmp));
+    } catch (error) {
+      plat().warn(`skill zip skipped: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      await fs3.rm(tmp, { recursive: true, force: true });
+    }
+  }
+  return imported;
+}
+async function importSkillFolders(paths) {
+  let imported = 0;
+  for (const dir of paths) {
+    imported += await importSkillRoots(await findSkillRoots(dir));
+  }
+  return imported;
+}
+async function toggleSkill(dirPath) {
+  if (isBundledSkillDir(dirPath) || !await listedSkillDir(dirPath)) {
+    return;
+  }
+  const on = path11.join(dirPath, SKILL_FILE);
+  const off = path11.join(dirPath, SKILL_OFF);
+  try {
+    await fs3.rename(on, off);
+    return;
+  } catch {
+  }
+  await fs3.rename(off, on);
+}
+async function deleteSkill(dirPath) {
+  if (isBundledSkillDir(dirPath) || !await listedSkillDir(dirPath)) {
+    return;
+  }
+  await fs3.rm(dirPath, { recursive: true, force: true });
+}
+async function listedSkillDir(dirPath) {
+  const os6 = plat().os();
+  const rows = await listSkills();
+  return rows.some((row) => row.scope !== "bundled" && sameFsPath(row.dirPath, dirPath, os6));
+}
+function isBundledSkillDir(dirPath) {
+  return pathInside(bundledSkillsDir(), dirPath, plat().os());
+}
+async function findSkillRoots(dir, depth = 0) {
+  if (depth > 3) {
+    return [];
+  }
+  if (await hasSkillMarker(dir)) {
+    return [dir];
+  }
+  let entries = [];
+  try {
+    entries = await fs3.readdir(dir);
+  } catch {
+    return [];
+  }
+  const hits = [];
+  for (const name of entries) {
+    if (name.startsWith(".")) {
+      continue;
+    }
+    const child = path11.join(dir, name);
+    try {
+      const st = await fs3.stat(child);
+      if (st.isDirectory()) {
+        hits.push(...await findSkillRoots(child, depth + 1));
+      }
+    } catch {
+    }
+  }
+  return hits;
+}
+async function importSkillRoots(roots) {
+  const destRoot = globalSkillsDir();
+  await fs3.mkdir(destRoot, { recursive: true });
+  let imported = 0;
+  for (const root of roots) {
+    const meta = await readMeta(root);
+    const stem = await uniqueDir(destRoot, safeSkillDirName(meta.name || path11.basename(root)));
+    await fs3.cp(root, path11.join(destRoot, stem), { recursive: true });
+    imported += 1;
+  }
+  return imported;
+}
+async function collectSkills(dir, scope) {
+  let names = [];
+  try {
+    names = await fs3.readdir(dir);
+  } catch {
+    return [];
+  }
+  const rows = [];
+  for (const name of names) {
+    const dirPath = path11.join(dir, name);
+    try {
+      if (!(await fs3.stat(dirPath)).isDirectory()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    const on = path11.join(dirPath, SKILL_FILE);
+    const off = path11.join(dirPath, SKILL_OFF);
+    const enabled = await fileExists(on);
+    if (!enabled && !await fileExists(off)) {
+      continue;
+    }
+    const meta = await readMeta(dirPath);
+    rows.push({
+      id: dirPath,
+      name: meta.name || name,
+      description: meta.description,
+      dirPath,
+      skillFile: enabled ? on : off,
+      scope,
+      enabled
+    });
+  }
+  return rows;
+}
+async function readMeta(dir) {
+  for (const file of [SKILL_FILE, SKILL_OFF]) {
+    try {
+      const text = await fs3.readFile(path11.join(dir, file), "utf8");
+      return parseSkillMeta(text);
+    } catch {
+    }
+  }
+  return {};
+}
+async function hasSkillMarker(dir) {
+  return await fileExists(path11.join(dir, SKILL_FILE)) || await fileExists(path11.join(dir, SKILL_OFF));
+}
+async function uniqueDir(parent, stem) {
+  const exists = async (name) => {
+    try {
+      await fs3.access(path11.join(parent, name));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!await exists(stem)) {
+    return stem;
+  }
+  for (let n = 2; n < 100; n += 1) {
+    const next = `${stem}-${n}`;
+    if (!await exists(next)) {
+      return next;
+    }
+  }
+  return `${stem}-${Date.now()}`;
+}
+function zipEntryUnsafe(dest, entry) {
+  const name = entry.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
+  if (!name || name === ".") {
+    return false;
+  }
+  if (name.startsWith("/") || /^[A-Za-z]:/.test(name)) {
+    return true;
+  }
+  const parts = name.split("/").filter((part) => part && part !== ".");
+  if (parts.includes("..")) {
+    return true;
+  }
+  const root = path11.resolve(dest);
+  const resolved = path11.resolve(root, ...parts);
+  const rel = path11.relative(root, resolved);
+  return rel.startsWith("..") || path11.isAbsolute(rel);
+}
+async function extractZip(zipPath, dest) {
+  const listed = await execFileAsync2("tar", ["-tf", zipPath], {
+    windowsHide: true,
+    maxBuffer: 8e6
+  });
+  const destRoot = path11.resolve(dest);
+  for (const line of String(listed.stdout).split(/\r?\n/)) {
+    if (zipEntryUnsafe(destRoot, line)) {
+      throw new Error(`unsafe skill zip path: ${line.trim()}`);
+    }
+  }
+  await fs3.mkdir(dest, { recursive: true });
+  await execFileAsync2("tar", ["-xf", zipPath, "-C", dest], { windowsHide: true });
+  await assertNoSymlinks(dest);
+}
+async function assertNoSymlinks(root) {
+  const names = await fs3.readdir(root);
+  for (const name of names) {
+    const full = path11.join(root, name);
+    const stat2 = await fs3.lstat(full);
+    if (stat2.isSymbolicLink()) {
+      throw new Error(`unsafe skill zip link: ${name}`);
+    }
+    if (stat2.isDirectory()) {
+      await assertNoSymlinks(full);
+    }
+  }
+}
+async function fileExists(filePath) {
+  try {
+    await fs3.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function stripQuotes(value) {
+  if (!value) {
+    return void 0;
+  }
+  return value.replace(/^['"]|['"]$/g, "").trim() || void 0;
+}
+function normalizeDir(dir) {
+  const value = path11.normalize(path11.resolve(dir));
+  return plat().os() === "win32" ? value.toLowerCase() : value;
+}
+
 // src/billing/billing.ts
 function isOfficialGrokAccount(account) {
   const id = account?.methodId;
@@ -12027,8 +12455,8 @@ function clampPercent(n) {
 }
 
 // src/core/openTarget.ts
-var fs3 = __toESM(require("node:fs"));
-var path10 = __toESM(require("node:path"));
+var fs4 = __toESM(require("node:fs"));
+var path12 = __toESM(require("node:path"));
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   "node_modules",
   "target",
@@ -12115,7 +12543,7 @@ function splitCitedPath(raw) {
 function located(filePath, line) {
   let kind = "file";
   try {
-    if (fs3.statSync(filePath).isDirectory()) {
+    if (fs4.statSync(filePath).isDirectory()) {
       kind = "dir";
     }
   } catch {
@@ -12124,16 +12552,16 @@ function located(filePath, line) {
   return { path: filePath, line: kind === "file" ? line : void 0, kind };
 }
 function resolveExisting(filePath, roots) {
-  const direct = path10.normalize(filePath);
-  if (path10.isAbsolute(direct) && fs3.existsSync(direct)) {
+  const direct = path12.normalize(filePath);
+  if (path12.isAbsolute(direct) && fs4.existsSync(direct)) {
     return direct;
   }
   for (const root of roots) {
     if (!root) {
       continue;
     }
-    const candidate = path10.normalize(path10.resolve(root, filePath));
-    if (fs3.existsSync(candidate)) {
+    const candidate = path12.normalize(path12.resolve(root, filePath));
+    if (fs4.existsSync(candidate)) {
       return candidate;
     }
   }
@@ -12195,11 +12623,11 @@ function findNamed(names, line, roots) {
 function scoreFile(file, names, cited) {
   let text;
   try {
-    const stat2 = fs3.statSync(file);
+    const stat2 = fs4.statSync(file);
     if (!stat2.isFile() || stat2.size === 0 || stat2.size > MAX_BYTES) {
       return void 0;
     }
-    text = fs3.readFileSync(file, "utf8");
+    text = fs4.readFileSync(file, "utf8");
   } catch {
     return void 0;
   }
@@ -12279,7 +12707,7 @@ function walk(root, visit) {
     }
     let entries;
     try {
-      entries = fs3.readdirSync(dir, { withFileTypes: true });
+      entries = fs4.readdirSync(dir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -12290,7 +12718,7 @@ function walk(root, visit) {
       if (entry.isSymbolicLink()) {
         continue;
       }
-      const full = path10.join(dir, entry.name);
+      const full = path12.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) {
           continue;
@@ -12315,7 +12743,7 @@ function endsWithPath(file, suffix) {
   return norm === tail || norm.endsWith(`/${tail}`);
 }
 function isSource(file) {
-  return SOURCE_EXTS.has(path10.extname(file).slice(1).toLowerCase());
+  return SOURCE_EXTS.has(path12.extname(file).slice(1).toLowerCase());
 }
 function positiveLine(line) {
   return line && Number.isFinite(line) && line > 0 ? Math.floor(line) : void 0;
@@ -12537,6 +12965,9 @@ async function dispatchUi(controller2, message) {
       return;
     case "searchFiles":
       await controller2.searchFiles(message.query);
+      return;
+    case "refreshSkills":
+      void controller2.refreshSkillCatalog();
       return;
     case "pickFile":
       controller2.pickFile(message.path);
@@ -12969,50 +13400,7 @@ function slimTool(tool) {
 }
 
 // src/chat/prompt/slashHost.ts
-var path12 = __toESM(require("node:path"));
-
-// src/core/grokDirs.ts
-var path11 = __toESM(require("node:path"));
-function sameFsPath(a, b, os6) {
-  const left = path11.normalize(path11.resolve(a));
-  const right = path11.normalize(path11.resolve(b));
-  return os6 === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
-}
-function pathInside(root, filePath, os6) {
-  const base = path11.normalize(path11.resolve(root));
-  const target = path11.normalize(path11.resolve(filePath));
-  const left = os6 === "win32" ? base.toLowerCase() : base;
-  const right = os6 === "win32" ? target.toLowerCase() : target;
-  if (left === right) {
-    return true;
-  }
-  const rel = path11.relative(left, right);
-  return rel !== "" && !rel.startsWith("..") && !path11.isAbsolute(rel);
-}
-function pathInsideAny(roots, filePath, os6) {
-  return roots.some((root) => pathInside(root, filePath, os6));
-}
-function resolveProjectGrokDir(workspaceFolders, homeDir, kind, os6) {
-  const folder = workspaceFolders[0];
-  if (!folder) {
-    return void 0;
-  }
-  const dir = path11.join(folder, ".grok", kind);
-  if (sameFsPath(dir, path11.join(homeDir, ".grok", kind), os6)) {
-    return void 0;
-  }
-  return dir;
-}
-function projectGrokDir(kind) {
-  return resolveProjectGrokDir(
-    plat().workspaceFolders(),
-    plat().homeDir(),
-    kind,
-    plat().os()
-  );
-}
-
-// src/chat/prompt/slashHost.ts
+var path13 = __toESM(require("node:path"));
 async function runSlashAction(host, action) {
   switch (action.kind) {
     case "newSession":
@@ -13175,7 +13563,7 @@ async function runSlashAction(host, action) {
       host.openExt(action.tab);
       return;
     case "editPrompt": {
-      const filePath = path12.join(host.cwd(), ".grok-prompt.md");
+      const filePath = path13.join(host.cwd(), ".grok-prompt.md");
       await plat().writeFile(filePath, Buffer.from(""));
       await plat().openFile(filePath, false);
       host.note("Edit the prompt in the editor, then send it from the sidebar.");
@@ -13230,7 +13618,7 @@ async function copyLastToPath(host, rawPath) {
   if (!last) {
     return;
   }
-  const filePath = path12.isAbsolute(rawPath) ? rawPath : path12.join(host.cwd(), rawPath);
+  const filePath = path13.isAbsolute(rawPath) ? rawPath : path13.join(host.cwd(), rawPath);
   const roots = plat().workspaceFolders();
   const allowed = roots.length ? roots : [host.cwd()];
   if (!pathInsideAny(allowed, filePath, plat().os())) {
@@ -13241,9 +13629,9 @@ async function copyLastToPath(host, rawPath) {
 }
 
 // src/hosts/memory/memoryHost.ts
-var path13 = __toESM(require("node:path"));
+var path14 = __toESM(require("node:path"));
 function globalMemoryDir() {
-  return path13.join(plat().homeDir(), ".grok", "memory");
+  return path14.join(plat().homeDir(), ".grok", "memory");
 }
 async function listMemoryFiles() {
   const root = globalMemoryDir();
@@ -13251,7 +13639,7 @@ async function listMemoryFiles() {
   const rows = [];
   for (const name of names) {
     if (name === "MEMORY.md") {
-      const filePath2 = path13.join(root, name);
+      const filePath2 = path14.join(root, name);
       rows.push({
         id: filePath2,
         name,
@@ -13263,7 +13651,7 @@ async function listMemoryFiles() {
     if (name.startsWith(".")) {
       continue;
     }
-    const filePath = path13.join(root, name, "MEMORY.md");
+    const filePath = path14.join(root, name, "MEMORY.md");
     if (await plat().fileExists(filePath)) {
       rows.push({
         id: filePath,
@@ -13703,7 +14091,7 @@ function dismissPermissions(host) {
 }
 
 // src/hosts/agents/agentsHost.ts
-var path14 = __toESM(require("node:path"));
+var path15 = __toESM(require("node:path"));
 var DISABLED = ".disabled";
 var BUILTIN_AGENTS = [
   { name: "grok-build", description: "Default Grok Build session" },
@@ -13717,8 +14105,8 @@ function parseAgentFrontmatter(markdown) {
     return {};
   }
   const block = match[1];
-  const name = stripQuotes(block.match(/^name:\s*(.+)$/m)?.[1]?.trim());
-  const description = stripQuotes(block.match(/^description:\s*(.+)$/m)?.[1]?.trim());
+  const name = stripQuotes2(block.match(/^name:\s*(.+)$/m)?.[1]?.trim());
+  const description = stripQuotes2(block.match(/^description:\s*(.+)$/m)?.[1]?.trim());
   return { name, description };
 }
 function parseAgentFileName(fileName) {
@@ -13742,12 +14130,12 @@ description: Custom agent
 ${body}`;
 }
 function safeAgentStem(filePath) {
-  const base = path14.basename(filePath).replace(/\.(md|txt)$/i, "");
+  const base = path15.basename(filePath).replace(/\.(md|txt)$/i, "");
   const cleaned = base.replace(/[<>:"/\\|?*\u0000]/g, "-").trim() || "agent";
   return cleaned.slice(0, 80);
 }
 function globalAgentsDir() {
-  return path14.join(plat().homeDir(), ".grok", "agents");
+  return path15.join(plat().homeDir(), ".grok", "agents");
 }
 function projectAgentsDir() {
   return projectGrokDir("agents");
@@ -13789,7 +14177,7 @@ async function importAgentFiles(paths) {
     const bytes = await plat().readFile(filePath);
     const stem = await uniqueStem(destDir, safeAgentStem(filePath));
     const body = wrapAgentMarkdown(stem, Buffer.from(bytes).toString("utf8"));
-    await plat().writeFile(path14.join(destDir, `${stem}.md`), Buffer.from(body, "utf8"));
+    await plat().writeFile(path15.join(destDir, `${stem}.md`), Buffer.from(body, "utf8"));
     imported += 1;
   }
   return imported;
@@ -13823,7 +14211,7 @@ async function collectAgents(dir, scope) {
     if (!parsed) {
       continue;
     }
-    const filePath = path14.join(dir, fileName);
+    const filePath = path15.join(dir, fileName);
     let meta = {};
     try {
       meta = parseAgentFrontmatter(Buffer.from(await plat().readFile(filePath)).toString("utf8"));
@@ -13859,10 +14247,10 @@ async function moveFile(from, to) {
   await plat().deleteFile(from, false);
 }
 function normalizePath(value) {
-  const next = path14.normalize(path14.resolve(value));
+  const next = path15.normalize(path15.resolve(value));
   return plat().os() === "win32" ? next.toLowerCase() : next;
 }
-function stripQuotes(value) {
+function stripQuotes2(value) {
   if (!value) {
     return void 0;
   }
@@ -13917,7 +14305,7 @@ function unwrapList(raw) {
 }
 
 // src/hosts/personas/personasHost.ts
-var path15 = __toESM(require("node:path"));
+var path16 = __toESM(require("node:path"));
 var DISABLED2 = ".disabled";
 function parsePersonaToml(text) {
   const description = tomlString2(text, "description");
@@ -13934,12 +14322,12 @@ function parsePersonaFileName(fileName) {
   return void 0;
 }
 function safePersonaStem(filePath) {
-  const base = path15.basename(filePath).replace(/\.toml$/i, "");
+  const base = path16.basename(filePath).replace(/\.toml$/i, "");
   const cleaned = base.replace(/[<>:"/\\|?*\u0000]/g, "-").trim() || "persona";
   return cleaned.slice(0, 80);
 }
 function globalPersonasDir() {
-  return path15.join(plat().homeDir(), ".grok", "personas");
+  return path16.join(plat().homeDir(), ".grok", "personas");
 }
 function projectPersonasDir() {
   return projectGrokDir("personas");
@@ -13970,7 +14358,7 @@ async function importPersonaFiles(paths) {
     }
     const bytes = await plat().readFile(filePath);
     const stem = await uniqueStem2(destDir, safePersonaStem(filePath));
-    await plat().writeFile(path15.join(destDir, `${stem}.toml`), bytes);
+    await plat().writeFile(path16.join(destDir, `${stem}.toml`), bytes);
     imported += 1;
   }
   return imported;
@@ -14004,7 +14392,7 @@ async function collectPersonas(dir, scope) {
     if (!parsed) {
       continue;
     }
-    const filePath = path15.join(dir, fileName);
+    const filePath = path16.join(dir, fileName);
     let meta = {};
     try {
       meta = parsePersonaToml(Buffer.from(await plat().readFile(filePath)).toString("utf8"));
@@ -14041,7 +14429,7 @@ async function moveFile2(from, to) {
   await plat().deleteFile(from, false);
 }
 function normalizePath2(value) {
-  const next = path15.normalize(path15.resolve(value));
+  const next = path16.normalize(path16.resolve(value));
   return plat().os() === "win32" ? next.toLowerCase() : next;
 }
 function tomlString2(text, key) {
@@ -14054,7 +14442,7 @@ function tomlString2(text, key) {
 }
 
 // src/hosts/rules/rulesHost.ts
-var path16 = __toESM(require("node:path"));
+var path17 = __toESM(require("node:path"));
 var DISABLED3 = ".disabled";
 var COMPAT_NAMED_RULES = [
   "AGENTS.md",
@@ -14074,12 +14462,12 @@ function parseRuleFileName(fileName) {
   return void 0;
 }
 function safeRuleStem(filePath) {
-  const base = path16.basename(filePath).replace(/\.(md|txt)$/i, "");
+  const base = path17.basename(filePath).replace(/\.(md|txt)$/i, "");
   const cleaned = base.replace(/[<>:"/\\|?*\u0000]/g, "-").trim() || "rule";
   return cleaned.slice(0, 80);
 }
 function globalRulesDir() {
-  return path16.join(plat().homeDir(), ".grok", "rules");
+  return path17.join(plat().homeDir(), ".grok", "rules");
 }
 function projectRulesDir() {
   return projectGrokDir("rules");
@@ -14091,7 +14479,7 @@ async function listRules() {
   const seen = /* @__PURE__ */ new Set();
   const add = async (batch) => {
     for (const row of await batch) {
-      const key = normalizeDir(row.filePath);
+      const key = normalizeDir2(row.filePath);
       if (seen.has(key)) {
         continue;
       }
@@ -14104,15 +14492,15 @@ async function listRules() {
   if (projectDir && !sameFsPath(projectDir, globalRulesDir(), plat().os())) {
     await add(collectRules(projectDir, "project", "grok"));
   }
-  await add(collectNamed(path16.join(home, ".claude"), "global", "claude"));
-  await add(collectRules(path16.join(home, ".claude", "rules"), "global", "claude"));
-  await add(collectNamed(path16.join(home, ".cursor"), "global", "cursor"));
-  await add(collectRules(path16.join(home, ".cursor", "rules"), "global", "cursor"));
+  await add(collectNamed(path17.join(home, ".claude"), "global", "claude"));
+  await add(collectRules(path17.join(home, ".claude", "rules"), "global", "claude"));
+  await add(collectNamed(path17.join(home, ".cursor"), "global", "cursor"));
+  await add(collectRules(path17.join(home, ".cursor", "rules"), "global", "cursor"));
   if (workspace) {
-    await add(collectNamed(path16.join(workspace, ".claude"), "project", "claude"));
-    await add(collectRules(path16.join(workspace, ".claude", "rules"), "project", "claude"));
-    await add(collectNamed(path16.join(workspace, ".cursor"), "project", "cursor"));
-    await add(collectRules(path16.join(workspace, ".cursor", "rules"), "project", "cursor"));
+    await add(collectNamed(path17.join(workspace, ".claude"), "project", "claude"));
+    await add(collectRules(path17.join(workspace, ".claude", "rules"), "project", "claude"));
+    await add(collectNamed(path17.join(workspace, ".cursor"), "project", "cursor"));
+    await add(collectRules(path17.join(workspace, ".cursor", "rules"), "project", "cursor"));
     await add(collectNamed(workspace, "project", "grok"));
   }
   return rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -14126,7 +14514,7 @@ async function importRuleFiles(paths) {
     }
     const bytes = await plat().readFile(filePath);
     const stem = await uniqueStem3(destDir, safeRuleStem(filePath));
-    await plat().writeFile(path16.join(destDir, `${stem}.md`), bytes);
+    await plat().writeFile(path17.join(destDir, `${stem}.md`), bytes);
     imported += 1;
   }
   return imported;
@@ -14165,7 +14553,7 @@ async function collectRules(dir, scope, origin) {
     if (!parsed) {
       continue;
     }
-    const filePath = path16.join(dir, fileName);
+    const filePath = path17.join(dir, fileName);
     rows.push({
       id: filePath,
       name: parsed.name,
@@ -14199,9 +14587,9 @@ async function collectNamed(dir, scope, origin) {
     }
     seen.add(key);
     rows.push({
-      id: path16.join(dir, fileName),
+      id: path17.join(dir, fileName),
       name: live,
-      filePath: path16.join(dir, fileName),
+      filePath: path17.join(dir, fileName),
       scope,
       origin,
       enabled: parsed.enabled
@@ -14226,295 +14614,6 @@ async function moveFile3(from, to) {
   const bytes = await plat().readFile(from);
   await plat().writeFile(to, bytes);
   await plat().deleteFile(from, false);
-}
-function normalizeDir(dir) {
-  const value = path16.normalize(path16.resolve(dir));
-  return plat().os() === "win32" ? value.toLowerCase() : value;
-}
-
-// src/hosts/skills/skillsHost.ts
-var import_node_child_process5 = require("node:child_process");
-var fs4 = __toESM(require("node:fs/promises"));
-var os2 = __toESM(require("node:os"));
-var path17 = __toESM(require("node:path"));
-var import_node_util2 = require("node:util");
-var execFileAsync2 = (0, import_node_util2.promisify)(import_node_child_process5.execFile);
-var SKILL_FILE = "SKILL.md";
-var SKILL_OFF = "SKILL.md.disabled";
-function parseSkillMeta(markdown) {
-  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) {
-    return {};
-  }
-  const block = match[1];
-  const name = block.match(/^name:\s*(.+)$/m)?.[1]?.trim();
-  const description = block.match(/^description:\s*(.+)$/m)?.[1]?.trim();
-  return { name: stripQuotes2(name), description: stripQuotes2(description) };
-}
-function safeSkillDirName(raw) {
-  const cleaned = raw.replace(/[<>:"/\\|?*\u0000]/g, "-").trim().replace(/\s+/g, "-");
-  const name = cleaned.slice(0, 80);
-  if (!name || name === "." || name === "..") {
-    return "skill";
-  }
-  return name;
-}
-function globalSkillsDir() {
-  return path17.join(plat().homeDir(), ".grok", "skills");
-}
-function bundledSkillsDir() {
-  return path17.join(plat().homeDir(), ".grok", "bundled", "skills");
-}
-function projectSkillsDir() {
-  return projectGrokDir("skills");
-}
-async function listSkills() {
-  const globalDir = globalSkillsDir();
-  const bundledDir = bundledSkillsDir();
-  const projectDir = projectSkillsDir();
-  const rows = [];
-  const seen = /* @__PURE__ */ new Set();
-  const take = (incoming) => {
-    for (const row of incoming) {
-      const name = row.name.trim().toLowerCase();
-      const key = normalizeDir2(row.dirPath);
-      if (seen.has(name) || seen.has(key)) {
-        continue;
-      }
-      seen.add(name);
-      seen.add(key);
-      rows.push(row);
-    }
-  };
-  if (projectDir && !sameFsPath(projectDir, globalDir, plat().os())) {
-    take(await collectSkills(projectDir, "project"));
-  }
-  take(await collectSkills(globalDir, "global"));
-  if (!sameFsPath(bundledDir, globalDir, plat().os())) {
-    take(await collectSkills(bundledDir, "bundled"));
-  }
-  return rows.sort((a, b) => a.name.localeCompare(b.name));
-}
-async function importSkillZips(paths) {
-  let imported = 0;
-  for (const filePath of paths) {
-    if (!/\.zip$/i.test(filePath)) {
-      continue;
-    }
-    const tmp = await fs4.mkdtemp(path17.join(os2.tmpdir(), "grok-skill-"));
-    try {
-      await extractZip(filePath, tmp);
-      imported += await importSkillRoots(await findSkillRoots(tmp));
-    } catch (error) {
-      plat().warn(`skill zip skipped: ${error instanceof Error ? error.message : error}`);
-    } finally {
-      await fs4.rm(tmp, { recursive: true, force: true });
-    }
-  }
-  return imported;
-}
-async function importSkillFolders(paths) {
-  let imported = 0;
-  for (const dir of paths) {
-    imported += await importSkillRoots(await findSkillRoots(dir));
-  }
-  return imported;
-}
-async function toggleSkill(dirPath) {
-  if (isBundledSkillDir(dirPath) || !await listedSkillDir(dirPath)) {
-    return;
-  }
-  const on = path17.join(dirPath, SKILL_FILE);
-  const off = path17.join(dirPath, SKILL_OFF);
-  try {
-    await fs4.rename(on, off);
-    return;
-  } catch {
-  }
-  await fs4.rename(off, on);
-}
-async function deleteSkill(dirPath) {
-  if (isBundledSkillDir(dirPath) || !await listedSkillDir(dirPath)) {
-    return;
-  }
-  await fs4.rm(dirPath, { recursive: true, force: true });
-}
-async function listedSkillDir(dirPath) {
-  const os6 = plat().os();
-  const rows = await listSkills();
-  return rows.some((row) => row.scope !== "bundled" && sameFsPath(row.dirPath, dirPath, os6));
-}
-function isBundledSkillDir(dirPath) {
-  return pathInside(bundledSkillsDir(), dirPath, plat().os());
-}
-async function findSkillRoots(dir, depth = 0) {
-  if (depth > 3) {
-    return [];
-  }
-  if (await hasSkillMarker(dir)) {
-    return [dir];
-  }
-  let entries = [];
-  try {
-    entries = await fs4.readdir(dir);
-  } catch {
-    return [];
-  }
-  const hits = [];
-  for (const name of entries) {
-    if (name.startsWith(".")) {
-      continue;
-    }
-    const child = path17.join(dir, name);
-    try {
-      const st = await fs4.stat(child);
-      if (st.isDirectory()) {
-        hits.push(...await findSkillRoots(child, depth + 1));
-      }
-    } catch {
-    }
-  }
-  return hits;
-}
-async function importSkillRoots(roots) {
-  const destRoot = globalSkillsDir();
-  await fs4.mkdir(destRoot, { recursive: true });
-  let imported = 0;
-  for (const root of roots) {
-    const meta = await readMeta(root);
-    const stem = await uniqueDir(destRoot, safeSkillDirName(meta.name || path17.basename(root)));
-    await fs4.cp(root, path17.join(destRoot, stem), { recursive: true });
-    imported += 1;
-  }
-  return imported;
-}
-async function collectSkills(dir, scope) {
-  let names = [];
-  try {
-    names = await fs4.readdir(dir);
-  } catch {
-    return [];
-  }
-  const rows = [];
-  for (const name of names) {
-    const dirPath = path17.join(dir, name);
-    try {
-      if (!(await fs4.stat(dirPath)).isDirectory()) {
-        continue;
-      }
-    } catch {
-      continue;
-    }
-    const on = path17.join(dirPath, SKILL_FILE);
-    const off = path17.join(dirPath, SKILL_OFF);
-    const enabled = await fileExists(on);
-    if (!enabled && !await fileExists(off)) {
-      continue;
-    }
-    const meta = await readMeta(dirPath);
-    rows.push({
-      id: dirPath,
-      name: meta.name || name,
-      description: meta.description,
-      dirPath,
-      skillFile: enabled ? on : off,
-      scope,
-      enabled
-    });
-  }
-  return rows;
-}
-async function readMeta(dir) {
-  for (const file of [SKILL_FILE, SKILL_OFF]) {
-    try {
-      const text = await fs4.readFile(path17.join(dir, file), "utf8");
-      return parseSkillMeta(text);
-    } catch {
-    }
-  }
-  return {};
-}
-async function hasSkillMarker(dir) {
-  return await fileExists(path17.join(dir, SKILL_FILE)) || await fileExists(path17.join(dir, SKILL_OFF));
-}
-async function uniqueDir(parent, stem) {
-  const exists = async (name) => {
-    try {
-      await fs4.access(path17.join(parent, name));
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (!await exists(stem)) {
-    return stem;
-  }
-  for (let n = 2; n < 100; n += 1) {
-    const next = `${stem}-${n}`;
-    if (!await exists(next)) {
-      return next;
-    }
-  }
-  return `${stem}-${Date.now()}`;
-}
-function zipEntryUnsafe(dest, entry) {
-  const name = entry.trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
-  if (!name || name === ".") {
-    return false;
-  }
-  if (name.startsWith("/") || /^[A-Za-z]:/.test(name)) {
-    return true;
-  }
-  const parts = name.split("/").filter((part) => part && part !== ".");
-  if (parts.includes("..")) {
-    return true;
-  }
-  const root = path17.resolve(dest);
-  const resolved = path17.resolve(root, ...parts);
-  const rel = path17.relative(root, resolved);
-  return rel.startsWith("..") || path17.isAbsolute(rel);
-}
-async function extractZip(zipPath, dest) {
-  const listed = await execFileAsync2("tar", ["-tf", zipPath], {
-    windowsHide: true,
-    maxBuffer: 8e6
-  });
-  const destRoot = path17.resolve(dest);
-  for (const line of String(listed.stdout).split(/\r?\n/)) {
-    if (zipEntryUnsafe(destRoot, line)) {
-      throw new Error(`unsafe skill zip path: ${line.trim()}`);
-    }
-  }
-  await fs4.mkdir(dest, { recursive: true });
-  await execFileAsync2("tar", ["-xf", zipPath, "-C", dest], { windowsHide: true });
-  await assertNoSymlinks(dest);
-}
-async function assertNoSymlinks(root) {
-  const names = await fs4.readdir(root);
-  for (const name of names) {
-    const full = path17.join(root, name);
-    const stat2 = await fs4.lstat(full);
-    if (stat2.isSymbolicLink()) {
-      throw new Error(`unsafe skill zip link: ${name}`);
-    }
-    if (stat2.isDirectory()) {
-      await assertNoSymlinks(full);
-    }
-  }
-}
-async function fileExists(filePath) {
-  try {
-    await fs4.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-function stripQuotes2(value) {
-  if (!value) {
-    return void 0;
-  }
-  return value.replace(/^['"]|['"]$/g, "").trim() || void 0;
 }
 function normalizeDir2(dir) {
   const value = path17.normalize(path17.resolve(dir));
@@ -18271,6 +18370,7 @@ var GrokController = class {
   apiEditId;
   rules = [];
   skills = [];
+  skillRefresh;
   apis = [];
   mcps = [];
   agents = [];
@@ -18344,6 +18444,7 @@ var GrokController = class {
   streamPosted = false;
   viewStamp = "";
   viewSession = "";
+  viewMessageCount = 0;
   lastInboundAt = 0;
   searchTimer;
   searchSeq = 0;
@@ -18812,6 +18913,13 @@ var GrokController = class {
     if (this.modeId === "goal" && !opts?.hidden && !trimmed.startsWith("/goal")) {
       outgoing = this.prepareGoalPrompt(trimmed);
       this.emit();
+    }
+    if (!opts?.hidden && outgoing.includes("#")) {
+      await this.refreshSkillCatalog();
+      if (sessionOp !== this.sessionOp || agent.sessionId !== sid) {
+        return;
+      }
+      outgoing = skillPromptText(outgoing, this.skills);
     }
     await this.applySelectedCustomModel(agent);
     if (sessionOp !== this.sessionOp || agent.sessionId !== sid || this.currentSessionId !== sid) {
@@ -19920,6 +20028,34 @@ ${m.text}`).join("\n\n");
     void plat().clipboardWrite(msg.text);
     this.note("Copied last reply.");
   }
+  refreshSkillCatalog() {
+    if (this.skillRefresh) {
+      return this.skillRefresh;
+    }
+    const run = this.loadSkillCatalog().finally(() => {
+      if (this.skillRefresh === run) {
+        this.skillRefresh = void 0;
+      }
+    });
+    this.skillRefresh = run;
+    return run;
+  }
+  async loadSkillCatalog() {
+    try {
+      const rows = await listSkills();
+      const prev = this.skills;
+      const same = prev.length === rows.length && prev.every(
+        (row, index) => row.id === rows[index]?.id && row.enabled === rows[index]?.enabled && row.name === rows[index]?.name && row.description === rows[index]?.description
+      );
+      if (same) {
+        return;
+      }
+      this.skills = rows;
+      this.emit();
+    } catch (error) {
+      logWarn(`skills list: ${error instanceof Error ? error.message : error}`);
+    }
+  }
   async searchFiles(query) {
     const seq = ++this.searchSeq;
     if (this.searchTimer) {
@@ -19951,24 +20087,23 @@ ${m.text}`).join("\n\n");
       return;
     }
     const later = this.messages.slice(userIdx + 1);
-    if (later.some((item) => item.role === "user")) {
-      return;
-    }
-    const assistant = later.find((item) => item.role === "assistant");
-    const userCount = this.messages.filter((item) => item.role === "user").length;
-    const rewindTo = Math.max(0, userCount - 1);
+    const promptIndex = this.messages.slice(0, userIdx).filter((item) => item.role === "user").length;
     if (this.status === "streaming") {
       this.cancelTurn();
     }
-    if (assistant?.edits?.length) {
-      await this.journal.revert(assistant.id, { silent: true });
+    for (const item of later) {
+      if (item.role === "assistant" && item.edits?.length) {
+        await this.journal.revert(item.id, { silent: true });
+      }
     }
     try {
-      await this.agent?.rewindTo(rewindTo);
+      await this.agent?.rewindTo(promptIndex, { force: true });
     } catch (error) {
-      logWarn(`rewind before edit: ${error instanceof Error ? error.message : error}`);
+      this.fail(tr("rewindAction"), error);
+      return;
     }
     this.messages = this.messages.slice(0, userIdx);
+    this.journal.trimStoredTurns();
     this.emit();
     await this.send(trimmed);
   }
@@ -20720,10 +20855,12 @@ ${m.text}`).join("\n\n");
     const stamp = this.transcriptStamp();
     const replay = stamp !== this.viewStamp;
     const sessionKey = this.currentSessionId ?? "";
-    const replace = replay && (sessionKey !== this.viewSession || this.messages.length === 0);
+    const shrunk = this.messages.length < this.viewMessageCount;
+    const replace = shrunk || replay && (sessionKey !== this.viewSession || this.messages.length === 0);
     this.viewStamp = stamp;
     this.viewSession = sessionKey;
-    this.publishSnapshot(!replay ? "none" : replace ? "all" : "tail");
+    this.viewMessageCount = this.messages.length;
+    this.publishSnapshot(!replay && !shrunk ? "none" : replace ? "all" : "tail");
   }
   transcriptStamp() {
     const last = this.messages.at(-1);
@@ -21001,6 +21138,7 @@ ${m.text}`).join("\n\n");
     await this.send(next.text, { queued: next });
   }
   async startInner() {
+    void this.refreshSkillCatalog();
     const epoch = this.agentGen;
     this.error = void 0;
     if (this.messages.length === 0) {
@@ -21175,6 +21313,7 @@ ${m.text}`).join("\n\n");
     this.publishSnapshot("all");
     this.viewStamp = this.transcriptStamp();
     this.viewSession = this.currentSessionId ?? "";
+    this.viewMessageCount = this.messages.length;
     if (this.status === "streaming") {
       this.streamPosted = true;
     }
