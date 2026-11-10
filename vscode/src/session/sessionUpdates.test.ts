@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { parseSessionUpdate } from '../agent/agent';
+import { parseSessionUpdate, rewindPointPreview } from '../agent/agent';
 import {
   applyRestoredTurnModels,
   applySessionUpdate,
@@ -398,6 +398,50 @@ describe('plan steps', () => {
     });
     assert.equal(session.messages.length, 1);
     assert.equal(session.messages[0]?.steps?.length ?? 0, 0);
+  });
+
+  it('stamps the user bubble from the flattened chunk _meta promptIndex', () => {
+    const parsed = parseSessionUpdate({
+      sessionId: 's',
+      update: {
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: '12' },
+        _meta: { promptIndex: 41, modelId: 'grok' },
+      },
+    });
+    assert.equal(parsed.update.promptIndex, 41);
+    assert.equal(parsed.update.hideFromScrollback, false);
+    const session = view({
+      replaying: false,
+      messages: [
+        { id: 'user-11', role: 'user', text: '11', tools: [], promptIndex: 40 },
+        { id: 'user-12', role: 'user', text: '12', tools: [] },
+      ],
+    });
+    applySessionUpdate(session, parsed.update);
+    assert.equal(session.messages[1]?.promptIndex, 41);
+    assert.equal(session.messages[0]?.promptIndex, 40);
+  });
+
+  it('does not let a hidden prompt steal the visible user index', () => {
+    const parsed = parseSessionUpdate({
+      update: {
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Background task abc completed' },
+        _meta: { promptIndex: 40, hideFromScrollback: true },
+      },
+    });
+    assert.equal(parsed.update.hideFromScrollback, true);
+    const session = view({
+      replaying: false,
+      messages: [{ id: 'user-12', role: 'user', text: '12', tools: [] }],
+    });
+    applySessionUpdate(session, parsed.update);
+    assert.equal(session.messages[0]?.promptIndex, undefined);
+  });
+
+  it('reads the CLI rewind preview field', () => {
+    assert.equal(rewindPointPreview({ prompt_preview: '比如说11', prompt_index: 40 }), '比如说11');
   });
 
   it('reads live todo_write rawInput as plan entries', () => {

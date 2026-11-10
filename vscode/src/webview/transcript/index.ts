@@ -1147,6 +1147,9 @@ function turnSig(turn: Turn, split: boolean): string {
 function groupTurns(messages: ChatMessage[]): Turn[] {
   const turns: Turn[] = [];
   for (const message of messages) {
+    if (message.deprecated) {
+      continue;
+    }
     if (message.role === 'assistant' && isCompactOnly(message) && !message.streaming) {
       continue;
     }
@@ -2592,7 +2595,7 @@ function turnMeta(message: ChatMessage): HTMLElement {
   const rewind = document.createElement('button');
   rewind.type = 'button';
   rewind.className = 'meta-btn';
-  rewind.title = tr('menuRewind');
+  rewind.title = tr('turnDeprecate');
   rewind.innerHTML = iconRewind();
   rewind.addEventListener('click', () => post({ type: 'rewindTurn', messageId: message.id }));
   el.append(copy, fork, rewind);

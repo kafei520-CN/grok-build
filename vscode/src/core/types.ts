@@ -439,6 +439,10 @@ export interface ChatMessage {
   streaming?: boolean;
   createdAt?: string;
   endedAt?: string;
+  /** CLI prompt index of this user turn. Edit rewinds to this, not the bubble count. */
+  promptIndex?: number;
+  /** Hidden from the window. The text stays in the session context. */
+  deprecated?: boolean;
   /** `null` on a stream tail means the retry/error card was cleared. */
   error?: TurnError | null;
   /** User or host stopped this assistant turn before it finished. */
@@ -694,6 +698,10 @@ export interface SessionUpdate {
   agentTimestampMs?: number;
   entries?: unknown;
   objective?: string;
+  /** Stamped on the user chunk that opened this prompt. */
+  promptIndex?: number;
+  /** Synthetic prompt that must not replace the visible user turn. */
+  hideFromScrollback?: boolean;
 }
 
 export interface HostToWebview {

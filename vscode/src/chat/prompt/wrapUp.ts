@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 import { plat } from '../../core/platform';
 import type { ContentBlock } from '../../core/types';
+import { stripDeprecatedText } from '../deprecatedTurn';
 
 export const WRAP_UP_RULE_FILE = 'opengrok-wrap-up.md';
 
@@ -37,6 +38,7 @@ const WRAP_UP_MARK = '# OpenGrok wrap-up';
 
 /** CLI persists extra prompt blocks onto the user turn; strip them for display. */
 export function stripWrapUpText(text: string): string {
+  text = stripDeprecatedText(text);
   const idx = text.indexOf(WRAP_UP_MARK);
   if (idx < 0) {
     return text;
